@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Risk level colors -->
+    <color name="risk_safe">#198754</color>
+    <color name="risk_low">#0dcaf0</color>
+    <color name="risk_medium">#d97706</color>
+    <color name="risk_high">#ea580c</color>
+    <color name="risk_deadly">#dc2626</color>
+
+    <!-- UI colors -->
+    <color name="primary">#1565c0</color>
+    <color name="primary_variant">#0d47a1</color>
+    <color name="accent">#3b82f6</color>
+    <color name="surface">#ffffff</color>
+    <color name="background">#ffffff</color>
+    <color name="text_primary">#212121</color>
+    <color name="text_secondary">#616161</color>
+    <color name="divider">#e0e0e0</color>
+    <color name="card_header_bg">#f5f5f5</color>
+    <color name="inconsistent_bg">#fff3cd</color>
+</resources>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/main :: layout('上报详情', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h5>上报详情 #<span th:text="${report.id}"></span></h5>
+        <a th:href="@{/reports}" class="btn btn-outline-secondary btn-sm">返回列表</a>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header">基本信息</div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <tr><th style="width:30%;padding-left:1rem">设备</th><td>
+                            <a th:href="@{/devices/{id}(id=${report.device.id})}" class="device-id"
+                               th:text="${#strings.abbreviate(report.device.deviceId, 24)}"></a>
+                        </td></tr>
+                        <tr><th style="padding-left:1rem">应用</th><td th:text="${report.app.appName}"></td></tr>
+                        <tr><th style="padding-left:1rem">风险等级</th><td>
+                            <span class="badge" th:classappend="'badge-' + ${#strings.toLowerCase(report.overallRiskLevel)}" th:text="${report.overallRiskLevel}"></span>
+                        </td></tr>
+                        <tr><th style="padding-left:1rem">SDK版本</th><td th:text="${report.sdkVersion}"></td></tr>
+                        <tr><th style="padding-left:1rem">接收时间</th><td th:text="${#temporals.format(report.receivedAt, 'yyyy-MM-dd HH:mm:ss')}"></td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header">检测结果 (Detections)</div>
+                <div class="card-body">
+                    <div class="json-view json-raw" th:text="${report.detectionsJson}"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">设备指纹 (Fingerprint)</div>
+                <div class="card-body">
+                    <div class="json-view json-raw" th:text="${report.fingerprintJson}"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

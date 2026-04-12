@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/main :: layout('设备管理', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div class="filter-bar">
+        <span style="font-size:0.8rem;color:#64748b;margin-right:0.25rem">筛选:</span>
+        <a th:href="@{/devices}" class="btn" th:classappend="${currentRiskLevel == ''} ? 'btn-primary' : 'btn-outline-secondary'">全部</a>
+        <a th:href="@{/devices(riskLevel='SAFE')}" class="btn" th:classappend="${currentRiskLevel == 'SAFE'} ? 'btn-success' : 'btn-outline-secondary'">SAFE</a>
+        <a th:href="@{/devices(riskLevel='LOW')}" class="btn" th:classappend="${currentRiskLevel == 'LOW'} ? 'btn-info' : 'btn-outline-secondary'">LOW</a>
+        <a th:href="@{/devices(riskLevel='MEDIUM')}" class="btn" th:classappend="${currentRiskLevel == 'MEDIUM'} ? 'btn-warning' : 'btn-outline-secondary'">MEDIUM</a>
+        <a th:href="@{/devices(riskLevel='HIGH')}" class="btn" th:classappend="${currentRiskLevel == 'HIGH'} ? 'btn-danger' : 'btn-outline-secondary'">HIGH</a>
+        <a th:href="@{/devices(riskLevel='DEADLY')}" class="btn" th:classappend="${currentRiskLevel == 'DEADLY'} ? 'btn-dark' : 'btn-outline-secondary'">DEADLY</a>
+    </div>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>设备标识</th>
+                        <th>风险等级</th>
+                        <th>标记</th>
+                        <th>上报次数</th>
+                        <th>首次出现</th>
+                        <th>最后活跃</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="device : ${devices}" th:onclick="|window.location='/devices/' + ${device.id}|">
+                        <td th:text="${device.id}"></td>
+                        <td class="device-id" th:text="${#strings.abbreviate(device.deviceId, 16)}"></td>
+                        <td>
+                            <span class="badge"
+                                  th:classappend="'badge-' + ${#strings.toLowerCase(device.lastRiskLevel)}"
+                                  th:text="${device.lastRiskLevel}"></span>
+                        </td>
+                        <td>
+                            <span th:if="${device.riskMarked}" class="badge bg-danger">已标记</span>
+                        </td>
+                        <td th:text="${device.reportCount}"></td>
+                        <td th:text="${#temporals.format(device.firstSeenAt, 'MM-dd HH:mm')}"></td>
+                        <td th:text="${#temporals.format(device.lastSeenAt, 'MM-dd HH:mm')}"></td>
+                    </tr>
+                    <tr th:if="${devices.isEmpty()}">
+                        <td colspan="7" class="text-center text-muted py-4">暂无设备数据</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <nav th:if="${devices.totalPages > 1}">
+        <ul class="pagination justify-content-center">
+            <li class="page-item" th:classappend="${devices.first} ? 'disabled'">
+                <a class="page-link" th:href="@{/devices(page=${devices.number - 1}, riskLevel=${currentRiskLevel})}">上一页</a>
+            </li>
+            <li class="page-item" th:each="i : ${#numbers.sequence(0, devices.totalPages - 1)}"
+                th:classappend="${i == devices.number} ? 'active'">
+                <a class="page-link" th:href="@{/devices(page=${i}, riskLevel=${currentRiskLevel})}" th:text="${i + 1}"></a>
+            </li>
+            <li class="page-item" th:classappend="${devices.last} ? 'disabled'">
+                <a class="page-link" th:href="@{/devices(page=${devices.number + 1}, riskLevel=${currentRiskLevel})}">下一页</a>
+            </li>
+        </ul>
+    </nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/main :: layout('仪表盘', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-lg-3">
+            <div class="card stat-card border-primary">
+                <div class="card-body">
+                    <div class="stat-label">设备总数</div>
+                    <div class="stat-value text-primary" th:text="${totalDevices}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card stat-card border-danger">
+                <div class="card-body">
+                    <div class="stat-label">高风险设备</div>
+                    <div class="stat-value text-danger" th:text="${highRiskDevices}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card stat-card border-info">
+                <div class="card-body">
+                    <div class="stat-label">今日上报</div>
+                    <div class="stat-value text-info" th:text="${todayReports}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card stat-card border-warning">
+                <div class="card-body">
+                    <div class="stat-label">今日规则命中</div>
+                    <div class="stat-value text-warning" th:text="${todayRuleHits}">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">快速操作</div>
+                <div class="card-body d-flex flex-wrap gap-2">
+                    <a th:href="@{/devices}" class="btn btn-outline-primary btn-sm">查看设备</a>
+                    <a th:href="@{/reports}" class="btn btn-outline-info btn-sm">查看上报</a>
+                    <a th:href="@{/rules/new}" class="btn btn-outline-warning btn-sm">新建规则</a>
+                    <a th:href="@{/apps}" class="btn btn-outline-success btn-sm">管理应用</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">标记的风险设备</div>
+                <div class="card-body">
+                    <span class="stat-value" th:text="${markedDevices}">0</span>
+                    <span class="text-muted ms-2" style="font-size:0.875rem">个设备已被手动标记</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

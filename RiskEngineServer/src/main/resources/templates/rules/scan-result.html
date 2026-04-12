@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/main :: layout('扫描结果', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h5>扫描结果</h5>
+        <a th:href="@{/rules}" class="btn btn-outline-secondary btn-sm">返回规则列表</a>
+    </div>
+
+    <!-- 操作结果提示 -->
+    <div th:if="${scanMessage}" class="alert alert-success alert-dismissible fade show" role="alert" style="font-size:0.875rem">
+        <span th:text="${scanMessage}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" style="padding:0.5rem"></button>
+    </div>
+
+    <!-- 扫描摘要 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-auto">
+                    <span class="badge" th:classappend="'badge-' + ${#strings.toLowerCase(rule.riskLevel)}"
+                          th:text="${rule.riskLevel}" style="font-size:0.8rem"></span>
+                </div>
+                <div class="col">
+                    <div style="font-weight:600" th:text="${rule.ruleName}"></div>
+                    <code style="font-size:0.78rem;color:#64748b" th:text="${rule.ruleExpression}"></code>
+                </div>
+            </div>
+            <hr style="margin:0.75rem 0">
+            <div class="row text-center">
+                <div class="col">
+                    <div style="font-size:1.5rem;font-weight:700;color:#3b82f6" th:text="${scanResult.hitDeviceCount}"></div>
+                    <div style="font-size:0.8rem;color:#64748b">命中设备数</div>
+                </div>
+                <div class="col">
+                    <div style="font-size:1.5rem;font-weight:700;color:#f59e0b" th:text="${scanResult.hitReportCount}"></div>
+                    <div style="font-size:0.8rem;color:#64748b">命中上报记录</div>
+                </div>
+                <div class="col" th:if="${scanResult.totalReportCount >= 0}">
+                    <div style="font-size:1.5rem;font-weight:700;color:#64748b" th:text="${scanResult.totalReportCount}"></div>
+                    <div style="font-size:0.8rem;color:#64748b">扫描总记录数</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 命中设备列表 -->
+    <div class="card" th:if="${!scanResult.hitDevices.isEmpty()}">
+        <div class="card-header d-flex justify-content-between align-items-center" style="padding:0.5rem 1rem">
+            <span>命中设备列表</span>
+            <form th:action="@{/rules/{id}/batch-mark(id=${rule.id})}" method="post" id="batchMarkForm">
+                <button type="submit" class="btn btn-danger btn-sm"
+                        data-confirm="确定将以下所有设备标记为风险设备?">
+                    批量标记风险
+                </button>
+            </form>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:40px">
+                            <input type="checkbox" class="form-check-input" id="selectAll" checked>
+                        </th>
+                        <th>设备ID</th>
+                        <th>最近风险等级</th>
+                        <th>上报次数</th>
+                        <th>最近活跃</th>
+                        <th>风险标记</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="device : ${scanResult.hitDevices}">
+                        <td>
+                            <input type="checkbox" class="form-check-input device-checkbox"
+                                   name="deviceIds" th:value="${device.id}" form="batchMarkForm" checked>
+                        </td>
+                        <td>
+                            <code style="font-size:0.8rem" th:text="${device.deviceId}"></code>
+                        </td>
+                        <td>
+                            <span class="badge" th:classappend="'badge-' + ${#strings.toLowerCase(device.lastRiskLevel)}"
+                                  th:text="${device.lastRiskLevel}"></span>
+                        </td>
+                        <td th:text="${device.reportCount}"></td>
+                        <td th:text="${#temporals.format(device.lastSeenAt, 'MM-dd HH:mm')}"></td>
+                        <td>
+                            <span th:if="${device.riskMarked}" class="badge bg-danger">已标记</span>
+                            <span th:unless="${device.riskMarked}" class="badge bg-secondary">未标记</span>
+                        </td>
+                        <td>
+                            <a th:href="@{/devices/{id}(id=${device.id})}" class="btn btn-outline-primary btn-sm">详情</a>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 无命中 -->
+    <div class="card" th:if="${scanResult.hitDevices.isEmpty()}">
+        <div class="card-body text-center text-muted py-4">
+            未发现命中设备
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('selectAll')?.addEventListener('change', function() {
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = this.checked);
+        });
+    </script>
+</div>
+</body>
+</html>

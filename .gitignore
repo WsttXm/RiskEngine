@@ -1,0 +1,73 @@
+# ========================
+# OS & Editor
+# ========================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ========================
+# IDE
+# ========================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+.springBeans
+.sts4-cache
+.apt_generated
+out/
+
+# ========================
+# Gradle
+# ========================
+.gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# ========================
+# Android (SDK)
+# ========================
+local.properties
+*.apk
+*.aab
+*.dex
+*.class
+.externalNativeBuild/
+.cxx/
+/captures
+
+# Native intermediates
+*.o
+*.so
+*.a
+
+# ========================
+# Spring Boot (Server)
+# ========================
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# ========================
+# Project specific
+# ========================
+.claude/
+*.log
+HELP.md
