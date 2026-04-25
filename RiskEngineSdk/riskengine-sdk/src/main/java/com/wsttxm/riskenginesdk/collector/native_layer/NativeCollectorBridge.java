@@ -47,9 +47,7 @@ public class NativeCollectorBridge {
     // Debug detection
     public static native int nativeGetTracerPid();
     public static native boolean nativeCheckPtrace();
-
-    // Signature verification
-    public static native String nativeVerifyApkSignature(String apkPath);
+    public static native String nativeInspectMethodEntryPoint(java.lang.reflect.Executable executable);
 
     // Anti-tamper
     public static native boolean nativeInitMemoryCrc();

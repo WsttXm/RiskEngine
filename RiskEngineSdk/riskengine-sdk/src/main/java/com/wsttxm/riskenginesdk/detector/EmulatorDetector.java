@@ -7,9 +7,11 @@ import android.hardware.SensorManager;
 import android.os.Build;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.CLog;
+import com.wsttxm.riskenginesdk.util.ProcfsUtils;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -42,11 +44,14 @@ public class EmulatorDetector extends BaseDetector {
         checkSensors(evidence);
         checkEmulatorIp(evidence);
         checkEmulatorPackages(evidence);
+        checkContainerSignals(evidence);
 
         if (evidence.size() >= 3) {
-            return risk(RiskLevel.HIGH, String.join("; ", evidence));
+            return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
+                    evidence, String.join("; ", evidence));
         } else if (!evidence.isEmpty()) {
-            return risk(RiskLevel.MEDIUM, String.join("; ", evidence));
+            return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 4, 10, false,
+                    evidence, String.join("; ", evidence));
         }
         return safe();
     }
@@ -190,7 +195,10 @@ public class EmulatorDetector extends BaseDetector {
         String[] emuPkgs = {
                 "com.google.android.launcher.layouts.genymotion",
                 "com.bluestacks",
-                "com.bignox.app"
+                "com.bignox.app",
+                "com.lbe.parallel",
+                "com.excelliance.dualaid",
+                "com.parallel.space"
         };
         PackageManager pm = context.getPackageManager();
         for (String pkg : emuPkgs) {
@@ -198,6 +206,14 @@ public class EmulatorDetector extends BaseDetector {
                 pm.getPackageInfo(pkg, 0);
                 evidence.add("emu_pkg:" + pkg);
             } catch (PackageManager.NameNotFoundException ignored) {}
+        }
+    }
+
+    private void checkContainerSignals(List<String> evidence) {
+        try {
+            evidence.addAll(ProcfsUtils.collectContainerSignals(context));
+        } catch (Exception e) {
+            CLog.e("Container signal check failed", e);
         }
     }
 }

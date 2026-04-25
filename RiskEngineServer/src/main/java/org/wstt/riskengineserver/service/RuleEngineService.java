@@ -21,10 +21,12 @@ import org.wstt.riskengineserver.entity.RuleHitRecord;
 import org.wstt.riskengineserver.repository.DeviceReportRepository;
 import org.wstt.riskengineserver.repository.RuleDefinitionRepository;
 import org.wstt.riskengineserver.repository.RuleHitRecordRepository;
+import org.wstt.riskengineserver.util.RiskReportMetrics;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -70,14 +72,16 @@ public class RuleEngineService {
     public void evaluateReport(DeviceReport report, Device device, RiskReportDTO reportDTO) {
         List<RuleDefinition> rules = ruleRepository.findByEnabledTrue();
         if (rules.isEmpty()) return;
+        RiskReportMetrics.backfill(reportDTO);
 
         // 调试: 打印检测结果概要
         if (reportDTO.getDetections() != null) {
             String detectionSummary = reportDTO.getDetections().stream()
-                    .map(d -> d.getDetectorName() + "=" + d.getRiskLevel())
+                    .map(d -> d.getDetectorName() + "=" + d.getRiskLevel() + "/" + d.getStatus())
                     .collect(Collectors.joining(", "));
-            log.info("规则评估输入: deviceId={}, detections=[{}], overallRiskLevel={}",
-                    device.getDeviceId().substring(0, 8), detectionSummary, reportDTO.getOverallRiskLevel());
+            log.info("规则评估输入: deviceId={}, detections=[{}], overallRiskLevel={}, riskScore={}",
+                    device.getDeviceId().substring(0, 8), detectionSummary,
+                    reportDTO.getOverallRiskLevel(), reportDTO.getRiskScore());
         }
 
         EvaluationContext context = buildContext(device, reportDTO);
@@ -184,6 +188,10 @@ public class RuleEngineService {
             dto.setOverallRiskLevel(report.getOverallRiskLevel());
             dto.setSdkVersion(report.getSdkVersion());
             dto.setTimestampMs(report.getReportTimestamp() != null ? report.getReportTimestamp() : 0);
+            dto.setRiskScore(report.getRiskScore() != null ? report.getRiskScore() : 0);
+            dto.setMaxRiskScore(report.getMaxRiskScore() != null ? report.getMaxRiskScore() : 0);
+            dto.setDangerCount(report.getDangerCount() != null ? report.getDangerCount() : 0);
+            dto.setWarningCount(report.getWarningCount() != null ? report.getWarningCount() : 0);
 
             // 反序列化detections JSON
             if (report.getDetectionsJson() != null && !report.getDetectionsJson().isEmpty()) {
@@ -201,6 +209,7 @@ public class RuleEngineService {
                 dto.setFingerprint(fingerprint);
             }
 
+            RiskReportMetrics.backfill(dto);
             return dto;
         } catch (Exception e) {
             log.warn("重建DTO失败: reportId={}, error={}", report.getId(), e.getMessage());
@@ -219,6 +228,11 @@ public class RuleEngineService {
         List<DetectionResultDTO> detections = reportDTO.getDetections() != null
                 ? reportDTO.getDetections() : new ArrayList<>();
         context.setVariable("detections", detections);
+        context.setVariable("riskScore", RiskReportMetrics.resolveRiskScore(reportDTO));
+        context.setVariable("dangerCount", RiskReportMetrics.resolveDangerCount(reportDTO));
+        context.setVariable("warningCount", RiskReportMetrics.resolveWarningCount(reportDTO));
+        context.setVariable("detectorStatusMap", RiskReportMetrics.buildDetectorStatusMap(detections));
+        context.setVariable("detailKeywords", RiskReportMetrics.buildDetailKeywords(detections));
 
         // 指纹数据
         if (reportDTO.getFingerprint() != null) {
@@ -253,16 +267,27 @@ public class RuleEngineService {
         public final List<DetectionResultDTO> detections;
         public final Map<String, CollectorResultDTO> fingerprint;
         public final List<String> inconsistentFields;
+        public final int riskScore;
+        public final int dangerCount;
+        public final int warningCount;
+        public final Map<String, String> detectorStatusMap;
+        public final Set<String> detailKeywords;
         public final int reportCount;
         public final boolean riskMarked;
 
         public RuleEvaluationRoot(RiskReportDTO report, Device device) {
+            RiskReportMetrics.backfill(report);
             this.overallRiskLevel = report.getOverallRiskLevel();
             this.detections = report.getDetections() != null ? report.getDetections() : new ArrayList<>();
             this.fingerprint = report.getFingerprint() != null && report.getFingerprint().getResults() != null
                     ? report.getFingerprint().getResults() : Map.of();
             this.inconsistentFields = report.getFingerprint() != null && report.getFingerprint().getInconsistentFields() != null
                     ? report.getFingerprint().getInconsistentFields() : List.of();
+            this.riskScore = RiskReportMetrics.resolveRiskScore(report);
+            this.dangerCount = RiskReportMetrics.resolveDangerCount(report);
+            this.warningCount = RiskReportMetrics.resolveWarningCount(report);
+            this.detectorStatusMap = RiskReportMetrics.buildDetectorStatusMap(this.detections);
+            this.detailKeywords = RiskReportMetrics.buildDetailKeywords(this.detections);
             this.reportCount = device.getReportCount();
             this.riskMarked = device.getRiskMarked();
         }

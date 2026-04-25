@@ -41,6 +41,7 @@ public class ReportWebController {
     public String detail(@PathVariable Long id, Model model) {
         DeviceReport report = reportService.findById(id).orElseThrow();
         model.addAttribute("report", report);
+        model.addAttribute("reportData", reportService.reconstructReportDTO(report));
         return "reports/detail";
     }
 }

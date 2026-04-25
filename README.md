@@ -283,13 +283,11 @@ Reported data can be viewed in the web admin console.
 | `serverUrl` | String | null | Server URL; reporting is disabled if unset |
 | `appKey` | String | null | Application key |
 | `encryptionKey` | byte[] | null | AES-256 key (32 bytes); enables encrypted transport |
-| `expectedSignature` | String | null | Expected APK SHA-256 digest for repackage detection |
 | `enableRoot` | boolean | true | Root detection |
 | `enableHookDetection` | boolean | true | Hook framework detection |
 | `enableEmulatorDetection` | boolean | true | Emulator detection |
 | `enableSandboxDetection` | boolean | true | Sandbox detection |
 | `enableDebugDetection` | boolean | true | Debug detection |
-| `enableRepackageDetection` | boolean | true | Repackage detection |
 | `enableCloudPhoneDetection` | boolean | true | Cloud phone detection |
 | `enableCustomRomDetection` | boolean | true | Custom ROM detection |
 | `debugLog` | boolean | false | Debug logging |
@@ -328,7 +326,7 @@ Reported data can be viewed in the web admin console.
 | LOW | 1 | Low risk (e.g., custom ROM) |
 | MEDIUM | 2 | Medium risk (e.g., emulator traits) |
 | HIGH | 3 | High risk (e.g., Root / sandbox / debugging) |
-| DEADLY | 4 | Critical risk (e.g., hook framework / repackage) |
+| DEADLY | 4 | Critical risk (e.g., confirmed hook framework compromise) |
 
 ### Fingerprint Collectors
 
@@ -370,7 +368,6 @@ Reported data can be viewed in the web admin console.
 | EmulatorDetector | HIGH/MEDIUM | Build property keywords / hardware traits / emulator files (18 paths) / thermal zone / Seccomp BPF x86 detection / sensor count |
 | SandboxDetector | HIGH | /proc process count analysis / fd scanning / multi-user UID |
 | DebugDetector | HIGH | TracerPid / debuggable flag / IDA Pro port 23946 / ptrace self-check |
-| RepackageDetector | DEADLY | Java vs Native signature cross-comparison / expected signature check / ClassLoader verification |
 | CloudPhoneDetector | HIGH/MEDIUM | Abnormal battery voltage / camera count < 2 / sensor count < 3 |
 | CustomRomDetector | LOW | 10 ROM property signatures (MIUI / ColorOS / Flyme / EMUI / OneUI etc.) / LineageOS |
 | ProcessScanDetector | HIGH | ps scan for suspicious processes (frida / xposed / magisk / gdb / ida) / service list |

@@ -21,6 +21,8 @@ public class CollectorRegistry {
         collectors.add(new WifiInfoCollector(context));
         collectors.add(new TelephonyCollector(context));
         collectors.add(new SettingsCollector(context));
+        collectors.add(new AdbStateCollector(context));
+        collectors.add(new ContainerSignalCollector(context));
 
         // Native layer collectors (via JNI bridge)
         NativeCollectorBridge nativeBridge = new NativeCollectorBridge(context);

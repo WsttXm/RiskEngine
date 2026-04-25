@@ -283,13 +283,11 @@ RiskEngine.collect(new RiskEngineCallback() {
 | `serverUrl` | String | null | 服务端地址，不配置则不上报 |
 | `appKey` | String | null | 应用密钥 |
 | `encryptionKey` | byte[] | null | AES-256 密钥 (32 bytes)，配置后启用加密传输 |
-| `expectedSignature` | String | null | APK SHA-256 签名摘要，用于重打包检测 |
 | `enableRoot` | boolean | true | Root 检测 |
 | `enableHookDetection` | boolean | true | Hook 框架检测 |
 | `enableEmulatorDetection` | boolean | true | 模拟器检测 |
 | `enableSandboxDetection` | boolean | true | 沙箱检测 |
 | `enableDebugDetection` | boolean | true | 调试检测 |
-| `enableRepackageDetection` | boolean | true | 重打包检测 |
 | `enableCloudPhoneDetection` | boolean | true | 云手机检测 |
 | `enableCustomRomDetection` | boolean | true | 自定义 ROM 检测 |
 | `debugLog` | boolean | false | 调试日志 |
@@ -328,7 +326,7 @@ RiskEngine.collect(new RiskEngineCallback() {
 | LOW | 1 | 低风险 (如定制 ROM) |
 | MEDIUM | 2 | 中风险 (如模拟器特征) |
 | HIGH | 3 | 高风险 (如 Root / 沙箱 / 调试) |
-| DEADLY | 4 | 极高风险 (如 Hook 框架 / 重打包) |
+| DEADLY | 4 | 极高风险 (如已确认的 Hook 框架注入) |
 
 ### 设备指纹采集器
 
@@ -370,7 +368,6 @@ RiskEngine.collect(new RiskEngineCallback() {
 | EmulatorDetector | HIGH/MEDIUM | Build 属性关键词 / 硬件特征 / 模拟器文件 (18 路径) / thermal zone / Seccomp BPF x86 架构检测 / 传感器数量 |
 | SandboxDetector | HIGH | /proc 进程数分析 / fd 扫描 / 多用户 UID |
 | DebugDetector | HIGH | TracerPid / debuggable flag / IDA Pro 端口 23946 / ptrace 自检 |
-| RepackageDetector | DEADLY | Java vs Native 签名交叉比对 / 预期签名校验 / ClassLoader 验证 |
 | CloudPhoneDetector | HIGH/MEDIUM | 电池电压异常 / Camera < 2 / 传感器 < 3 |
 | CustomRomDetector | LOW | 10 种 ROM 特征属性 (MIUI / ColorOS / Flyme / EMUI / OneUI 等) / LineageOS |
 | ProcessScanDetector | HIGH | ps 扫描可疑进程 (frida / xposed / magisk / gdb / ida) / service list |

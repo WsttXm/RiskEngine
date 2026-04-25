@@ -11,10 +11,11 @@ public class DetectorRegistry {
     public DetectorRegistry(Context context) {
         detectors.add(new RootDetector(context));
         detectors.add(new HookFrameworkDetector(context));
+        detectors.add(new MethodIntegrityDetector(context));
+        detectors.add(new AdbDetector(context));
         detectors.add(new EmulatorDetector(context));
         detectors.add(new SandboxDetector(context));
         detectors.add(new DebugDetector(context));
-        detectors.add(new RepackageDetector(context));
         detectors.add(new CloudPhoneDetector(context));
         detectors.add(new CustomRomDetector(context));
         detectors.add(new ProcessScanDetector(context));

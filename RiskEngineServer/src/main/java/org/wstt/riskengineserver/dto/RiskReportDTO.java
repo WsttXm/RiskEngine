@@ -11,6 +11,10 @@ public class RiskReportDTO {
     private long timestampMs;
     private String sdkVersion;
     private String overallRiskLevel;
+    private int riskScore;
+    private int maxRiskScore;
+    private int warningCount;
+    private int dangerCount;
 
     public DeviceFingerprintDTO getFingerprint() { return fingerprint; }
     public void setFingerprint(DeviceFingerprintDTO fingerprint) { this.fingerprint = fingerprint; }
@@ -26,4 +30,16 @@ public class RiskReportDTO {
 
     public String getOverallRiskLevel() { return overallRiskLevel; }
     public void setOverallRiskLevel(String overallRiskLevel) { this.overallRiskLevel = overallRiskLevel; }
+
+    public int getRiskScore() { return riskScore; }
+    public void setRiskScore(int riskScore) { this.riskScore = riskScore; }
+
+    public int getMaxRiskScore() { return maxRiskScore; }
+    public void setMaxRiskScore(int maxRiskScore) { this.maxRiskScore = maxRiskScore; }
+
+    public int getWarningCount() { return warningCount; }
+    public void setWarningCount(int warningCount) { this.warningCount = warningCount; }
+
+    public int getDangerCount() { return dangerCount; }
+    public void setDangerCount(int dangerCount) { this.dangerCount = dangerCount; }
 }

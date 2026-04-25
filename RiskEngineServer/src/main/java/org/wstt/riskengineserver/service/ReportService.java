@@ -14,6 +14,7 @@ import org.wstt.riskengineserver.entity.Device;
 import org.wstt.riskengineserver.entity.DeviceReport;
 import org.wstt.riskengineserver.repository.DeviceReportRepository;
 import org.wstt.riskengineserver.repository.DeviceRepository;
+import org.wstt.riskengineserver.util.RiskReportMetrics;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -47,6 +48,8 @@ public class ReportService {
      */
     @Transactional
     public ServerConfigResponse processReport(App app, RiskReportDTO reportDTO) {
+        RiskReportMetrics.backfill(reportDTO);
+
         // 1. 生成设备ID, 创建或更新设备记录
         String deviceIdHash = deviceIdGenerator.generateDeviceId(reportDTO.getFingerprint());
         Device device = findOrCreateDevice(deviceIdHash, reportDTO.getOverallRiskLevel());
@@ -57,6 +60,10 @@ public class ReportService {
         report.setApp(app);
         report.setSdkVersion(reportDTO.getSdkVersion());
         report.setOverallRiskLevel(reportDTO.getOverallRiskLevel());
+        report.setRiskScore(reportDTO.getRiskScore());
+        report.setMaxRiskScore(reportDTO.getMaxRiskScore());
+        report.setDangerCount(reportDTO.getDangerCount());
+        report.setWarningCount(reportDTO.getWarningCount());
         report.setFingerprintJson(gson.toJson(reportDTO.getFingerprint()));
         report.setDetectionsJson(gson.toJson(reportDTO.getDetections()));
         report.setReportTimestamp(reportDTO.getTimestampMs());
@@ -97,6 +104,28 @@ public class ReportService {
 
     public Optional<DeviceReport> findById(Long id) {
         return reportRepository.findByIdWithDeviceAndApp(id);
+    }
+
+    public RiskReportDTO reconstructReportDTO(DeviceReport report) {
+        RiskReportDTO dto = new RiskReportDTO();
+        dto.setOverallRiskLevel(report.getOverallRiskLevel());
+        dto.setSdkVersion(report.getSdkVersion());
+        dto.setTimestampMs(report.getReportTimestamp() != null ? report.getReportTimestamp() : 0);
+        dto.setRiskScore(report.getRiskScore() != null ? report.getRiskScore() : 0);
+        dto.setMaxRiskScore(report.getMaxRiskScore() != null ? report.getMaxRiskScore() : 0);
+        dto.setDangerCount(report.getDangerCount() != null ? report.getDangerCount() : 0);
+        dto.setWarningCount(report.getWarningCount() != null ? report.getWarningCount() : 0);
+
+        if (report.getDetectionsJson() != null && !report.getDetectionsJson().isEmpty()) {
+            dto.setDetections(gson.fromJson(report.getDetectionsJson(),
+                    new com.google.gson.reflect.TypeToken<java.util.List<org.wstt.riskengineserver.dto.DetectionResultDTO>>(){}.getType()));
+        }
+        if (report.getFingerprintJson() != null && !report.getFingerprintJson().isEmpty()) {
+            dto.setFingerprint(gson.fromJson(report.getFingerprintJson(),
+                    org.wstt.riskengineserver.dto.DeviceFingerprintDTO.class));
+        }
+        RiskReportMetrics.backfill(dto);
+        return dto;
     }
 
     public Page<DeviceReport> findByRiskLevel(String riskLevel, Pageable pageable) {

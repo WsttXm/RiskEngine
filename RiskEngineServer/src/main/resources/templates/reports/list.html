@@ -21,6 +21,8 @@
                         <th>设备</th>
                         <th>应用</th>
                         <th>风险等级</th>
+                        <th>总分</th>
+                        <th>高危信号</th>
                         <th>SDK版本</th>
                         <th>接收时间</th>
                         <th>操作</th>
@@ -37,12 +39,14 @@
                         <td>
                             <span class="badge" th:classappend="'badge-' + ${#strings.toLowerCase(report.overallRiskLevel)}" th:text="${report.overallRiskLevel}"></span>
                         </td>
+                        <td th:text="${report.riskScore != null && report.maxRiskScore != null ? report.riskScore + '/' + report.maxRiskScore : '-'}"></td>
+                        <td th:text="${report.dangerCount != null ? report.dangerCount : 0}"></td>
                         <td th:text="${report.sdkVersion}"></td>
                         <td th:text="${#temporals.format(report.receivedAt, 'MM-dd HH:mm:ss')}"></td>
                         <td><a th:href="@{/reports/{id}(id=${report.id})}" class="btn btn-outline-primary btn-sm">详情</a></td>
                     </tr>
                     <tr th:if="${reports.isEmpty()}">
-                        <td colspan="7" class="text-center text-muted py-4">暂无上报记录</td>
+                        <td colspan="9" class="text-center text-muted py-4">暂无上报记录</td>
                     </tr>
                 </tbody>
             </table>

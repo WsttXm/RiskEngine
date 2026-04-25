@@ -28,6 +28,18 @@ public class DeviceReport {
     @Column(nullable = false, length = 16)
     private String overallRiskLevel;
 
+    /** SDK综合得分 */
+    private Integer riskScore;
+
+    /** SDK理论满分 */
+    private Integer maxRiskScore;
+
+    /** 危险信号数量 */
+    private Integer dangerCount;
+
+    /** 告警信号数量 */
+    private Integer warningCount;
+
     /** 完整指纹JSON数据 */
     @Column(columnDefinition = "MEDIUMTEXT")
     private String fingerprintJson;
@@ -64,6 +76,18 @@ public class DeviceReport {
 
     public String getOverallRiskLevel() { return overallRiskLevel; }
     public void setOverallRiskLevel(String overallRiskLevel) { this.overallRiskLevel = overallRiskLevel; }
+
+    public Integer getRiskScore() { return riskScore; }
+    public void setRiskScore(Integer riskScore) { this.riskScore = riskScore; }
+
+    public Integer getMaxRiskScore() { return maxRiskScore; }
+    public void setMaxRiskScore(Integer maxRiskScore) { this.maxRiskScore = maxRiskScore; }
+
+    public Integer getDangerCount() { return dangerCount; }
+    public void setDangerCount(Integer dangerCount) { this.dangerCount = dangerCount; }
+
+    public Integer getWarningCount() { return warningCount; }
+    public void setWarningCount(Integer warningCount) { this.warningCount = warningCount; }
 
     public String getFingerprintJson() { return fingerprintJson; }
     public void setFingerprintJson(String fingerprintJson) { this.fingerprintJson = fingerprintJson; }

@@ -17,6 +17,7 @@
 #include "detector/seccomp_arch_checker.h"
 
 #include <android/log.h>
+#include <cstdint>
 #include <string>
 
 #define LOG_TAG "RiskEngine:JNI"
@@ -120,10 +121,32 @@ static jboolean jni_checkPtrace(JNIEnv *, jclass) {
     return (jboolean) check_ptrace();
 }
 
-static jstring jni_verifyApkSignature(JNIEnv *env, jclass, jstring japkPath) {
-    const char *path = env->GetStringUTFChars(japkPath, nullptr);
-    std::string result = verify_apk_signature(path);
-    env->ReleaseStringUTFChars(japkPath, path);
+static jstring jni_inspectMethodEntryPoint(JNIEnv *env, jclass, jobject executable) {
+    void *artMethodPointer = nullptr;
+
+    if (executable != nullptr) {
+        jclass executableClass = env->GetObjectClass(executable);
+        if (executableClass != nullptr) {
+            jfieldID artMethodField = env->GetFieldID(executableClass, "artMethod", "J");
+            if (artMethodField != nullptr) {
+                jlong artMethod = env->GetLongField(executable, artMethodField);
+                if (artMethod > 0) {
+                    artMethodPointer = reinterpret_cast<void *>(static_cast<uintptr_t>(artMethod));
+                }
+            } else if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+
+    if (artMethodPointer == nullptr) {
+        jmethodID methodId = env->FromReflectedMethod(executable);
+        artMethodPointer = reinterpret_cast<void *>(methodId);
+    }
+
+    std::string result = native_inspect_method_entry_point(artMethodPointer);
     return toJString(env, result);
 }
 
@@ -169,7 +192,7 @@ static JNINativeMethod methods[] = {
         {"nativeCheckSeccompArch",      "()Ljava/lang/String;",                  (void *) jni_checkSeccompArch},
         {"nativeGetTracerPid",          "()I",                                   (void *) jni_getTracerPid},
         {"nativeCheckPtrace",           "()Z",                                   (void *) jni_checkPtrace},
-        {"nativeVerifyApkSignature",    "(Ljava/lang/String;)Ljava/lang/String;", (void *) jni_verifyApkSignature},
+        {"nativeInspectMethodEntryPoint","(Ljava/lang/reflect/Executable;)Ljava/lang/String;", (void *) jni_inspectMethodEntryPoint},
 
         // Anti-tamper
         {"nativeInitMemoryCrc",         "()Z",                                   (void *) jni_initMemoryCrc},
