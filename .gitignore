@@ -51,9 +51,6 @@ local.properties
 *.so
 *.a
 
-# ========================
-# Spring Boot (Server)
-# ========================
 bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
