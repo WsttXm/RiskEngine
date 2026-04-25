@@ -34,17 +34,20 @@ public class MainActivity extends AppCompatActivity {
     private MaterialCardView cardDetections;
     private MaterialCardView cardInconsistent;
     private MaterialCardView cardFingerprint;
-    private MaterialCardView cardJson;
 
     private TextView tvRiskLevel;
     private TextView tvStatusInfo;
     private TextView tvLocalStatus;
+    private LinearLayout layoutStats;
+    private TextView tvStatDetections;
+    private TextView tvStatFingerprints;
+    private TextView tvStatElapsed;
+    private TextView tvDetectionsHeader;
     private LinearLayout layoutDetections;
     private TextView tvInconsistentHeader;
     private LinearLayout layoutInconsistent;
     private TextView tvFingerprintHeader;
     private LinearLayout layoutFingerprint;
-    private TextView tvJsonData;
 
     private boolean collecting = false;
     private long collectStartTime;
@@ -69,16 +72,19 @@ public class MainActivity extends AppCompatActivity {
         cardDetections = findViewById(R.id.cardDetections);
         cardInconsistent = findViewById(R.id.cardInconsistent);
         cardFingerprint = findViewById(R.id.cardFingerprint);
-        cardJson = findViewById(R.id.cardJson);
         tvRiskLevel = findViewById(R.id.tvRiskLevel);
         tvStatusInfo = findViewById(R.id.tvStatusInfo);
         tvLocalStatus = findViewById(R.id.tvLocalStatus);
+        layoutStats = findViewById(R.id.layoutStats);
+        tvStatDetections = findViewById(R.id.tvStatDetections);
+        tvStatFingerprints = findViewById(R.id.tvStatFingerprints);
+        tvStatElapsed = findViewById(R.id.tvStatElapsed);
+        tvDetectionsHeader = findViewById(R.id.tvDetectionsHeader);
         layoutDetections = findViewById(R.id.layoutDetections);
         tvInconsistentHeader = findViewById(R.id.tvInconsistentHeader);
         layoutInconsistent = findViewById(R.id.layoutInconsistent);
         tvFingerprintHeader = findViewById(R.id.tvFingerprintHeader);
         layoutFingerprint = findViewById(R.id.layoutFingerprint);
-        tvJsonData = findViewById(R.id.tvJsonData);
     }
 
     private void initSdk() {
@@ -98,21 +104,19 @@ public class MainActivity extends AppCompatActivity {
         collecting = true;
         collectStartTime = System.currentTimeMillis();
         btnCollect.setEnabled(false);
+        btnCollect.setText("采集中...");
 
         // Show status card with loading state
         cardStatus.setVisibility(View.VISIBLE);
         tvRiskLevel.setText("...");
-        tvRiskLevel.setTextColor(getColor(R.color.text_secondary));
+        tvRiskLevel.setTextColor(getColor(R.color.text_tertiary));
         tvStatusInfo.setText("正在采集设备信息...");
-        tvLocalStatus.setVisibility(View.VISIBLE);
-        tvLocalStatus.setText("仅本地采集，不进行网络传输");
-        tvLocalStatus.setTextColor(getColor(R.color.text_secondary));
+        layoutStats.setVisibility(View.GONE);
 
         // Hide result cards
         cardDetections.setVisibility(View.GONE);
         cardInconsistent.setVisibility(View.GONE);
         cardFingerprint.setVisibility(View.GONE);
-        cardJson.setVisibility(View.GONE);
 
         RiskEngine.collect(new RiskEngineCallback() {
             @Override
@@ -122,6 +126,7 @@ public class MainActivity extends AppCompatActivity {
                     displayReport(report, elapsed);
                     collecting = false;
                     btnCollect.setEnabled(true);
+                    btnCollect.setText("重新采集");
                 });
             }
 
@@ -131,9 +136,9 @@ public class MainActivity extends AppCompatActivity {
                     tvRiskLevel.setText("ERROR");
                     tvRiskLevel.setTextColor(getColor(R.color.risk_deadly));
                     tvStatusInfo.setText("采集失败: " + error.getMessage());
-                    tvLocalStatus.setVisibility(View.GONE);
                     collecting = false;
                     btnCollect.setEnabled(true);
+                    btnCollect.setText("重试");
                 });
             }
         });
@@ -146,16 +151,18 @@ public class MainActivity extends AppCompatActivity {
         tvRiskLevel.setTextColor(getRiskColor(level));
 
         // Status info
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         String time = sdf.format(new Date(report.getTimestampMs()));
         int detectionCount = report.getDetections().size();
         int fingerprintCount = report.getFingerprint().getResults().size();
         tvStatusInfo.setText(String.format(Locale.getDefault(),
-                "SDK %s | %s | 耗时 %dms\n采集 %d 项指纹, %d 项检测",
-                report.getSdkVersion(), time, elapsedMs, fingerprintCount, detectionCount));
+                "SDK %s · %s", report.getSdkVersion(), time));
 
-        tvLocalStatus.setText("采集完成，结果仅保存在当前进程内");
-        tvLocalStatus.setTextColor(getColor(R.color.text_secondary));
+        // Stats
+        layoutStats.setVisibility(View.VISIBLE);
+        tvStatDetections.setText(String.valueOf(detectionCount));
+        tvStatFingerprints.setText(String.valueOf(fingerprintCount));
+        tvStatElapsed.setText(String.valueOf(elapsedMs));
 
         // Detection Results
         displayDetections(report);
@@ -165,19 +172,25 @@ public class MainActivity extends AppCompatActivity {
 
         // Device Fingerprint
         displayFingerprint(report);
-
-        // Raw JSON
-        displayRawJson(report);
     }
 
     private void displayDetections(RiskReport report) {
         layoutDetections.removeAllViews();
-        cardDetections.setVisibility(View.VISIBLE);
 
+        int total = report.getDetections().size();
+        if (total == 0) {
+            cardDetections.setVisibility(View.GONE);
+            return;
+        }
+
+        cardDetections.setVisibility(View.VISIBLE);
+        tvDetectionsHeader.setText("环境检测  ·  " + total + " 项");
+
+        int idx = 0;
         for (DetectionResult dr : report.getDetections()) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.VERTICAL);
-            row.setPadding(0, 0, 0, dp(8));
+            row.setPadding(0, dp(10), 0, dp(10));
 
             // Name + Risk Level Row
             LinearLayout nameRow = new LinearLayout(this);
@@ -185,10 +198,11 @@ public class MainActivity extends AppCompatActivity {
             nameRow.setGravity(Gravity.CENTER_VERTICAL);
 
             // Risk dot
-            TextView dot = new TextView(this);
-            dot.setText("\u25CF ");
-            dot.setTextColor(getRiskColor(dr.getRiskLevel()));
-            dot.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            View dot = new View(this);
+            LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(8), dp(8));
+            dotParams.rightMargin = dp(10);
+            dot.setLayoutParams(dotParams);
+            dot.setBackground(createCircleDrawable(getRiskColor(dr.getRiskLevel())));
             nameRow.addView(dot);
 
             // Detector name
@@ -203,12 +217,13 @@ public class MainActivity extends AppCompatActivity {
 
             // Risk level badge
             TextView badge = new TextView(this);
-            badge.setText(" " + dr.getRiskLevel().name() + " ");
-            badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            badge.setText(dr.getRiskLevel().name());
+            badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
             badge.setTextColor(Color.WHITE);
             badge.setTypeface(null, Typeface.BOLD);
-            badge.setPadding(dp(6), dp(2), dp(6), dp(2));
-            badge.setBackground(createRiskBadgeDrawable(dr.getRiskLevel()));
+            badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+            badge.setBackground(createPillDrawable(getRiskColor(dr.getRiskLevel())));
+            badge.setLetterSpacing(0.05f);
             nameRow.addView(badge);
 
             row.addView(nameRow);
@@ -219,22 +234,26 @@ public class MainActivity extends AppCompatActivity {
                 evidence.setText(dr.getEvidence());
                 evidence.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
                 evidence.setTextColor(getColor(R.color.text_secondary));
-                evidence.setPadding(dp(16), dp(2), 0, 0);
+                LinearLayout.LayoutParams evidenceParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                evidenceParams.leftMargin = dp(18);
+                evidenceParams.topMargin = dp(3);
+                evidence.setLayoutParams(evidenceParams);
                 row.addView(evidence);
             }
 
             layoutDetections.addView(row);
 
             // Divider (except last)
-            if (report.getDetections().indexOf(dr) < report.getDetections().size() - 1) {
+            if (idx < total - 1) {
                 View divider = new View(this);
                 divider.setBackgroundColor(getColor(R.color.divider));
                 LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
-                divParams.bottomMargin = dp(8);
                 divider.setLayoutParams(divParams);
                 layoutDetections.addView(divider);
             }
+            idx++;
         }
     }
 
@@ -248,25 +267,28 @@ public class MainActivity extends AppCompatActivity {
 
         cardInconsistent.setVisibility(View.VISIBLE);
         int count = report.getFingerprint().getInconsistentFields().size();
-        tvInconsistentHeader.setText("不一致字段 (" + count + " 项)");
+        tvInconsistentHeader.setText("⚠  发现 " + count + " 项不一致字段");
 
         for (String field : report.getFingerprint().getInconsistentFields()) {
             TextView tv = new TextView(this);
-            tv.setText("\u26A0 " + field);
+            tv.setText("• " + field);
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            tv.setTextColor(Color.parseColor("#856404"));
-            tv.setPadding(0, dp(2), 0, dp(2));
+            tv.setTextColor(getColor(R.color.inconsistent_text));
+            tv.setTypeface(null, Typeface.BOLD);
+            tv.setPadding(0, dp(6), 0, dp(2));
             layoutInconsistent.addView(tv);
 
-            // Show the inconsistent values
             CollectorResult cr = report.getFingerprint().getResults().get(field);
             if (cr != null) {
                 for (Map.Entry<String, String> entry : cr.getValues().entrySet()) {
                     TextView val = new TextView(this);
-                    val.setText("  " + entry.getKey() + " = " + entry.getValue());
+                    String value = entry.getValue();
+                    if (value == null || value.isEmpty()) value = "(empty)";
+                    val.setText("    " + entry.getKey() + " = " + value);
                     val.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    val.setTextColor(getColor(R.color.text_secondary));
-                    val.setFontFeatureSettings("monospace");
+                    val.setTextColor(getColor(R.color.inconsistent_text));
+                    val.setTypeface(Typeface.MONOSPACE);
+                    val.setAlpha(0.85f);
                     layoutInconsistent.addView(val);
                 }
             }
@@ -275,93 +297,87 @@ public class MainActivity extends AppCompatActivity {
 
     private void displayFingerprint(RiskReport report) {
         layoutFingerprint.removeAllViews();
-        cardFingerprint.setVisibility(View.VISIBLE);
 
         int totalFields = report.getFingerprint().getResults().size();
-        int totalValues = 0;
-        for (CollectorResult cr : report.getFingerprint().getResults().values()) {
-            totalValues += cr.getValues().size();
+        if (totalFields == 0) {
+            cardFingerprint.setVisibility(View.GONE);
+            return;
         }
-        tvFingerprintHeader.setText("设备指纹 (" + totalFields + " 项, " + totalValues + " 个采集点)");
 
+        cardFingerprint.setVisibility(View.VISIBLE);
+        tvFingerprintHeader.setText("设备指纹  ·  " + totalFields + " 项");
+
+        int idx = 0;
         for (Map.Entry<String, CollectorResult> entry :
                 report.getFingerprint().getResults().entrySet()) {
             CollectorResult cr = entry.getValue();
 
-            // Field name header
-            LinearLayout fieldHeader = new LinearLayout(this);
-            fieldHeader.setOrientation(LinearLayout.HORIZONTAL);
-            fieldHeader.setGravity(Gravity.CENTER_VERTICAL);
-            fieldHeader.setPadding(0, dp(6), 0, dp(2));
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(0, dp(10), 0, dp(10));
+
+            // Header row: field name + methods chip + inconsistent flag
+            LinearLayout headerRow = new LinearLayout(this);
+            headerRow.setOrientation(LinearLayout.HORIZONTAL);
+            headerRow.setGravity(Gravity.CENTER_VERTICAL);
 
             TextView fieldName = new TextView(this);
             fieldName.setText(cr.getFieldName());
             fieldName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            fieldName.setTextColor(getColor(R.color.accent));
+            fieldName.setTextColor(getColor(R.color.text_primary));
             fieldName.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-            fieldHeader.addView(fieldName);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            fieldName.setLayoutParams(nameParams);
+            headerRow.addView(fieldName);
 
             if (!cr.isConsistent()) {
                 TextView warn = new TextView(this);
-                warn.setText("  \u26A0 INCONSISTENT");
-                warn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+                warn.setText("⚠");
+                warn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
                 warn.setTextColor(getColor(R.color.risk_medium));
-                warn.setTypeface(null, Typeface.BOLD);
-                fieldHeader.addView(warn);
+                warn.setPadding(0, 0, dp(6), 0);
+                headerRow.addView(warn);
             }
 
-            // Methods count
             TextView methodCount = new TextView(this);
-            methodCount.setText("  (" + cr.getValues().size() + " methods)");
+            methodCount.setText(cr.getValues().size() + " 法");
             methodCount.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-            methodCount.setTextColor(getColor(R.color.text_secondary));
-            fieldHeader.addView(methodCount);
+            methodCount.setTextColor(getColor(R.color.accent));
+            methodCount.setBackground(getDrawable(R.drawable.bg_pill_subtle));
+            methodCount.setPadding(dp(8), dp(2), dp(8), dp(2));
+            methodCount.setTypeface(null, Typeface.BOLD);
+            headerRow.addView(methodCount);
 
-            layoutFingerprint.addView(fieldHeader);
+            row.addView(headerRow);
 
             // Canonical value
-            if (cr.getCanonicalValue() != null) {
-                TextView canonical = new TextView(this);
-                canonical.setText("  = " + cr.getCanonicalValue());
-                canonical.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                canonical.setTextColor(getColor(R.color.text_primary));
-                canonical.setTypeface(Typeface.MONOSPACE);
-                layoutFingerprint.addView(canonical);
+            String canonical = cr.getCanonicalValue();
+            if (canonical == null || canonical.isEmpty()) canonical = "(empty)";
+            TextView canonicalView = new TextView(this);
+            canonicalView.setText(canonical);
+            canonicalView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            canonicalView.setTextColor(getColor(R.color.text_secondary));
+            canonicalView.setTypeface(Typeface.MONOSPACE);
+            canonicalView.setMaxLines(2);
+            canonicalView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams canonicalParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            canonicalParams.topMargin = dp(4);
+            canonicalView.setLayoutParams(canonicalParams);
+            row.addView(canonicalView);
+
+            layoutFingerprint.addView(row);
+
+            // Divider (except last)
+            if (idx < totalFields - 1) {
+                View divider = new View(this);
+                divider.setBackgroundColor(getColor(R.color.divider));
+                LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+                divider.setLayoutParams(divParams);
+                layoutFingerprint.addView(divider);
             }
-
-            // All method values (detailed)
-            for (Map.Entry<String, String> val : cr.getValues().entrySet()) {
-                TextView methodVal = new TextView(this);
-                String value = val.getValue();
-                if (value == null || value.isEmpty()) value = "(empty)";
-                methodVal.setText("    " + val.getKey() + ": " + value);
-                methodVal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-                methodVal.setTextColor(getColor(R.color.text_secondary));
-                methodVal.setTypeface(Typeface.MONOSPACE);
-                layoutFingerprint.addView(methodVal);
-            }
-
-            // Divider
-            View divider = new View(this);
-            divider.setBackgroundColor(getColor(R.color.divider));
-            LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
-            divParams.topMargin = dp(4);
-            divider.setLayoutParams(divParams);
-            layoutFingerprint.addView(divider);
-        }
-    }
-
-    private void displayRawJson(RiskReport report) {
-        cardJson.setVisibility(View.VISIBLE);
-        try {
-            com.google.gson.Gson gson = new com.google.gson.GsonBuilder()
-                    .setPrettyPrinting()
-                    .disableHtmlEscaping()
-                    .create();
-            tvJsonData.setText(gson.toJson(report));
-        } catch (Exception e) {
-            tvJsonData.setText("Failed to serialize: " + e.getMessage());
+            idx++;
         }
     }
 
@@ -376,10 +392,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private android.graphics.drawable.GradientDrawable createRiskBadgeDrawable(RiskLevel level) {
+    private android.graphics.drawable.GradientDrawable createPillDrawable(int color) {
         android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
-        drawable.setCornerRadius(dp(4));
-        drawable.setColor(getRiskColor(level));
+        drawable.setCornerRadius(dp(100));
+        drawable.setColor(color);
+        return drawable;
+    }
+
+    private android.graphics.drawable.GradientDrawable createCircleDrawable(int color) {
+        android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
+        drawable.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        drawable.setColor(color);
         return drawable;
     }
 
