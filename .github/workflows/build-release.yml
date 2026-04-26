@@ -1,0 +1,99 @@
+name: Build Android Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: true
+
+jobs:
+  build-release:
+    name: Build SDK and Demo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build dependencies
+        run: |
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973"
+
+      - name: Build SDK AAR and demo APK
+        run: ./gradlew :riskengine-sdk:assembleRelease :demo:assembleDebug --no-daemon
+
+      - name: Collect release artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          mkdir -p release-artifacts
+
+          sdk_artifacts=(riskengine-sdk/build/outputs/aar/*.aar)
+          demo_artifacts=(demo/build/outputs/apk/debug/*.apk)
+
+          if (( ${#sdk_artifacts[@]} == 0 )); then
+            echo "No SDK AAR artifacts found."
+            exit 1
+          fi
+
+          if (( ${#demo_artifacts[@]} == 0 )); then
+            echo "No demo APK artifacts found."
+            exit 1
+          fi
+
+          cp "${sdk_artifacts[@]}" release-artifacts/
+          cp "${demo_artifacts[@]}" release-artifacts/
+
+          ls -lah release-artifacts
+
+      - name: Move nightly tag
+        run: |
+          git tag -f nightly "$GITHUB_SHA"
+          git push origin refs/tags/nightly --force
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_notes="Automated build from ${GITHUB_SHA}."
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly \
+              --title "Nightly Build" \
+              --notes "$release_notes" \
+              --prerelease
+          else
+            gh release create nightly \
+              --title "Nightly Build" \
+              --notes "$release_notes" \
+              --prerelease \
+              --target "$GITHUB_SHA"
+          fi
+
+          gh release upload nightly release-artifacts/* --clobber
