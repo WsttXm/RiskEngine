@@ -1,17 +1,16 @@
-name: Build Android Artifacts
+name: Publish Android Release
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - master
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: write
 
 concurrency:
-  group: nightly-release
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-release:
@@ -42,58 +41,80 @@ jobs:
             "cmake;3.22.1" \
             "ndk;27.0.12077973"
 
-      - name: Build SDK AAR and demo APK
-        run: ./gradlew :riskengine-sdk:assembleRelease :demo:assembleDebug --no-daemon
-
-      - name: Collect release artifacts
+      - name: Read and validate version
+        id: version
+        shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Tag must use semantic version format vMAJOR.MINOR.PATCH, for example v1.2.3."
+            exit 1
+          fi
+
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+
+          if (( minor > 999 || patch > 999 )); then
+            echo "MINOR and PATCH must each be between 0 and 999."
+            exit 1
+          fi
+
+          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
+          if (( version_code < 1 || version_code > 2100000000 )); then
+            echo "Calculated Android versionCode is outside the supported range."
+            exit 1
+          fi
+
+          echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "code=$version_code" >> "$GITHUB_OUTPUT"
+
+      - name: Build SDK AAR and demo APK
+        run: |
+          ./gradlew \
+            :riskengine-sdk:assembleRelease \
+            :demo:assembleDebug \
+            -PreleaseVersionName="${{ steps.version.outputs.name }}" \
+            -PreleaseVersionCode="${{ steps.version.outputs.code }}" \
+            --no-daemon
+
+      - name: Collect release artifacts
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
 
           mkdir -p release-artifacts
 
-          sdk_artifacts=(riskengine-sdk/build/outputs/aar/*.aar)
-          demo_artifacts=(demo/build/outputs/apk/debug/*.apk)
+          sdk_aar="riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"
+          demo_apk="demo/build/outputs/apk/debug/demo-debug.apk"
 
-          if (( ${#sdk_artifacts[@]} == 0 )); then
-            echo "No SDK AAR artifacts found."
+          if [[ ! -f "$sdk_aar" ]]; then
+            echo "SDK AAR not found: $sdk_aar"
             exit 1
           fi
 
-          if (( ${#demo_artifacts[@]} == 0 )); then
-            echo "No demo APK artifacts found."
+          if [[ ! -f "$demo_apk" ]]; then
+            echo "Demo APK not found: $demo_apk"
             exit 1
           fi
 
-          cp "${sdk_artifacts[@]}" release-artifacts/
-          cp "${demo_artifacts[@]}" release-artifacts/
+          cp "$sdk_aar" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}.aar"
+          cp "$demo_apk" "release-artifacts/RiskEngine-Demo-${VERSION_NAME}-debug.apk"
 
-          ls -lah release-artifacts
+          cd release-artifacts
+          sha256sum ./*.aar ./*.apk > SHA256SUMS
 
-      - name: Move nightly tag
-        run: |
-          git tag -f nightly "$GITHUB_SHA"
-          git push origin refs/tags/nightly --force
+          ls -lah
 
-      - name: Publish nightly release
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
-          release_notes="Automated build from ${GITHUB_SHA}."
-
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release edit nightly \
-              --title "Nightly Build" \
-              --notes "$release_notes" \
-              --prerelease
-          else
-            gh release create nightly \
-              --title "Nightly Build" \
-              --notes "$release_notes" \
-              --prerelease \
-              --target "$GITHUB_SHA"
-          fi
-
-          gh release upload nightly release-artifacts/* --clobber
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
+            --verify-tag \
+            --title "RiskEngine ${{ steps.version.outputs.name }}" \
+            --generate-notes

@@ -2,6 +2,9 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+val releaseVersionName = providers.gradleProperty("releaseVersionName").orElse("1.0.0")
+version = releaseVersionName.get()
+
 android {
     namespace = "com.wsttxm.riskenginesdk"
     compileSdk = 36
@@ -9,7 +12,7 @@ android {
     defaultConfig {
         minSdk = 30
 
-        buildConfigField("String", "SDK_VERSION", "\"1.0.0\"")
+        buildConfigField("String", "SDK_VERSION", "\"${releaseVersionName.get()}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
