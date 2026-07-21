@@ -4,7 +4,7 @@ import android.util.Log;
 
 public class CLog {
     private static final String TAG = "RiskEngine";
-    private static boolean enabled = true;
+    private static volatile boolean enabled;
 
     public static void setEnabled(boolean enabled) {
         CLog.enabled = enabled;

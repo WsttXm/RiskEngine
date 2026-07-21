@@ -9,6 +9,7 @@ import android.hardware.camera2.CameraManager;
 import android.os.BatteryManager;
 
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.CLog;
 
@@ -30,72 +31,84 @@ public class CloudPhoneDetector extends BaseDetector {
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
 
-        checkBatteryAnomaly(evidence);
-        checkCameraCount(evidence);
-        checkSensorCount(evidence);
+        boolean batteryAvailable = checkBatteryAnomaly(evidence);
+        boolean cameraAvailable = checkCameraCount(evidence);
+        boolean sensorsAvailable = checkSensorCount(evidence);
 
-        if (evidence.size() >= 2) {
-            return risk(RiskLevel.HIGH, String.join("; ", evidence));
-        } else if (!evidence.isEmpty()) {
-            return risk(RiskLevel.MEDIUM, String.join("; ", evidence));
+        if (!evidence.isEmpty()) {
+            RiskLevel level = evidence.size() >= 3 ? RiskLevel.MEDIUM : RiskLevel.LOW;
+            return result(level, DetectionStatus.WARNING, 1, 10, true,
+                    evidence, String.join("; ", evidence));
+        }
+        if (!batteryAvailable && !cameraAvailable && !sensorsAvailable) {
+            return unavailable("hardware_signals_unavailable");
         }
         return safe();
     }
 
-    private void checkBatteryAnomaly(List<String> evidence) {
+    private boolean checkBatteryAnomaly(List<String> evidence) {
         try {
             IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             Intent battery = context.registerReceiver(null, filter);
-            if (battery != null) {
-                int voltage = battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1);
-                int temperature = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+            if (battery == null) {
+                return false;
+            }
+            int voltage = battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1);
+            int temperature = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
 
-                // Cloud phones often have abnormal battery values
-                if (voltage == 0 || temperature == 0) {
-                    evidence.add("battery_zero:v=" + voltage + ",t=" + temperature);
-                }
+            // Cloud phones often have abnormal battery values
+            if (voltage == 0 || temperature == 0) {
+                evidence.add("battery_zero:v=" + voltage + ",t=" + temperature);
+            }
 
-                int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
-                int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-                // Always 100% and charging is suspicious
-                if (level == 100 && status == BatteryManager.BATTERY_STATUS_CHARGING) {
-                    // Check power: if USB charging but reporting very high power, likely fake
-                    int plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
-                    if (plugged == 0) {
-                        evidence.add("battery_anomaly:100%_charging_no_plug");
-                    }
+            int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+            if (level == 100 && status == BatteryManager.BATTERY_STATUS_CHARGING) {
+                int plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+                if (plugged == 0) {
+                    evidence.add("battery_anomaly:100%_charging_no_plug");
                 }
             }
+            return true;
         } catch (Exception e) {
             CLog.e("Battery check failed", e);
+            return false;
         }
     }
 
-    private void checkCameraCount(List<String> evidence) {
+    private boolean checkCameraCount(List<String> evidence) {
         try {
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-            if (cm != null) {
-                String[] cameras = cm.getCameraIdList();
-                if (cameras.length < 2) {
-                    evidence.add("low_camera_count:" + cameras.length);
-                }
+            if (cm == null) {
+                evidence.add("low_camera_count:0");
+                return true;
             }
+            String[] cameras = cm.getCameraIdList();
+            if (cameras.length < 2) {
+                evidence.add("low_camera_count:" + cameras.length);
+            }
+            return true;
         } catch (Exception e) {
             CLog.e("Camera check failed", e);
+            return false;
         }
     }
 
-    private void checkSensorCount(List<String> evidence) {
+    private boolean checkSensorCount(List<String> evidence) {
         try {
             SensorManager sm = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-            if (sm != null) {
-                List<Sensor> sensors = sm.getSensorList(Sensor.TYPE_ALL);
-                if (sensors.size() < 3) {
-                    evidence.add("very_low_sensor_count:" + sensors.size());
-                }
+            if (sm == null) {
+                evidence.add("very_low_sensor_count:0");
+                return true;
             }
+            List<Sensor> sensors = sm.getSensorList(Sensor.TYPE_ALL);
+            if (sensors.size() < 3) {
+                evidence.add("very_low_sensor_count:" + sensors.size());
+            }
+            return true;
         } catch (Exception e) {
             CLog.e("Sensor count check failed", e);
+            return false;
         }
     }
 }

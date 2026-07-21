@@ -5,55 +5,116 @@ import android.content.Context;
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
+import com.wsttxm.riskenginesdk.util.PrivacyUtils;
+
+import java.util.Set;
 
 public class NativeCollectorBridge {
     private final Context context;
+    private static final boolean NATIVE_AVAILABLE;
+    private static final Set<String> ALLOWED_PROPERTIES = Set.of(
+            "service.adb.tcp.port", "persist.adb.tcp.port",
+            "ro.build.fingerprint", "ro.build.display.id", "ro.product.model",
+            "ro.product.brand", "ro.product.device", "ro.product.manufacturer",
+            "ro.hardware", "ro.board.platform", "persist.sys.timezone",
+            "gsm.version.baseband", "ro.lineage.version", "ro.cm.version",
+            "ro.mokee.version", "ro.rr.version", "ro.pixelexperience.version",
+            "ro.modversion"
+    );
 
     static {
+        boolean loaded = false;
         try {
             System.loadLibrary("riskengine");
-        } catch (UnsatisfiedLinkError e) {
+            loaded = true;
+        } catch (LinkageError | SecurityException e) {
             CLog.e("Failed to load native library", e);
         }
+        NATIVE_AVAILABLE = loaded;
     }
 
     public NativeCollectorBridge(Context context) {
-        this.context = context;
+        Context application = context == null ? null : context.getApplicationContext();
+        this.context = application != null ? application : context;
+    }
+
+    public static boolean isNativeAvailable() {
+        return NATIVE_AVAILABLE;
+    }
+
+    public static String getSystemProperty(String name) {
+        if (!NATIVE_AVAILABLE || !ALLOWED_PROPERTIES.contains(name)) {
+            return "";
+        }
+        try {
+            String value = nativeGetSystemPropertyRaw(name);
+            return value == null ? "" : value;
+        } catch (Exception | LinkageError e) {
+            CLog.e("Native system property lookup failed", e);
+            return "";
+        }
     }
 
     // Native methods
-    public static native String nativeGetDrmId();
-    public static native String nativeGetBootId();
-    public static native String nativeGetSystemProperty(String name);
-    public static native String nativeGetAllSystemProperties();
-    public static native String nativeGetCpuInfo();
-    public static native long nativeGetDiskSize(String path);
-    public static native String nativeGetMacAddress();
-    public static native String nativeGetKernelInfo();
+    private static native String nativeGetDrmId();
+    private static native String nativeGetBootId();
+    private static native String nativeGetSystemPropertyRaw(String name);
+    private static native String nativeGetCpuInfo();
+    private static native long nativeGetDiskSize(String path);
+    private static native String nativeGetKernelInfo();
 
-    // Root detection
-    public static native boolean nativeCheckRoot();
-    public static native String nativeGetRootEvidence();
+    private static native boolean nativeCheckRootRaw();
+    private static native String nativeGetRootEvidenceRaw();
+    private static native String nativeGetHookEvidenceRaw();
+    private static native String nativeCheckEmulatorFilesRaw();
+    private static native int nativeGetThermalZoneCountRaw();
+    private static native String nativeGetRuntimeArchRaw();
+    private static native int nativeGetTracerPidRaw();
 
-    // Hook detection
-    public static native boolean nativeCheckHooks();
-    public static native String nativeGetHookEvidence();
+    public static boolean checkRoot() {
+        return callNative(false, NativeCollectorBridge::nativeCheckRootRaw);
+    }
 
-    // Emulator detection
-    public static native String nativeCheckEmulatorFiles();
-    public static native int nativeGetThermalZoneCount();
-    public static native String nativeCheckSeccompArch();
+    public static String getRootEvidence() {
+        return callNative("", NativeCollectorBridge::nativeGetRootEvidenceRaw);
+    }
 
-    // Debug detection
-    public static native int nativeGetTracerPid();
-    public static native boolean nativeCheckPtrace();
-    public static native String nativeInspectMethodEntryPoint(java.lang.reflect.Executable executable);
+    public static String getHookEvidence() {
+        return callNative("", NativeCollectorBridge::nativeGetHookEvidenceRaw);
+    }
 
-    // Anti-tamper
-    public static native boolean nativeInitMemoryCrc();
-    public static native boolean nativeCheckMemoryCrc();
-    public static native boolean nativeCheckMapsRedirect();
+    public static String checkEmulatorFiles() {
+        return callNative("", NativeCollectorBridge::nativeCheckEmulatorFilesRaw);
+    }
 
+    public static int getThermalZoneCount() {
+        return callNative(-1, NativeCollectorBridge::nativeGetThermalZoneCountRaw);
+    }
+
+    public static String getRuntimeArch() {
+        return callNative("", NativeCollectorBridge::nativeGetRuntimeArchRaw);
+    }
+
+    public static int getTracerPid() {
+        return callNative(-1, NativeCollectorBridge::nativeGetTracerPidRaw);
+    }
+
+    private static <T> T callNative(T fallback, NativeCall<T> call) {
+        if (!NATIVE_AVAILABLE) {
+            return fallback;
+        }
+        try {
+            T result = call.run();
+            return result == null ? fallback : result;
+        } catch (Exception | LinkageError e) {
+            CLog.e("Native detector call failed", e);
+            return fallback;
+        }
+    }
+
+    private interface NativeCall<T> {
+        T run();
+    }
     public BaseCollector getDrmCollector() {
         return new BaseCollector(context) {
             @Override
@@ -61,10 +122,13 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
-                    result.addValue("widevine", nativeGetDrmId());
+                    String hashed = PrivacyUtils.hashIdentifier(context, nativeGetDrmId());
+                    if (!hashed.isEmpty()) result.addValue("widevine_hash", hashed);
                 } catch (Exception e) {
                     CLog.e("DRM collector failed", e);
+                    result.markError(e);
                 }
             }
         };
@@ -77,10 +141,13 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
-                    result.addValue("native", nativeGetBootId());
+                    String hashed = PrivacyUtils.hashIdentifier(context, nativeGetBootId());
+                    if (!hashed.isEmpty()) result.addValue("native_hash", hashed);
                 } catch (Exception e) {
                     CLog.e("BootId collector failed", e);
+                    result.markError(e);
                 }
             }
         };
@@ -93,23 +160,24 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
                     String[] props = {
                             "ro.build.fingerprint", "ro.build.display.id",
                             "ro.product.model", "ro.product.brand",
                             "ro.product.device", "ro.product.manufacturer",
                             "ro.hardware", "ro.board.platform",
-                            "ro.serialno", "ro.boot.serialno",
                             "persist.sys.timezone", "gsm.version.baseband"
                     };
                     for (String prop : props) {
-                        String value = nativeGetSystemProperty(prop);
+                        String value = getSystemProperty(prop);
                         if (value != null && !value.isEmpty()) {
                             result.addValue(prop, value);
                         }
                     }
                 } catch (Exception e) {
                     CLog.e("SystemProperty collector failed", e);
+                    result.markError(e);
                 }
             }
         };
@@ -122,10 +190,12 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
                     result.addValue("native", nativeGetCpuInfo());
                 } catch (Exception e) {
                     CLog.e("CpuInfo collector failed", e);
+                    result.markError(e);
                 }
             }
         };
@@ -138,29 +208,20 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
                     long size = nativeGetDiskSize("/data");
-                    result.addValue("native_data", String.valueOf(size));
                     long sizeStorage = nativeGetDiskSize("/storage/emulated/0");
-                    result.addValue("native_storage", String.valueOf(sizeStorage));
+                    if (size >= 0) result.addValue("native_data", String.valueOf(size));
+                    if (sizeStorage >= 0) {
+                        result.addValue("native_storage", String.valueOf(sizeStorage));
+                    }
+                    if (size < 0 && sizeStorage < 0) {
+                        result.markUnsupported("statfs_unavailable");
+                    }
                 } catch (Exception e) {
                     CLog.e("DiskSize collector failed", e);
-                }
-            }
-        };
-    }
-
-    public BaseCollector getMacNetlinkCollector() {
-        return new BaseCollector(context) {
-            @Override
-            public String getName() { return "mac_netlink"; }
-
-            @Override
-            protected void collect(CollectorResult result) {
-                try {
-                    result.addValue("native", nativeGetMacAddress());
-                } catch (Exception e) {
-                    CLog.e("MAC netlink collector failed", e);
+                    result.markError(e);
                 }
             }
         };
@@ -173,12 +234,22 @@ public class NativeCollectorBridge {
 
             @Override
             protected void collect(CollectorResult result) {
+                if (!ensureNative(result)) return;
                 try {
                     result.addValue("native", nativeGetKernelInfo());
                 } catch (Exception e) {
                     CLog.e("KernelInfo collector failed", e);
+                    result.markError(e);
                 }
             }
         };
+    }
+
+    private static boolean ensureNative(CollectorResult result) {
+        if (NATIVE_AVAILABLE) {
+            return true;
+        }
+        result.markUnsupported("native_library_unavailable");
+        return false;
     }
 }

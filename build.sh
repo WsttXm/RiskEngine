@@ -25,6 +25,7 @@ Usage: $0 <command>
 Commands:
   sdk       Build RiskEngine SDK (Android AAR)
   demo      Build Demo APK (debug)
+  install   Build and install Demo APK on a connected device
   clean     Clean Gradle build outputs
   all       Build SDK AAR and Demo APK
   help      Show this help message
@@ -74,9 +75,8 @@ build_sdk() {
     check_java
     check_android_sdk
     run_gradle :riskengine-sdk:assembleRelease
-    local aar
-    aar=$(find "$ROOT_DIR/riskengine-sdk/build/outputs/aar" -name "*.aar" 2>/dev/null | head -1)
-    if [[ -n "$aar" ]]; then
+    local aar="$ROOT_DIR/riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"
+    if [[ -f "$aar" ]]; then
         ok "SDK AAR: $aar"
     else
         warn "AAR not found under riskengine-sdk/build/outputs/aar/."
@@ -88,18 +88,32 @@ build_demo() {
     check_java
     check_android_sdk
     run_gradle :demo:assembleDebug
-    local apk
-    apk=$(find "$ROOT_DIR/demo/build/outputs/apk/debug" -name "*.apk" 2>/dev/null | head -1)
-    if [[ -n "$apk" ]]; then
+    local apk="$ROOT_DIR/demo/build/outputs/apk/debug/demo-debug.apk"
+    if [[ -f "$apk" ]]; then
         ok "Demo APK: $apk"
-        if command -v adb &>/dev/null && adb devices | grep -q "device$"; then
-            info "Connected device detected, installing..."
-            adb install -r "$apk"
-            ok "Demo APK installed."
-        fi
     else
         warn "APK not found under demo/build/outputs/apk/debug/."
     fi
+}
+
+install_demo() {
+    build_demo
+    if ! command -v adb &>/dev/null; then
+        err "adb not found."
+        exit 1
+    fi
+    if ! adb devices | grep -q "device$"; then
+        err "No connected Android device is ready."
+        exit 1
+    fi
+    local apk="$ROOT_DIR/demo/build/outputs/apk/debug/demo-debug.apk"
+    if [[ ! -f "$apk" ]]; then
+        err "Demo APK not found."
+        exit 1
+    fi
+    info "Installing Demo APK..."
+    adb install -r "$apk"
+    ok "Demo APK installed."
 }
 
 clean_all() {
@@ -124,6 +138,7 @@ fi
 case "$1" in
     sdk) build_sdk ;;
     demo) build_demo ;;
+    install) install_demo ;;
     clean) clean_all ;;
     all) build_all ;;
     help|-h|--help) usage ;;

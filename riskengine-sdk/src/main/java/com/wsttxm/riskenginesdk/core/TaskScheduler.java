@@ -5,54 +5,94 @@ import com.wsttxm.riskenginesdk.util.CLog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class TaskScheduler {
+public final class TaskScheduler {
     private static final int THREAD_POOL_SIZE = 4;
-    private final ExecutorService executor;
+    private static final int MAX_QUEUED_COLLECTIONS = 16;
+
+    private final ExecutorService workerExecutor;
+    private final ExecutorService coordinatorExecutor;
 
     public TaskScheduler() {
-        executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+        workerExecutor = Executors.newFixedThreadPool(
+                THREAD_POOL_SIZE, namedThreadFactory("risk-worker"));
+        // Coordination must never occupy the worker pool it is waiting on.
+        coordinatorExecutor = new ThreadPoolExecutor(
+                1,
+                1,
+                0,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(MAX_QUEUED_COLLECTIONS),
+                namedThreadFactory("risk-coordinator"),
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     public <T> Future<T> submit(Callable<T> task) {
-        return executor.submit(task);
+        return coordinatorExecutor.submit(task);
     }
 
-    public <T> List<T> submitAllAndWait(List<Callable<T>> tasks, long timeoutMs) {
-        List<T> results = new ArrayList<>();
+    /** Executes a batch with one deadline shared by the whole batch. */
+    public <T> List<T> submitAllAndWait(List<? extends Callable<T>> tasks, long timeoutMs) {
+        if (tasks.isEmpty() || timeoutMs <= 0) {
+            return new ArrayList<>();
+        }
+
+        List<Future<T>> futures;
         try {
-            List<Future<T>> futures = new ArrayList<>();
-            for (Callable<T> task : tasks) {
-                futures.add(executor.submit(task));
+            futures = workerExecutor.invokeAll(tasks, timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            CLog.e("Task batch interrupted", e);
+            return new ArrayList<>();
+        } catch (RejectedExecutionException e) {
+            CLog.e("Task batch rejected", e);
+            return new ArrayList<>();
+        }
+
+        List<T> results = new ArrayList<>(futures.size());
+        for (Future<T> future : futures) {
+            if (future.isCancelled()) {
+                continue;
             }
-            for (Future<T> future : futures) {
-                try {
-                    T result = future.get(timeoutMs, TimeUnit.MILLISECONDS);
-                    if (result != null) {
-                        results.add(result);
-                    }
-                } catch (Exception e) {
-                    CLog.e("Task execution failed", e);
+            try {
+                T result = future.get();
+                if (result != null) {
+                    results.add(result);
                 }
+            } catch (CancellationException ignored) {
+                // invokeAll cancels unfinished work at the shared deadline.
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                CLog.e("Task execution failed", e);
             }
-        } catch (Exception e) {
-            CLog.e("TaskScheduler submitAllAndWait failed", e);
         }
         return results;
     }
 
+    /** Cancels queued/running work without blocking the caller thread. */
     public void shutdown() {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-        }
+        coordinatorExecutor.shutdownNow();
+        workerExecutor.shutdownNow();
+    }
+
+    private static ThreadFactory namedThreadFactory(String prefix) {
+        AtomicInteger sequence = new AtomicInteger();
+        return runnable -> {
+            Thread thread = new Thread(runnable, prefix + "-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 }

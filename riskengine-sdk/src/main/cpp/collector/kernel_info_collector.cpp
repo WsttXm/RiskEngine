@@ -5,8 +5,7 @@
 std::string get_kernel_info() {
     struct utsname buf;
     if (uname(&buf) == 0) {
-        return std::string(buf.sysname) + " " + buf.release + " " +
-               buf.version + " " + buf.machine;
+        return std::string(buf.sysname) + " " + buf.release + " " + buf.machine;
     }
     return "";
 }

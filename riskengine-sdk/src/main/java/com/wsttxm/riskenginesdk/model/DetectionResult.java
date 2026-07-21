@@ -50,15 +50,15 @@ public class DetectionResult {
                            List<String> details,
                            String evidence,
                            long timestampMs) {
-        this.detectorName = detectorName;
-        this.riskLevel = riskLevel;
-        this.status = status != null ? status : defaultStatusFor(riskLevel);
+        this.detectorName = detectorName == null || detectorName.isBlank()
+                ? "unknown"
+                : detectorName;
+        this.riskLevel = riskLevel == null ? RiskLevel.UNKNOWN : riskLevel;
+        this.status = status != null ? status : defaultStatusFor(this.riskLevel);
         this.score = Math.max(0, score);
         this.maxScore = Math.max(this.score, Math.max(1, maxScore));
         this.warnOnly = warnOnly;
-        this.details = details == null
-                ? Collections.emptyList()
-                : Collections.unmodifiableList(new ArrayList<>(details));
+        this.details = sanitizeDetails(details);
         this.evidence = (evidence == null || evidence.isEmpty())
                 ? String.join("; ", this.details)
                 : evidence;
@@ -75,8 +75,26 @@ public class DetectionResult {
     public String getEvidence() { return evidence; }
     public long getTimestampMs() { return timestampMs; }
 
+    public static DetectionResult unavailable(String detectorName, String reason) {
+        String detail = "detection_unavailable:"
+                + ((reason == null || reason.isBlank()) ? "unknown" : reason);
+        return new DetectionResult(
+                detectorName,
+                RiskLevel.UNKNOWN,
+                DetectionStatus.UNKNOWN,
+                0,
+                1,
+                true,
+                Collections.singletonList(detail),
+                detail
+        );
+    }
+
     private static DetectionStatus defaultStatusFor(RiskLevel riskLevel) {
-        if (riskLevel == null || riskLevel == RiskLevel.SAFE) {
+        if (riskLevel == null || riskLevel == RiskLevel.UNKNOWN) {
+            return DetectionStatus.UNKNOWN;
+        }
+        if (riskLevel == RiskLevel.SAFE) {
             return DetectionStatus.NORMAL;
         }
         if (riskLevel == RiskLevel.LOW || riskLevel == RiskLevel.MEDIUM) {
@@ -90,6 +108,8 @@ public class DetectionResult {
             return 0;
         }
         switch (riskLevel) {
+            case UNKNOWN:
+                return 0;
             case LOW:
                 return 2;
             case MEDIUM:
@@ -116,5 +136,18 @@ public class DetectionResult {
             }
         }
         return details;
+    }
+
+    private static List<String> sanitizeDetails(List<String> details) {
+        if (details == null || details.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> copy = new ArrayList<>(details.size());
+        for (String detail : details) {
+            if (detail != null && !detail.isBlank()) {
+                copy.add(detail);
+            }
+        }
+        return Collections.unmodifiableList(copy);
     }
 }

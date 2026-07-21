@@ -40,20 +40,42 @@ public class EmulatorDetector extends BaseDetector {
         checkHardwareFeatures(evidence);
         checkEmulatorFiles(evidence);
         checkThermalZones(evidence);
-        checkSeccompArch(evidence);
+        checkRuntimeArch(evidence);
         checkSensors(evidence);
         checkEmulatorIp(evidence);
         checkEmulatorPackages(evidence);
         checkContainerSignals(evidence);
 
-        if (evidence.size() >= 3) {
+        int strongSignals = 0;
+        for (String signal : evidence) {
+            if (isStrongSignal(signal)) {
+                strongSignals++;
+            }
+        }
+        int weakSignals = evidence.size() - strongSignals;
+
+        if (strongSignals >= 2 || (strongSignals >= 1 && weakSignals >= 2)) {
             return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
                     evidence, String.join("; ", evidence));
-        } else if (!evidence.isEmpty()) {
+        } else if (strongSignals == 1) {
             return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 4, 10, false,
+                    evidence, String.join("; ", evidence));
+        } else if (!evidence.isEmpty()) {
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
                     evidence, String.join("; ", evidence));
         }
         return safe();
+    }
+
+    private boolean isStrongSignal(String signal) {
+        return signal.startsWith("fingerprint:")
+                || signal.startsWith("model:")
+                || signal.startsWith("manufacturer:")
+                || signal.startsWith("product:")
+                || signal.startsWith("hardware:")
+                || signal.startsWith("board:")
+                || signal.startsWith("emu_file:")
+                || signal.startsWith("emu_pkg:");
     }
 
     private void checkBuildProperties(List<String> evidence) {
@@ -73,7 +95,7 @@ public class EmulatorDetector extends BaseDetector {
             }
         }
 
-        if (Build.MANUFACTURER.contains("Genymotion")) {
+        if (Build.MANUFACTURER.toLowerCase(Locale.ROOT).contains("genymotion")) {
             evidence.add("manufacturer:Genymotion");
         }
 
@@ -106,10 +128,14 @@ public class EmulatorDetector extends BaseDetector {
                     PackageManager.FEATURE_CAMERA_FLASH,
                     PackageManager.FEATURE_TELEPHONY
             };
+            int missing = 0;
             for (String feature : features) {
                 if (!pm.hasSystemFeature(feature)) {
-                    evidence.add("missing_feature:" + feature);
+                    missing++;
                 }
+            }
+            if (missing > 0) {
+                evidence.add("limited_hardware_features:" + missing);
             }
         } catch (Exception e) {
             CLog.e("Hardware feature check failed", e);
@@ -117,8 +143,11 @@ public class EmulatorDetector extends BaseDetector {
     }
 
     private void checkEmulatorFiles(List<String> evidence) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return;
+        }
         try {
-            String found = NativeCollectorBridge.nativeCheckEmulatorFiles();
+            String found = NativeCollectorBridge.checkEmulatorFiles();
             if (found != null && !found.isEmpty()) {
                 evidence.add("emu_file:" + found);
             }
@@ -128,8 +157,11 @@ public class EmulatorDetector extends BaseDetector {
     }
 
     private void checkThermalZones(List<String> evidence) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return;
+        }
         try {
-            int count = NativeCollectorBridge.nativeGetThermalZoneCount();
+            int count = NativeCollectorBridge.getThermalZoneCount();
             if (count == 0) {
                 evidence.add("no_thermal_zones");
             }
@@ -138,14 +170,17 @@ public class EmulatorDetector extends BaseDetector {
         }
     }
 
-    private void checkSeccompArch(List<String> evidence) {
+    private void checkRuntimeArch(List<String> evidence) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return;
+        }
         try {
-            String arch = NativeCollectorBridge.nativeCheckSeccompArch();
-            if (arch != null && !arch.isEmpty()) {
-                evidence.add("seccomp_arch:" + arch);
+            String arch = NativeCollectorBridge.getRuntimeArch();
+            if ("X86_64".equals(arch) || "I386".equals(arch)) {
+                evidence.add("runtime_arch:" + arch);
             }
         } catch (Exception e) {
-            CLog.e("Seccomp arch check failed", e);
+            CLog.e("Runtime architecture check failed", e);
         }
     }
 
@@ -192,16 +227,13 @@ public class EmulatorDetector extends BaseDetector {
     }
 
     private void checkEmulatorPackages(List<String> evidence) {
-        String[] emuPkgs = {
+        String[] emulatorPackages = {
                 "com.google.android.launcher.layouts.genymotion",
                 "com.bluestacks",
-                "com.bignox.app",
-                "com.lbe.parallel",
-                "com.excelliance.dualaid",
-                "com.parallel.space"
+                "com.bignox.app"
         };
         PackageManager pm = context.getPackageManager();
-        for (String pkg : emuPkgs) {
+        for (String pkg : emulatorPackages) {
             try {
                 pm.getPackageInfo(pkg, 0);
                 evidence.add("emu_pkg:" + pkg);

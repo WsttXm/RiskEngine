@@ -28,10 +28,8 @@ public class BuildPropsCollector extends BaseCollector {
         result.addValue("manufacturer", Build.MANUFACTURER);
         result.addValue("fingerprint", Build.FINGERPRINT);
         result.addValue("display", Build.DISPLAY);
-        result.addValue("host", Build.HOST);
         result.addValue("tags", Build.TAGS);
         result.addValue("type", Build.TYPE);
-        result.addValue("user", Build.USER);
         result.addValue("bootloader", Build.BOOTLOADER);
         result.addValue("radio", Build.getRadioVersion());
         result.addValue("sdk_int", String.valueOf(Build.VERSION.SDK_INT));

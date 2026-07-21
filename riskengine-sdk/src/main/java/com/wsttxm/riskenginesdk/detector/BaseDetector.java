@@ -15,7 +15,8 @@ public abstract class BaseDetector implements Callable<DetectionResult> {
     protected final Context context;
 
     public BaseDetector(Context context) {
-        this.context = context;
+        Context application = context == null ? null : context.getApplicationContext();
+        this.context = application != null ? application : context;
     }
 
     public abstract String getName();
@@ -26,17 +27,9 @@ public abstract class BaseDetector implements Callable<DetectionResult> {
     public DetectionResult call() {
         try {
             return detect();
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             CLog.e("Detector [" + getName() + "] failed", e);
-            return result(
-                    RiskLevel.SAFE,
-                    DetectionStatus.NORMAL,
-                    0,
-                    10,
-                    true,
-                    Collections.singletonList("detection_failed:" + e.getClass().getSimpleName()),
-                    "detection failed: " + e.getMessage()
-            );
+            return DetectionResult.unavailable(getName(), e.getClass().getSimpleName());
         }
     }
 
@@ -54,6 +47,10 @@ public abstract class BaseDetector implements Callable<DetectionResult> {
 
     protected DetectionResult risk(RiskLevel level, String evidence) {
         return new DetectionResult(getName(), level, evidence);
+    }
+
+    protected DetectionResult unavailable(String reason) {
+        return DetectionResult.unavailable(getName(), reason);
     }
 
     protected DetectionResult result(RiskLevel level,

@@ -7,8 +7,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,16 +24,19 @@ public final class ProcfsUtils {
         private final String localAddress;
         private final int localPort;
         private final String state;
+        private final String inode;
 
-        public TcpEntry(String localAddress, int localPort, String state) {
+        public TcpEntry(String localAddress, int localPort, String state, String inode) {
             this.localAddress = localAddress;
             this.localPort = localPort;
             this.state = state;
+            this.inode = inode;
         }
 
         public String getLocalAddress() { return localAddress; }
         public int getLocalPort() { return localPort; }
         public String getState() { return state; }
+        public String getInode() { return inode; }
         public boolean isListening() { return TCP_LISTEN.equalsIgnoreCase(state); }
         public boolean isLoopback() {
             return "127.0.0.1".equals(localAddress)
@@ -64,7 +66,7 @@ public final class ProcfsUtils {
                     continue;
                 }
                 String[] parts = trimmed.split("\\s+");
-                if (parts.length < 4) {
+                if (parts.length < 10) {
                     continue;
                 }
                 String[] local = parts[1].split(":");
@@ -80,7 +82,7 @@ public final class ProcfsUtils {
                 } catch (NumberFormatException ignored) {
                     continue;
                 }
-                entries.add(new TcpEntry(decodeAddress(addressHex), port, state));
+                entries.add(new TcpEntry(decodeAddress(addressHex), port, state, parts[9]));
             }
         } catch (IOException e) {
             CLog.e("Failed to read tcp table: " + path, e);
@@ -97,13 +99,20 @@ public final class ProcfsUtils {
 
     public static Set<Integer> findPidLoopbackListeningPorts(int pid) {
         LinkedHashSet<Integer> ports = new LinkedHashSet<>();
-        collectLoopbackPorts("/proc/" + pid + "/net/tcp", ports);
-        collectLoopbackPorts("/proc/" + pid + "/net/tcp6", ports);
+        Set<String> socketInodes = readPidSocketInodes(pid);
+        if (socketInodes.isEmpty()) {
+            return ports;
+        }
+        collectOwnedLoopbackPorts("/proc/" + pid + "/net/tcp", socketInodes, ports);
+        collectOwnedLoopbackPorts("/proc/" + pid + "/net/tcp6", socketInodes, ports);
         return ports;
     }
 
     public static List<Integer> findPidsByNameFragments(String... keywords) {
         List<Integer> pids = new ArrayList<>();
+        if (keywords == null || keywords.length == 0) {
+            return pids;
+        }
         File proc = new File("/proc");
         File[] dirs = proc.listFiles();
         if (dirs == null) {
@@ -121,10 +130,52 @@ public final class ProcfsUtils {
             String cmdline = readCmdline(Integer.parseInt(name));
             String haystack = (comm + " " + cmdline).toLowerCase(Locale.ROOT);
             for (String keyword : keywords) {
+                if (keyword == null || keyword.isBlank()) {
+                    continue;
+                }
                 if (haystack.contains(keyword.toLowerCase(Locale.ROOT))) {
                     pids.add(Integer.parseInt(name));
                     break;
                 }
+            }
+        }
+        return pids;
+    }
+
+    public static List<Integer> findPidsByProcessNames(String... processNames) {
+        LinkedHashSet<String> expected = new LinkedHashSet<>();
+        if (processNames == null || processNames.length == 0) {
+            return new ArrayList<>();
+        }
+        for (String processName : processNames) {
+            if (processName != null && !processName.isBlank()) {
+                expected.add(processName.toLowerCase(Locale.ROOT));
+            }
+        }
+
+        List<Integer> pids = new ArrayList<>();
+        if (expected.isEmpty()) {
+            return pids;
+        }
+        File[] dirs = new File("/proc").listFiles();
+        if (dirs == null) {
+            return pids;
+        }
+        for (File dir : dirs) {
+            String name = dir.getName();
+            if (!dir.isDirectory() || !name.matches("\\d+")) {
+                continue;
+            }
+            int pid;
+            try {
+                pid = Integer.parseInt(name);
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            String comm = readFirstLine(new File(dir, "comm").getAbsolutePath());
+            String cmdline = readCmdline(pid);
+            if (matchesProcessName(comm, cmdline, expected)) {
+                pids.add(pid);
             }
         }
         return pids;
@@ -202,28 +253,11 @@ public final class ProcfsUtils {
         if (!cmdline.isEmpty() && context != null) {
             String packageName = context.getPackageName();
             if (packageName != null && !packageName.isEmpty() && !cmdline.contains(packageName)) {
-                signals.add("cmdline_mismatch:" + cmdline);
+                signals.add("cmdline_mismatch");
             }
         }
 
         return signals;
-    }
-
-    public static String probeDbus(int port, int timeoutMs) {
-        try (Socket socket = new Socket()) {
-            socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), timeoutMs);
-            socket.setSoTimeout(timeoutMs);
-            socket.getOutputStream().write("\0AUTH\r\n".getBytes(StandardCharsets.US_ASCII));
-            socket.getOutputStream().flush();
-            byte[] buffer = new byte[96];
-            int read = socket.getInputStream().read(buffer);
-            if (read <= 0) {
-                return "";
-            }
-            return new String(buffer, 0, read, StandardCharsets.US_ASCII).trim();
-        } catch (Exception ignored) {
-            return "";
-        }
     }
 
     private static void collectLoopbackPorts(String path, Set<Integer> ports) {
@@ -234,15 +268,70 @@ public final class ProcfsUtils {
         }
     }
 
+    private static void collectOwnedLoopbackPorts(String path,
+                                                  Set<String> socketInodes,
+                                                  Set<Integer> ports) {
+        for (TcpEntry entry : readTcpTable(path)) {
+            if (entry.isListening()
+                    && entry.isLoopback()
+                    && socketInodes.contains(entry.getInode())) {
+                ports.add(entry.getLocalPort());
+            }
+        }
+    }
+
+    private static Set<String> readPidSocketInodes(int pid) {
+        LinkedHashSet<String> inodes = new LinkedHashSet<>();
+        File fdDirectory = new File("/proc/" + pid + "/fd");
+        File[] descriptors = fdDirectory.listFiles();
+        if (descriptors == null) {
+            return inodes;
+        }
+        for (File descriptor : descriptors) {
+            try {
+                String target = Files.readSymbolicLink(descriptor.toPath()).toString();
+                if (target.startsWith("socket:[") && target.endsWith("]")) {
+                    inodes.add(target.substring(8, target.length() - 1));
+                }
+            } catch (Exception ignored) {
+                // Procfs descriptors may disappear while being inspected.
+            }
+        }
+        return inodes;
+    }
+
+    private static boolean matchesProcessName(String comm,
+                                              String cmdline,
+                                              Set<String> expected) {
+        String normalizedComm = comm == null ? "" : comm.trim().toLowerCase(Locale.ROOT);
+        if (expected.contains(normalizedComm)) {
+            return true;
+        }
+        if (cmdline == null || cmdline.isBlank()) {
+            return false;
+        }
+        String executable = cmdline.trim().split("\\s+", 2)[0];
+        int slash = executable.lastIndexOf('/');
+        if (slash >= 0) {
+            executable = executable.substring(slash + 1);
+        }
+        return expected.contains(executable.toLowerCase(Locale.ROOT));
+    }
+
     private static String decodeAddress(String value) {
         if (value == null) {
             return "";
         }
         if (value.length() == 8) {
             byte[] bytes = new byte[4];
-            for (int i = 0; i < 4; i++) {
-                int index = (3 - i) * 2;
-                bytes[i] = (byte) Integer.parseInt(value.substring(index, index + 2), 16);
+            try {
+                for (int i = 0; i < 4; i++) {
+                    int index = (3 - i) * 2;
+                    bytes[i] = (byte) Integer.parseInt(
+                            value.substring(index, index + 2), 16);
+                }
+            } catch (NumberFormatException ignored) {
+                return value;
             }
             try {
                 return InetAddress.getByAddress(bytes).getHostAddress();

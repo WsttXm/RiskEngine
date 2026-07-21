@@ -9,6 +9,8 @@ import com.wsttxm.riskenginesdk.util.ShellExecutor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 public class ProcessScanDetector extends BaseDetector {
 
@@ -18,8 +20,8 @@ public class ProcessScanDetector extends BaseDetector {
             "magisk", "magiskd", "magisk_daemon",
             "objection",
             "gdb", "gdbserver", "lldb-server",
-            "ida", "idaq", "android_server", "android_server64",
-            "r2", "radare2",
+            "idaq", "android_server", "android_server64",
+            "radare2",
             "substrate", "cydia",
     };
 
@@ -35,13 +37,16 @@ public class ProcessScanDetector extends BaseDetector {
     @Override
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
+        boolean processListAvailable = false;
+        boolean serviceListAvailable = false;
 
         try {
             String psOutput = ShellExecutor.execute("ps -ef");
             if (psOutput != null && !psOutput.isEmpty()) {
-                String lower = psOutput.toLowerCase();
+                processListAvailable = true;
+                String lower = psOutput.toLowerCase(Locale.ROOT);
                 for (String proc : SUSPICIOUS_PROCESSES) {
-                    if (lower.contains(proc)) {
+                    if (containsProcessToken(lower, proc)) {
                         evidence.add("suspicious_process:" + proc);
                     }
                 }
@@ -53,8 +58,9 @@ public class ProcessScanDetector extends BaseDetector {
         // Also check service list
         try {
             String serviceOutput = ShellExecutor.execute("service list");
-            if (serviceOutput != null) {
-                String lower = serviceOutput.toLowerCase();
+            if (serviceOutput != null && !serviceOutput.isEmpty()) {
+                serviceListAvailable = true;
+                String lower = serviceOutput.toLowerCase(Locale.ROOT);
                 if (lower.contains("xposed") || lower.contains("edxposed")) {
                     evidence.add("suspicious_service:xposed");
                 }
@@ -66,6 +72,14 @@ public class ProcessScanDetector extends BaseDetector {
         if (!evidence.isEmpty()) {
             return risk(RiskLevel.HIGH, String.join("; ", evidence));
         }
+        if (!processListAvailable && !serviceListAvailable) {
+            return unavailable("process_and_service_lists_unavailable");
+        }
         return safe();
+    }
+
+    private boolean containsProcessToken(String output, String processName) {
+        String boundary = "(^|[\\s/:])" + Pattern.quote(processName) + "($|[\\s:])";
+        return Pattern.compile(boundary, Pattern.MULTILINE).matcher(output).find();
     }
 }

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#FF0A84FF</color>
+    <color name="primary_pressed">#FF409CFF</color>
+    <color name="accent">#FF0A84FF</color>
+    <color name="background">#FF000000</color>
+    <color name="background_top">#FF11141A</color>
+    <color name="surface">#FF1C1C1E</color>
+    <color name="surface_elevated">#F72C2C2E</color>
+    <color name="surface_secondary">#FF2C2C2E</color>
+    <color name="surface_tinted">#FF15243A</color>
+    <color name="text_primary">#FFF2F2F7</color>
+    <color name="text_secondary">#FFAEAEB2</color>
+    <color name="text_tertiary">#FF8E8E93</color>
+    <color name="divider">#3D545458</color>
+    <color name="track">#3D787880</color>
+    <color name="chip_bg">#330A84FF</color>
+
+    <color name="risk_safe">#FF30D158</color>
+    <color name="risk_low">#FF64D2FF</color>
+    <color name="risk_medium">#FFFF9F0A</color>
+    <color name="risk_high">#FFFF8A1F</color>
+    <color name="risk_deadly">#FFFF453A</color>
+    <color name="risk_unknown">#FF98989D</color>
+
+    <color name="success_bg">#2630D158</color>
+    <color name="warning_bg">#26FF9F0A</color>
+    <color name="danger_bg">#26FF453A</color>
+    <color name="unknown_bg">#26787880</color>
+    <color name="inconsistent_bg">#FF332A18</color>
+    <color name="inconsistent_text">#FFFFC46B</color>
+</resources>

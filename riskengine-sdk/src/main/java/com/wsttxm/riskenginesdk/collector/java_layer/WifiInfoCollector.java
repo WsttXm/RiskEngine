@@ -1,13 +1,12 @@
 package com.wsttxm.riskenginesdk.collector.java_layer;
 
 import android.content.Context;
-import android.net.wifi.WifiInfo;
-import android.net.wifi.WifiManager;
+import android.content.pm.PackageManager;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
-import com.wsttxm.riskenginesdk.util.CLog;
 
+/** Collects Wi-Fi hardware capabilities without connection or network metadata. */
 public class WifiInfoCollector extends BaseCollector {
 
     public WifiInfoCollector(Context context) {
@@ -20,29 +19,11 @@ public class WifiInfoCollector extends BaseCollector {
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     protected void collect(CollectorResult result) {
-        try {
-            WifiManager wm = (WifiManager) context.getApplicationContext()
-                    .getSystemService(Context.WIFI_SERVICE);
-            if (wm != null) {
-                WifiInfo info = wm.getConnectionInfo();
-                if (info != null) {
-                    result.addValue("mac_address", info.getMacAddress());
-                    result.addValue("ssid", info.getSSID());
-                    result.addValue("bssid", info.getBSSID());
-                    result.addValue("ip_address", intToIp(info.getIpAddress()));
-                    result.addValue("link_speed", String.valueOf(info.getLinkSpeed()));
-                    result.addValue("rssi", String.valueOf(info.getRssi()));
-                }
-            }
-        } catch (Exception e) {
-            CLog.e("WifiInfo failed", e);
-        }
-    }
-
-    private String intToIp(int i) {
-        return (i & 0xFF) + "." + ((i >> 8) & 0xFF) + "." +
-                ((i >> 16) & 0xFF) + "." + ((i >> 24) & 0xFF);
+        PackageManager manager = context.getPackageManager();
+        result.addValue("supported", String.valueOf(
+                manager.hasSystemFeature(PackageManager.FEATURE_WIFI)));
+        result.addValue("wifi_direct_supported", String.valueOf(
+                manager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)));
     }
 }

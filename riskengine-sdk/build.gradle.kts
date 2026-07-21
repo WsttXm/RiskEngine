@@ -9,18 +9,20 @@ android {
     defaultConfig {
         minSdk = 30
 
+        buildConfigField("String", "SDK_VERSION", "\"1.0.0\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
 
         externalNativeBuild {
             cmake {
-                cppFlags += "-std=c++17 -fvisibility=hidden"
+                cppFlags += "-std=c++17 -fvisibility=hidden -fvisibility-inlines-hidden"
                 arguments += "-DANDROID_STL=c++_static"
             }
         }
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
     }
 
@@ -33,7 +35,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            // An SDK AAR is consumed and optimized again by the host application.
+            // Minifying here can remove public nested types before consumers compile.
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -46,6 +50,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     @Suppress("UnstableApiUsage")
     testOptions {
         unitTests.all {
@@ -56,8 +64,6 @@ android {
 
 dependencies {
     implementation(libs.gson)
-    implementation(libs.hidden.api.bypass)
-    implementation(libs.appcompat)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

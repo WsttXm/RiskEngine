@@ -24,8 +24,8 @@ RiskEngine is an Android SDK for local device fingerprint collection and runtime
 │       │   └── util/
 │       └── cpp/
 └── doc/
-    ├── README.md
-    └── README_zh.md
+    ├── Implementation_Details.md
+    └── Implementation_Details_zh.md
 ```
 
 ## Requirements
@@ -44,6 +44,7 @@ RiskEngine is an Android SDK for local device fingerprint collection and runtime
 ```bash
 ./build.sh sdk
 ./build.sh demo
+./build.sh install
 ./build.sh all
 ./build.sh clean
 ```
@@ -60,7 +61,6 @@ Equivalent Gradle commands:
 
 ```java
 RiskEngineConfig config = new RiskEngineConfig.Builder()
-        .debugLog(true)
         .collectTimeout(15000)
         .build();
 
@@ -80,6 +80,8 @@ RiskEngine.collect(new RiskEngineCallback() {
 });
 ```
 
+Callbacks run on an SDK background thread. `collectTimeout` is shared by the complete request, including serialized queue wait and the collector/detector pipeline.
+
 Synchronous collection is also available:
 
 ```java
@@ -87,7 +89,9 @@ RiskReport report = RiskEngine.collectSync();
 String json = RiskEngine.getReportJson();
 ```
 
-Call `RiskEngine.shutdown()` when the host app no longer needs the SDK.
+Synchronous APIs must not be called from the Android main thread.
+
+Call `RiskEngine.shutdown()` when the host app no longer needs the SDK. Reinitialization requires shutting down the existing instance first.
 
 ## Public API
 
@@ -99,7 +103,8 @@ Call `RiskEngine.shutdown()` when the host app no longer needs the SDK.
 | `RiskEngine.getReportJson()` | Collect and return the report as JSON. |
 | `RiskEngine.shutdown()` | Release SDK resources. |
 | `RiskEngineConfig.Builder.debugLog(boolean)` | Enable or disable SDK logs. |
-| `RiskEngineConfig.Builder.collectTimeout(long)` | Set collection timeout in milliseconds. |
+| `RiskEngineConfig.Builder.collectTimeout(long)` | Set collection timeout from 1 to 120,000 milliseconds. |
+| `RiskEngineConfig.Builder.enableRoot/enableHookDetection/...` | Enable or disable individual detector groups. |
 
 ## Detection Scope
 
@@ -107,12 +112,14 @@ The SDK includes Java and native checks for common Android runtime risks:
 
 | Area | Examples |
 | --- | --- |
-| Root | `su`, Magisk, dangerous props, writable system paths |
+| Root | `su`/Magisk artifacts, SELinux and build-context signals |
 | Hooking | Xposed/LSPosed, Frida, suspicious maps and processes |
 | Emulator | Build props, QEMU artifacts, native emulator markers |
 | Debugging | Debug flags, tracer pid, gdb/lldb/IDA artifacts |
 | Sandbox/container | Container files, cgroup markers, virtualized paths |
-| Device fingerprint | Android ID, build props, telephony, Wi-Fi, Bluetooth, screen, APK signature |
+| Device fingerprint | App-scoped Android ID hash, build props, non-sensitive telephony/Wi-Fi/Bluetooth capabilities, screen, APK signature |
+
+The library manifest declares no Android permissions and limits package-visibility queries to three known emulator packages.
 
 ## Output Model
 
@@ -122,11 +129,14 @@ The SDK includes Java and native checks for common Android runtime risks:
 | --- | --- |
 | `fingerprint` | Aggregated device fingerprint values. |
 | `detections` | Detector results and evidence. |
-| `overallRiskLevel` | Final risk level. |
+| `overallRiskLevel` | Final risk level; `UNKNOWN` when coverage failed and no other risk is present. |
 | `riskScore` | Numeric score derived from detector results. |
+| `unknownCount` | Number of unavailable, timed-out, or unsupported checks. |
 | `timestampMs` | Collection timestamp. |
 | `sdkVersion` | SDK version string. |
 
 ## ProGuard
 
 The SDK ships with `consumer-rules.pro`. Host apps do not need extra keep rules for the public API.
+
+Raw Android ID, DRM ID, boot ID, IMEI, IMSI, MAC, SSID, and BSSID values are never included in reports. Stable values are converted to package-scoped SHA-256 values first.

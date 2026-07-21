@@ -16,12 +16,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 
 public class HookFrameworkDetector extends BaseDetector {
 
     private static final int DEFAULT_FRIDA_PORT = 27042;
-    private static final int PROBE_TIMEOUT_MS = 120;
 
     public HookFrameworkDetector(Context context) {
         super(context);
@@ -51,7 +51,11 @@ public class HookFrameworkDetector extends BaseDetector {
                 return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
                         detailList, String.join("; ", detailList));
             }
-            return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 4, 10, false,
+            if (score.medium >= 1) {
+                return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 2, 10, true,
+                        detailList, String.join("; ", detailList));
+            }
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
                     detailList, String.join("; ", detailList));
         }
         return safe();
@@ -96,20 +100,19 @@ public class HookFrameworkDetector extends BaseDetector {
         try (BufferedReader br = new BufferedReader(new FileReader("/proc/self/maps"))) {
             String line;
             while ((line = br.readLine()) != null) {
-                String lower = line.toLowerCase();
-                if (lower.contains("frida") || lower.contains("gadget")) {
-                    addStrong(details, score, "frida_maps:" + line.trim());
+                String lower = line.toLowerCase(Locale.ROOT);
+                if (lower.contains("frida") || lower.contains("libgadget.so")) {
+                    addStrong(details, score, "frida_maps");
                     break;
                 }
             }
         } catch (Exception ignored) {}
 
-        // Check Frida default port
+        // Observe the TCP table without actively connecting to local services.
         try {
-            java.net.Socket socket = new java.net.Socket();
-            socket.connect(new java.net.InetSocketAddress("127.0.0.1", DEFAULT_FRIDA_PORT), PROBE_TIMEOUT_MS);
-            socket.close();
-            addMedium(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
+            if (ProcfsUtils.findLoopbackListeningPorts().contains(DEFAULT_FRIDA_PORT)) {
+                addMedium(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
+            }
         } catch (Exception ignored) {}
 
         // Check threads for Frida
@@ -125,28 +128,14 @@ public class HookFrameworkDetector extends BaseDetector {
                             if (threadName != null && (threadName.contains("gum-js-loop") ||
                                     threadName.contains("gmain") ||
                                     threadName.contains("frida"))) {
-                                addMedium(details, score, "frida_thread:" + threadName);
+                                addMedium(details, score,
+                                        "frida_thread:" + matchingThreadMarker(threadName));
                             }
                         }
                     }
                 }
             }
         } catch (Exception ignored) {}
-
-        try {
-            Set<Integer> loopbackPorts = ProcfsUtils.findLoopbackListeningPorts();
-            for (Integer port : loopbackPorts) {
-                if (port == null || port <= 0) {
-                    continue;
-                }
-                String response = ProcfsUtils.probeDbus(port, PROBE_TIMEOUT_MS);
-                if (response.toUpperCase().startsWith("REJECT")) {
-                    addStrong(details, score, "dbus_reject:" + port);
-                }
-            }
-        } catch (Exception e) {
-            CLog.e("D-Bus probe failed", e);
-        }
 
         try {
             List<Integer> pids = ProcfsUtils.findPidsByNameFragments("frida-server", "frida_helper");
@@ -161,22 +150,29 @@ public class HookFrameworkDetector extends BaseDetector {
         }
     }
 
+    private String matchingThreadMarker(String threadName) {
+        if (threadName.contains("gum-js-loop")) return "gum-js-loop";
+        if (threadName.contains("frida")) return "frida";
+        return "gmain";
+    }
+
     private void checkNativeHooks(Set<String> details, SignalScore score) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return;
+        }
         try {
-            String nativeEvidence = NativeCollectorBridge.nativeGetHookEvidence();
+            String nativeEvidence = NativeCollectorBridge.getHookEvidence();
             if (nativeEvidence != null && !nativeEvidence.isEmpty()) {
                 for (String item : nativeEvidence.split(",")) {
                     String token = item.trim();
                     if (token.isEmpty()) {
                         continue;
                     }
-                    if (token.startsWith("anon_exec:")
-                            || token.startsWith("trampoline:")
-                            || token.startsWith("sigtrap:")
-                            || token.startsWith("maps:frida")
+                    if (token.startsWith("maps:frida")
                             || token.startsWith("maps:gadget")) {
                         addStrong(details, score, token);
-                    } else if (token.startsWith("thread:")
+                    } else if (token.startsWith("anon_exec:")
+                            || token.startsWith("thread:")
                             || token.startsWith("maps:xposed")
                             || token.startsWith("maps:substrate")) {
                         addMedium(details, score, token);
@@ -185,7 +181,7 @@ public class HookFrameworkDetector extends BaseDetector {
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             CLog.e("Native hook check failed", e);
         }
     }

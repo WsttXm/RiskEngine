@@ -7,6 +7,7 @@ import android.provider.Settings;
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -22,7 +23,9 @@ public final class AdbInspector {
         private boolean wifiEnabled;
         private int tcpPort = -1;
 
-        public List<String> getDetails() { return details; }
+        public List<String> getDetails() {
+            return Collections.unmodifiableList(new ArrayList<>(details));
+        }
         public String getSummary() { return summary; }
         public boolean isEnabled() { return enabled; }
         public boolean isWifiEnabled() { return wifiEnabled; }
@@ -47,32 +50,25 @@ public final class AdbInspector {
         }
 
         String tcpPortProp = firstNonBlank(
-                NativeCollectorBridge.nativeGetSystemProperty("service.adb.tcp.port"),
-                NativeCollectorBridge.nativeGetSystemProperty("persist.adb.tcp.port"),
-                ShellExecutor.execute("getprop service.adb.tcp.port"),
-                ShellExecutor.execute("getprop persist.adb.tcp.port")
+                getNativeProperty("service.adb.tcp.port"),
+                getNativeProperty("persist.adb.tcp.port")
         );
+        if (tcpPortProp.isEmpty()) {
+            tcpPortProp = firstNonBlank(
+                    ShellExecutor.execute("getprop service.adb.tcp.port"),
+                    ShellExecutor.execute("getprop persist.adb.tcp.port"));
+        }
         Integer port = parsePort(tcpPortProp);
         if (port != null && port > 0) {
             snapshot.enabled = true;
+            snapshot.wifiEnabled = true;
             snapshot.tcpPort = port;
             snapshot.details.add("adb_tcp_port:" + port);
-            if (port != 5555) {
-                snapshot.wifiEnabled = true;
-            }
         }
 
-        Set<Integer> loopbackPorts = ProcfsUtils.findLoopbackListeningPorts();
-        if (loopbackPorts.contains(5555)) {
-            snapshot.enabled = true;
-            snapshot.wifiEnabled = true;
-            snapshot.details.add("tcp_listen:5555");
-        }
-        if (snapshot.tcpPort > 0 && loopbackPorts.contains(snapshot.tcpPort)) {
-            snapshot.details.add("tcp_listen:" + snapshot.tcpPort);
-        }
-
-        List<Integer> adbdPids = ProcfsUtils.findPidsByNameFragments("adbd");
+        // A listening port alone is not proof of ADB: any app can bind 5555.
+        // Only correlate sockets that are owned by an actual adbd process.
+        List<Integer> adbdPids = ProcfsUtils.findPidsByProcessNames("adbd");
         if (!adbdPids.isEmpty()) {
             snapshot.enabled = true;
             snapshot.details.add("adbd_process:" + adbdPids.get(0));
@@ -80,17 +76,20 @@ public final class AdbInspector {
                 Set<Integer> pidPorts = ProcfsUtils.findPidLoopbackListeningPorts(pid);
                 for (Integer pidPort : pidPorts) {
                     snapshot.details.add("adbd_pid_port:" + pidPort);
-                    if (pidPort == 5555) {
-                        snapshot.wifiEnabled = true;
-                    }
+                    snapshot.wifiEnabled = true;
                 }
             }
         }
 
-        String usbState = firstNonBlank(
-                ProcfsUtils.readFirstLine("/sys/class/android_usb/android0/state"),
-                ProcfsUtils.readFirstLine("/sys/class/usb_composite/adb/state")
-        );
+        String usbFunctions = ProcfsUtils.readFirstLine(
+                "/sys/class/android_usb/android0/functions");
+        if (containsAdbFunction(usbFunctions)) {
+            snapshot.enabled = true;
+            snapshot.details.add("usb_function:adb");
+        }
+
+        String usbState = ProcfsUtils.readFirstLine(
+                "/sys/class/usb_composite/adb/state");
         if (!usbState.isEmpty() && isConfiguredState(usbState)) {
             snapshot.enabled = true;
             snapshot.details.add("usb_state:" + usbState.toLowerCase(Locale.ROOT));
@@ -107,6 +106,29 @@ public final class AdbInspector {
         return lower.contains("configured")
                 || lower.contains("connected")
                 || "1".equals(lower);
+    }
+
+    private static boolean containsAdbFunction(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        for (String function : value.toLowerCase(Locale.ROOT).split(",")) {
+            if ("adb".equals(function.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String getNativeProperty(String name) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return "";
+        }
+        try {
+            return NativeCollectorBridge.getSystemProperty(name);
+        } catch (Exception | LinkageError e) {
+            return "";
+        }
     }
 
     private static Integer parsePort(String value) {

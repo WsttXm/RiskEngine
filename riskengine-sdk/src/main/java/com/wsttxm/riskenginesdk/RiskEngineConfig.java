@@ -1,32 +1,68 @@
 package com.wsttxm.riskenginesdk;
 
-public class RiskEngineConfig {
-    private boolean enableRoot = true;
-    private boolean enableHookDetection = true;
-    private boolean enableEmulatorDetection = true;
-    private boolean enableSandboxDetection = true;
-    private boolean enableDebugDetection = true;
-    private boolean enableCloudPhoneDetection = true;
-    private boolean enableCustomRomDetection = true;
-    private boolean debugLog = false;
-    private long collectTimeoutMs = 10000;
+/** Immutable configuration for a RiskEngine instance. */
+public final class RiskEngineConfig {
+    private static final long MAX_COLLECT_TIMEOUT_MS = 120_000;
 
-    private RiskEngineConfig() {}
+    private final boolean enableRoot;
+    private final boolean enableHookDetection;
+    private final boolean enableEmulatorDetection;
+    private final boolean enableSandboxDetection;
+    private final boolean enableDebugDetection;
+    private final boolean enableCloudPhoneDetection;
+    private final boolean enableCustomRomDetection;
+    private final boolean enableAdbDetection;
+    private final boolean debugLog;
+    private final long collectTimeoutMs;
 
-    public static class Builder {
-        private final RiskEngineConfig config = new RiskEngineConfig();
+    private RiskEngineConfig(Builder builder) {
+        this.enableRoot = builder.enableRoot;
+        this.enableHookDetection = builder.enableHookDetection;
+        this.enableEmulatorDetection = builder.enableEmulatorDetection;
+        this.enableSandboxDetection = builder.enableSandboxDetection;
+        this.enableDebugDetection = builder.enableDebugDetection;
+        this.enableCloudPhoneDetection = builder.enableCloudPhoneDetection;
+        this.enableCustomRomDetection = builder.enableCustomRomDetection;
+        this.enableAdbDetection = builder.enableAdbDetection;
+        this.debugLog = builder.debugLog;
+        this.collectTimeoutMs = builder.collectTimeoutMs;
+    }
 
-        public Builder enableRoot(boolean v) { config.enableRoot = v; return this; }
-        public Builder enableHookDetection(boolean v) { config.enableHookDetection = v; return this; }
-        public Builder enableEmulatorDetection(boolean v) { config.enableEmulatorDetection = v; return this; }
-        public Builder enableSandboxDetection(boolean v) { config.enableSandboxDetection = v; return this; }
-        public Builder enableDebugDetection(boolean v) { config.enableDebugDetection = v; return this; }
-        public Builder enableCloudPhoneDetection(boolean v) { config.enableCloudPhoneDetection = v; return this; }
-        public Builder enableCustomRomDetection(boolean v) { config.enableCustomRomDetection = v; return this; }
-        public Builder debugLog(boolean v) { config.debugLog = v; return this; }
-        public Builder collectTimeout(long ms) { config.collectTimeoutMs = ms; return this; }
+    public static final class Builder {
+        private boolean enableRoot = true;
+        private boolean enableHookDetection = true;
+        private boolean enableEmulatorDetection = true;
+        private boolean enableSandboxDetection = true;
+        private boolean enableDebugDetection = true;
+        private boolean enableCloudPhoneDetection = true;
+        private boolean enableCustomRomDetection = true;
+        private boolean enableAdbDetection = true;
+        private boolean debugLog;
+        private long collectTimeoutMs = 10_000;
 
-        public RiskEngineConfig build() { return config; }
+        public Builder enableRoot(boolean value) { enableRoot = value; return this; }
+        public Builder enableHookDetection(boolean value) { enableHookDetection = value; return this; }
+        public Builder enableEmulatorDetection(boolean value) { enableEmulatorDetection = value; return this; }
+        public Builder enableSandboxDetection(boolean value) { enableSandboxDetection = value; return this; }
+        public Builder enableDebugDetection(boolean value) { enableDebugDetection = value; return this; }
+        public Builder enableCloudPhoneDetection(boolean value) { enableCloudPhoneDetection = value; return this; }
+        public Builder enableCustomRomDetection(boolean value) { enableCustomRomDetection = value; return this; }
+        public Builder enableAdbDetection(boolean value) { enableAdbDetection = value; return this; }
+        public Builder debugLog(boolean value) { debugLog = value; return this; }
+
+        public Builder collectTimeout(long timeoutMs) {
+            if (timeoutMs <= 0 || timeoutMs > MAX_COLLECT_TIMEOUT_MS) {
+                throw new IllegalArgumentException(
+                        "collectTimeout must be between 1 and "
+                                + MAX_COLLECT_TIMEOUT_MS + " milliseconds");
+            }
+            collectTimeoutMs = timeoutMs;
+            return this;
+        }
+
+        public RiskEngineConfig build() {
+            return new RiskEngineConfig(this);
+        }
     }
 
     public boolean isEnableRoot() { return enableRoot; }
@@ -36,6 +72,7 @@ public class RiskEngineConfig {
     public boolean isEnableDebugDetection() { return enableDebugDetection; }
     public boolean isEnableCloudPhoneDetection() { return enableCloudPhoneDetection; }
     public boolean isEnableCustomRomDetection() { return enableCustomRomDetection; }
+    public boolean isEnableAdbDetection() { return enableAdbDetection; }
     public boolean isDebugLog() { return debugLog; }
     public long getCollectTimeoutMs() { return collectTimeoutMs; }
 }

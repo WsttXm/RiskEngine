@@ -14,8 +14,26 @@ import static org.junit.Assert.*;
 public class RiskEngineIntegrationTest {
 
     @Test
-    public void sdkInitializesSuccessfully() {
+    public void sdkInitializesAndCollectsSuccessfully() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertNotNull(context);
+        RiskEngineConfig config = new RiskEngineConfig.Builder()
+                .enableRoot(false)
+                .enableHookDetection(false)
+                .enableAdbDetection(false)
+                .enableEmulatorDetection(false)
+                .enableSandboxDetection(false)
+                .enableDebugDetection(false)
+                .enableCloudPhoneDetection(false)
+                .enableCustomRomDetection(false)
+                .collectTimeout(5_000)
+                .build();
+        try {
+            RiskEngine.init(context, config);
+            assertTrue(RiskEngine.isInitialized());
+            assertNotNull(RiskEngine.collectSync());
+        } finally {
+            RiskEngine.shutdown();
+        }
     }
 }

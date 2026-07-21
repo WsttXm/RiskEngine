@@ -22,9 +22,9 @@ public class RiskScoringModelTest {
                         new DetectionResult("adb", RiskLevel.LOW, DetectionStatus.WARNING,
                                 2, 10, true, List.of("settings_adb_enabled"), "settings_adb_enabled"),
                         new DetectionResult("hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
-                                8, 10, false, List.of("dbus_reject:45678"), "dbus_reject:45678"),
+                                8, 10, false, List.of("frida_pid_port:27042"), "frida_pid_port:27042"),
                         new DetectionResult("emulator", RiskLevel.MEDIUM, DetectionStatus.WARNING,
-                                4, 10, false, List.of("cmdline_mismatch:virtual"), "cmdline_mismatch:virtual")
+                                4, 10, false, List.of("cmdline_mismatch"), "cmdline_mismatch")
                 )
         );
 
@@ -46,6 +46,26 @@ public class RiskScoringModelTest {
 
         assertEquals(0, report.getRiskScore());
         assertEquals(1, report.getWarningCount());
+        assertEquals(RiskLevel.LOW, report.getOverallRiskLevel());
+    }
+
+    @Test
+    public void multipleWarnOnlySignalsRemainLowRisk() {
+        RiskReport report = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(
+                        new DetectionResult("adb", RiskLevel.LOW, DetectionStatus.WARNING,
+                                2, 10, true, List.of("settings_adb_enabled"),
+                                "settings_adb_enabled"),
+                        new DetectionResult("custom_rom", RiskLevel.LOW,
+                                DetectionStatus.WARNING, 1, 10, true,
+                                List.of("community_rom:LineageOS"),
+                                "community_rom:LineageOS")
+                )
+        );
+
+        assertEquals(2, report.getWarningCount());
+        assertEquals(0, report.getRiskScore());
         assertEquals(RiskLevel.LOW, report.getOverallRiskLevel());
     }
 }

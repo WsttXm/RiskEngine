@@ -10,12 +10,15 @@ import com.wsttxm.riskenginesdk.util.CLog;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 public class DataAggregator {
 
     public RiskReport aggregate(List<CollectorResult> collectorResults,
                                 List<DetectionResult> detectionResults) {
+        Objects.requireNonNull(collectorResults, "collectorResults must not be null");
+        Objects.requireNonNull(detectionResults, "detectionResults must not be null");
         DeviceFingerprint fingerprint = new DeviceFingerprint();
 
         for (CollectorResult cr : collectorResults) {
@@ -24,15 +27,16 @@ public class DataAggregator {
 
         // Add inconsistency detections
         List<DetectionResult> allDetections = new ArrayList<>(detectionResults);
+        addCollectionCoverageSignal(collectorResults, allDetections);
         if (fingerprint.hasInconsistency()) {
             List<String> inconsistent = fingerprint.getInconsistentFields();
             List<String> details = List.of("inconsistent_fields:" + String.join(",", inconsistent));
             String evidence = details.get(0);
             allDetections.add(new DetectionResult(
                     "multi_source_validation",
-                    RiskLevel.HIGH,
-                    DetectionStatus.DANGER,
-                    6,
+                    RiskLevel.MEDIUM,
+                    DetectionStatus.WARNING,
+                    4,
                     10,
                     false,
                     details,
@@ -43,6 +47,18 @@ public class DataAggregator {
 
         addSyntheticFingerprintSignals(fingerprint, allDetections);
         return new RiskReport(fingerprint, allDetections);
+    }
+
+    private void addCollectionCoverageSignal(List<CollectorResult> collectorResults,
+                                             List<DetectionResult> detections) {
+        for (CollectorResult result : collectorResults) {
+            if (result.getStatus() != CollectorResult.Status.SUCCESS) {
+                detections.add(DetectionResult.unavailable(
+                        "collector:" + result.getFieldName(),
+                        result.getStatus() + (result.getError() == null
+                                ? "" : ":" + result.getError())));
+            }
+        }
     }
 
     private void addSyntheticFingerprintSignals(DeviceFingerprint fingerprint,
@@ -65,9 +81,8 @@ public class DataAggregator {
             }
             List<String> details = detection.getDetails().stream()
                     .filter(detail -> detail.startsWith("anon_exec:")
-                            || detail.startsWith("trampoline:")
                             || detail.startsWith("maps:")
-                            || detail.startsWith("dbus_reject:"))
+                            || detail.startsWith("frida_pid_port:"))
                     .collect(Collectors.toList());
             if (details.isEmpty()) {
                 return null;
@@ -90,7 +105,7 @@ public class DataAggregator {
         CollectorResult result = new CollectorResult("runtime_integrity_score_inputs");
         int dangerCount = 0;
         int warningCount = 0;
-        int score = 0;
+        long score = 0;
         List<String> statusMap = new ArrayList<>();
         for (DetectionResult detection : detections) {
             if (detection.getStatus() == DetectionStatus.DANGER) {

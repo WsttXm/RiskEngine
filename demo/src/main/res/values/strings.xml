@@ -1,3 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RiskEngineSDK</string>
+    <string name="app_name">RiskEngine</string>
+    <string name="toolbar_subtitle">本地安全检测</string>
+    <string name="screen_title">设备风险概览</string>
+    <string name="screen_subtitle">一次检测，了解当前运行环境与数据采集覆盖情况。</string>
+    <string name="privacy_title">隐私优先 · Privacy First</string>
+    <string name="privacy_description">数据仅在本机处理，无需 Android 权限；设备标识会先转换为应用级哈希再展示。</string>
+    <string name="status_label">综合风险</string>
+    <string name="status_ready">准备就绪</string>
+    <string name="status_ready_code">READY</string>
+    <string name="status_ready_description">轻触下方按钮，开始一次仅在本机执行的安全检测。</string>
+    <string name="status_analyzing">检测中</string>
+    <string name="status_analyzing_code">ANALYZING</string>
+    <string name="status_analyzing_description">正在并行检查设备环境与采集覆盖，请稍候。</string>
+    <string name="status_error_code">ERROR</string>
+    <string name="score_label">风险分</string>
+    <string name="coverage_label">覆盖率</string>
+    <string name="coverage_percent">%1$d%%</string>
+    <string name="elapsed_label">耗时</string>
+    <string name="score_idle_description">尚未生成检测报告</string>
+    <string name="score_calculating_description">正在计算风险分与检测覆盖率</string>
+    <string name="score_error_description">本次结果未生成，可安全重试</string>
+    <string name="detections_title">环境检测</string>
+    <string name="detections_subtitle">风险项优先展示；轻触条目可查看英文技术证据。</string>
+    <string name="fingerprint_title">数据采集</string>
+    <string name="fingerprint_subtitle">仅展示非敏感属性或应用级哈希；轻触查看来源详情。</string>
+    <string name="collect_action">开始安全检测</string>
+    <string name="collect_again_action">重新检测</string>
+    <string name="collecting_action">正在检测…</string>
+    <string name="retry_action">重试检测</string>
+    <string name="bottom_helper">本次结果仅用于本机风险判断，不会自动上传。</string>
+    <string name="inconsistent_title">数据一致性提醒</string>
+    <string name="inconsistent_subtitle">同一字段的不同来源返回了不同结果，请结合业务场景复核。</string>
+    <string name="collecting_toast">检测仍在进行，请稍候</string>
+    <string name="collection_failed">检测未完成</string>
+    <string name="collection_failed_description">发生错误：%1$s</string>
+    <string name="unknown_error">未知错误</string>
+    <string name="expand_details">展开详情</string>
+    <string name="collapse_details">收起详情</string>
 </resources>

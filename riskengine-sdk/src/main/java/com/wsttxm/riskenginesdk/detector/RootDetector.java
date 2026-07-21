@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.ShellExecutor;
@@ -38,19 +39,20 @@ public class RootDetector extends BaseDetector {
 
     @Override
     protected DetectionResult detect() {
-        List<String> evidence = new ArrayList<>();
+        List<String> strongEvidence = new ArrayList<>();
+        List<String> weakEvidence = new ArrayList<>();
 
         // Check su binary paths
         for (String path : SU_PATHS) {
             if (new File(path).exists()) {
-                evidence.add("su_found:" + path);
+                strongEvidence.add("su_found:" + path);
             }
         }
 
         // Check Magisk paths
         for (String path : MAGISK_PATHS) {
             if (new File(path).exists()) {
-                evidence.add("magisk_found:" + path);
+                strongEvidence.add("magisk_found:" + path);
             }
         }
 
@@ -58,7 +60,7 @@ public class RootDetector extends BaseDetector {
         try {
             String enforcing = ShellExecutor.execute("getenforce");
             if (enforcing != null && enforcing.trim().equalsIgnoreCase("Permissive")) {
-                evidence.add("selinux_permissive");
+                weakEvidence.add("selinux_permissive");
             }
         } catch (Exception e) {
             CLog.e("SELinux check failed", e);
@@ -66,10 +68,11 @@ public class RootDetector extends BaseDetector {
 
         // Native root check
         try {
-            if (NativeCollectorBridge.nativeCheckRoot()) {
-                String nativeEvidence = NativeCollectorBridge.nativeGetRootEvidence();
+            if (NativeCollectorBridge.isNativeAvailable()
+                    && NativeCollectorBridge.checkRoot()) {
+                String nativeEvidence = NativeCollectorBridge.getRootEvidence();
                 if (nativeEvidence != null && !nativeEvidence.isEmpty()) {
-                    evidence.add("native:" + nativeEvidence);
+                    strongEvidence.add("native:" + nativeEvidence);
                 }
             }
         } catch (Exception e) {
@@ -79,11 +82,18 @@ public class RootDetector extends BaseDetector {
         // Check build tags
         String tags = android.os.Build.TAGS;
         if (tags != null && tags.contains("test-keys")) {
-            evidence.add("test_keys");
+            weakEvidence.add("test_keys");
         }
 
-        if (!evidence.isEmpty()) {
-            return risk(RiskLevel.HIGH, String.join("; ", evidence));
+        List<String> allEvidence = new ArrayList<>(strongEvidence);
+        allEvidence.addAll(weakEvidence);
+        if (!strongEvidence.isEmpty()) {
+            return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
+                    allEvidence, String.join("; ", allEvidence));
+        }
+        if (!weakEvidence.isEmpty()) {
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
+                    weakEvidence, String.join("; ", weakEvidence));
         }
         return safe();
     }

@@ -1,32 +1,36 @@
 #include "riskengine_jni.h"
-#include "antitamper/custom_jni_register.h"
-#include "antitamper/memory_crc_checker.h"
-#include "antitamper/maps_monitor.h"
+#include "util/custom_jni_register.h"
 #include "collector/drm_collector.h"
 #include "collector/boot_id_collector.h"
 #include "collector/system_property_collector.h"
 #include "collector/cpu_info_collector.h"
 #include "collector/disk_size_collector.h"
-#include "collector/mac_netlink_collector.h"
 #include "collector/kernel_info_collector.h"
 #include "detector/native_root_detector.h"
 #include "detector/native_hook_detector.h"
 #include "detector/native_emulator_detector.h"
 #include "detector/native_debug_detector.h"
-#include "detector/native_signature_checker.h"
-#include "detector/seccomp_arch_checker.h"
+#include "detector/runtime_arch_checker.h"
 
-#include <android/log.h>
-#include <cstdint>
+#include <algorithm>
+#include <array>
 #include <string>
-
-#define LOG_TAG "RiskEngine:JNI"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-
-static JavaVM *g_jvm = nullptr;
 
 static jstring toJString(JNIEnv *env, const std::string &str) {
     return env->NewStringUTF(str.c_str());
+}
+
+static bool isAllowedSystemProperty(const std::string &name) {
+    static constexpr std::array<const char *, 18> allowed = {
+            "service.adb.tcp.port", "persist.adb.tcp.port",
+            "ro.build.fingerprint", "ro.build.display.id", "ro.product.model",
+            "ro.product.brand", "ro.product.device", "ro.product.manufacturer",
+            "ro.hardware", "ro.board.platform", "persist.sys.timezone",
+            "gsm.version.baseband", "ro.lineage.version", "ro.cm.version",
+            "ro.mokee.version", "ro.rr.version", "ro.pixelexperience.version",
+            "ro.modversion"
+    };
+    return std::find(allowed.begin(), allowed.end(), name) != allowed.end();
 }
 
 // ==================== Collector JNI Methods ====================
@@ -40,28 +44,16 @@ static jstring jni_getBootId(JNIEnv *env, jclass) {
 }
 
 static jstring jni_getSystemProperty(JNIEnv *env, jclass, jstring jname) {
+    if (jname == nullptr) return toJString(env, "");
     const char *name = env->GetStringUTFChars(jname, nullptr);
-    std::string value = get_system_property(name);
+    if (name == nullptr) return toJString(env, "");
+    std::string propertyName(name);
     env->ReleaseStringUTFChars(jname, name);
-    return toJString(env, value);
-}
-
-static jstring jni_getAllSystemProperties(JNIEnv *env, jclass) {
-    // Return a summary of key properties
-    std::string result;
-    const char *props[] = {
-            "ro.build.fingerprint", "ro.product.model", "ro.product.brand",
-            "ro.product.device", "ro.product.manufacturer", "ro.hardware",
-            "ro.serialno", "ro.boot.serialno", nullptr
-    };
-    for (int i = 0; props[i]; i++) {
-        std::string val = get_system_property(props[i]);
-        if (!val.empty()) {
-            if (!result.empty()) result += "|";
-            result += std::string(props[i]) + "=" + val;
-        }
+    if (!isAllowedSystemProperty(propertyName)) {
+        return toJString(env, "");
     }
-    return toJString(env, result);
+    std::string value = get_system_property(propertyName.c_str());
+    return toJString(env, value);
 }
 
 static jstring jni_getCpuInfo(JNIEnv *env, jclass) {
@@ -69,14 +61,12 @@ static jstring jni_getCpuInfo(JNIEnv *env, jclass) {
 }
 
 static jlong jni_getDiskSize(JNIEnv *env, jclass, jstring jpath) {
+    if (jpath == nullptr) return static_cast<jlong>(-1);
     const char *path = env->GetStringUTFChars(jpath, nullptr);
+    if (path == nullptr) return static_cast<jlong>(-1);
     long long size = get_disk_total_size(path);
     env->ReleaseStringUTFChars(jpath, path);
     return (jlong) size;
-}
-
-static jstring jni_getMacAddress(JNIEnv *env, jclass) {
-    return toJString(env, get_mac_via_netlink());
 }
 
 static jstring jni_getKernelInfo(JNIEnv *env, jclass) {
@@ -93,10 +83,6 @@ static jstring jni_getRootEvidence(JNIEnv *env, jclass) {
     return toJString(env, native_get_root_evidence());
 }
 
-static jboolean jni_checkHooks(JNIEnv *, jclass) {
-    return (jboolean) native_check_hooks();
-}
-
 static jstring jni_getHookEvidence(JNIEnv *env, jclass) {
     return toJString(env, native_get_hook_evidence());
 }
@@ -109,61 +95,12 @@ static jint jni_getThermalZoneCount(JNIEnv *, jclass) {
     return (jint) get_thermal_zone_count();
 }
 
-static jstring jni_checkSeccompArch(JNIEnv *env, jclass) {
-    return toJString(env, check_arch_by_seccomp());
+static jstring jni_getRuntimeArch(JNIEnv *env, jclass) {
+    return toJString(env, get_runtime_arch());
 }
 
 static jint jni_getTracerPid(JNIEnv *, jclass) {
     return (jint) get_tracer_pid();
-}
-
-static jboolean jni_checkPtrace(JNIEnv *, jclass) {
-    return (jboolean) check_ptrace();
-}
-
-static jstring jni_inspectMethodEntryPoint(JNIEnv *env, jclass, jobject executable) {
-    void *artMethodPointer = nullptr;
-
-    if (executable != nullptr) {
-        jclass executableClass = env->GetObjectClass(executable);
-        if (executableClass != nullptr) {
-            jfieldID artMethodField = env->GetFieldID(executableClass, "artMethod", "J");
-            if (artMethodField != nullptr) {
-                jlong artMethod = env->GetLongField(executable, artMethodField);
-                if (artMethod > 0) {
-                    artMethodPointer = reinterpret_cast<void *>(static_cast<uintptr_t>(artMethod));
-                }
-            } else if (env->ExceptionCheck()) {
-                env->ExceptionClear();
-            }
-        } else if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-        }
-    }
-
-    if (artMethodPointer == nullptr) {
-        jmethodID methodId = env->FromReflectedMethod(executable);
-        artMethodPointer = reinterpret_cast<void *>(methodId);
-    }
-
-    std::string result = native_inspect_method_entry_point(artMethodPointer);
-    return toJString(env, result);
-}
-
-// ==================== Anti-Tamper JNI Methods ====================
-
-static jboolean jni_initMemoryCrc(JNIEnv *, jclass) {
-    // Get path to our own .so from /proc/self/maps
-    // For simplicity, use a known path pattern
-    return (jboolean) init_memory_crc("libriskengine.so");
-}
-
-static jboolean jni_checkMemoryCrc(JNIEnv *, jclass) {
-    return (jboolean) check_memory_crc();
-}
-
-static jboolean jni_checkMapsRedirect(JNIEnv *, jclass) {
-    return (jboolean) check_maps_redirect();
 }
 
 // ==================== Registration ====================
@@ -175,33 +112,22 @@ static JNINativeMethod methods[] = {
         // Collectors
         {"nativeGetDrmId",              "()Ljava/lang/String;",                  (void *) jni_getDrmId},
         {"nativeGetBootId",             "()Ljava/lang/String;",                  (void *) jni_getBootId},
-        {"nativeGetSystemProperty",     "(Ljava/lang/String;)Ljava/lang/String;", (void *) jni_getSystemProperty},
-        {"nativeGetAllSystemProperties","()Ljava/lang/String;",                  (void *) jni_getAllSystemProperties},
+        {"nativeGetSystemPropertyRaw",  "(Ljava/lang/String;)Ljava/lang/String;", (void *) jni_getSystemProperty},
         {"nativeGetCpuInfo",            "()Ljava/lang/String;",                  (void *) jni_getCpuInfo},
         {"nativeGetDiskSize",           "(Ljava/lang/String;)J",                 (void *) jni_getDiskSize},
-        {"nativeGetMacAddress",         "()Ljava/lang/String;",                  (void *) jni_getMacAddress},
         {"nativeGetKernelInfo",         "()Ljava/lang/String;",                  (void *) jni_getKernelInfo},
 
         // Detectors
-        {"nativeCheckRoot",             "()Z",                                   (void *) jni_checkRoot},
-        {"nativeGetRootEvidence",       "()Ljava/lang/String;",                  (void *) jni_getRootEvidence},
-        {"nativeCheckHooks",            "()Z",                                   (void *) jni_checkHooks},
-        {"nativeGetHookEvidence",       "()Ljava/lang/String;",                  (void *) jni_getHookEvidence},
-        {"nativeCheckEmulatorFiles",    "()Ljava/lang/String;",                  (void *) jni_checkEmulatorFiles},
-        {"nativeGetThermalZoneCount",   "()I",                                   (void *) jni_getThermalZoneCount},
-        {"nativeCheckSeccompArch",      "()Ljava/lang/String;",                  (void *) jni_checkSeccompArch},
-        {"nativeGetTracerPid",          "()I",                                   (void *) jni_getTracerPid},
-        {"nativeCheckPtrace",           "()Z",                                   (void *) jni_checkPtrace},
-        {"nativeInspectMethodEntryPoint","(Ljava/lang/reflect/Executable;)Ljava/lang/String;", (void *) jni_inspectMethodEntryPoint},
-
-        // Anti-tamper
-        {"nativeInitMemoryCrc",         "()Z",                                   (void *) jni_initMemoryCrc},
-        {"nativeCheckMemoryCrc",        "()Z",                                   (void *) jni_checkMemoryCrc},
-        {"nativeCheckMapsRedirect",     "()Z",                                   (void *) jni_checkMapsRedirect},
+        {"nativeCheckRootRaw",          "()Z",                                   (void *) jni_checkRoot},
+        {"nativeGetRootEvidenceRaw",    "()Ljava/lang/String;",                  (void *) jni_getRootEvidence},
+        {"nativeGetHookEvidenceRaw",    "()Ljava/lang/String;",                  (void *) jni_getHookEvidence},
+        {"nativeCheckEmulatorFilesRaw", "()Ljava/lang/String;",                  (void *) jni_checkEmulatorFiles},
+        {"nativeGetThermalZoneCountRaw","()I",                                   (void *) jni_getThermalZoneCount},
+        {"nativeGetRuntimeArchRaw",     "()Ljava/lang/String;",                  (void *) jni_getRuntimeArch},
+        {"nativeGetTracerPidRaw",       "()I",                                   (void *) jni_getTracerPid},
 };
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
-    g_jvm = vm;
     JNIEnv *env;
     if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) {
         return JNI_ERR;
@@ -209,10 +135,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
 
     int numMethods = sizeof(methods) / sizeof(methods[0]);
     if (!custom_register_natives(env, BRIDGE_CLASS, methods, numMethods)) {
-        LOGD("Failed to register native methods");
         return JNI_ERR;
     }
 
-    LOGD("RiskEngine native library loaded successfully");
     return JNI_VERSION_1_6;
 }

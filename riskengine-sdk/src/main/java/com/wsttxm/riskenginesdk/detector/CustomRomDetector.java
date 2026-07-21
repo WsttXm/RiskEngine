@@ -4,26 +4,22 @@ import android.content.Context;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
-import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.ShellExecutor;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class CustomRomDetector extends BaseDetector {
-
-    private static final String[][] ROM_PROPS = {
-            {"ro.miui.ui.version.name", "MIUI"},
-            {"ro.build.version.oplusrom", "ColorOS"},
-            {"ro.build.display.ftv", "Flyme"},
-            {"ro.vivo.os.version", "FuntouchOS"},
-            {"ro.build.hw_emui_api_level", "EMUI"},
+    // Stock OEM Android distributions are intentionally excluded.
+    private static final String[][] COMMUNITY_ROM_PROPS = {
             {"ro.lineage.version", "LineageOS"},
             {"ro.cm.version", "CyanogenMod"},
             {"ro.mokee.version", "MoKee"},
             {"ro.rr.version", "ResurrectionRemix"},
             {"ro.pixelexperience.version", "PixelExperience"},
+            {"ro.modversion", "ModVersion"}
     };
 
     public CustomRomDetector(Context context) {
@@ -38,36 +34,35 @@ public class CustomRomDetector extends BaseDetector {
     @Override
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
-
-        // Check ROM-specific properties
-        for (String[] romProp : ROM_PROPS) {
-            try {
-                String value = NativeCollectorBridge.nativeGetSystemProperty(romProp[0]);
-                if (value != null && !value.isEmpty()) {
-                    evidence.add("rom_detected:" + romProp[1] + "=" + value);
-                }
-            } catch (Exception ignored) {}
+        if (readProperty("ro.build.fingerprint").isEmpty()) {
+            return unavailable("system_properties_unavailable");
         }
-
-        // Check for custom ROM indicators
-        try {
-            String prop = NativeCollectorBridge.nativeGetSystemProperty("ro.modversion");
-            if (prop != null && !prop.isEmpty()) {
-                evidence.add("modversion:" + prop);
+        for (String[] romProperty : COMMUNITY_ROM_PROPS) {
+            String value = readProperty(romProperty[0]);
+            if (!value.isEmpty()) {
+                evidence.add("community_rom:" + romProperty[1] + "=" + value);
             }
-        } catch (Exception ignored) {}
-
-        // LineageOS specific
-        try {
-            String lineage = ShellExecutor.execute("getprop ro.lineage.version");
-            if (lineage != null && !lineage.trim().isEmpty()) {
-                evidence.add("lineageos:" + lineage.trim());
-            }
-        } catch (Exception ignored) {}
+        }
 
         if (!evidence.isEmpty()) {
-            return risk(RiskLevel.LOW, String.join("; ", evidence));
+            // A community ROM is context, not proof of compromise/root.
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
+                    evidence, String.join("; ", evidence));
         }
         return safe();
+    }
+
+    private String readProperty(String name) {
+        if (NativeCollectorBridge.isNativeAvailable()) {
+            try {
+                String value = NativeCollectorBridge.getSystemProperty(name);
+                if (value != null && !value.isBlank()) {
+                    return value.trim();
+                }
+            } catch (Exception | LinkageError ignored) {
+                // Fall through to the bounded shell fallback.
+            }
+        }
+        return ShellExecutor.execute("getprop " + name).trim();
     }
 }

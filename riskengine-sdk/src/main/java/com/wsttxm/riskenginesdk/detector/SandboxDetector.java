@@ -1,17 +1,16 @@
 package com.wsttxm.riskenginesdk.detector;
 
-import android.app.ActivityManager;
 import android.content.Context;
 
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.CLog;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class SandboxDetector extends BaseDetector {
 
@@ -28,71 +27,62 @@ public class SandboxDetector extends BaseDetector {
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
 
-        checkProcessCount(evidence);
-        checkFdCount(evidence);
-        checkMultiUser(evidence);
+        boolean fdInspectionAvailable = checkFdCount(evidence);
 
         if (!evidence.isEmpty()) {
-            return risk(RiskLevel.HIGH, String.join("; ", evidence));
+            // A virtualized path is useful context, but one path alone is not
+            // proof that the current app is executing inside a sandbox.
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
+                    evidence, String.join("; ", evidence));
+        }
+        if (!fdInspectionAvailable) {
+            return unavailable("procfs_fd_unavailable");
         }
         return safe();
     }
 
-    private void checkProcessCount(List<String> evidence) {
-        try {
-            File procDir = new File("/proc");
-            File[] files = procDir.listFiles();
-            int processCount = 0;
-            if (files != null) {
-                for (File f : files) {
-                    if (f.isDirectory()) {
-                        try {
-                            Integer.parseInt(f.getName());
-                            processCount++;
-                        } catch (NumberFormatException ignored) {}
-                    }
-                }
-            }
-            // Sandbox environments typically have very few processes
-            if (processCount > 0 && processCount < 50) {
-                evidence.add("low_process_count:" + processCount);
-            }
-        } catch (Exception e) {
-            CLog.e("Process count check failed", e);
-        }
-    }
-
-    private void checkFdCount(List<String> evidence) {
+    private boolean checkFdCount(List<String> evidence) {
         try {
             File fdDir = new File("/proc/self/fd");
             File[] fds = fdDir.listFiles();
-            if (fds != null) {
-                for (File fd : fds) {
-                    try {
-                        String link = fd.getCanonicalPath();
-                        // Check for suspicious fd targets
-                        if (link.contains("virtual-app") || link.contains("sandbox") ||
-                                link.contains("parallel") || link.contains("dual")) {
-                            evidence.add("suspicious_fd:" + link);
-                            break;
-                        }
-                    } catch (Exception ignored) {}
+            if (fds == null) {
+                return false;
+            }
+            for (File fd : fds) {
+                try {
+                    String marker = findVirtualizationMarker(
+                            fd.getCanonicalPath().toLowerCase(Locale.ROOT));
+                    if (marker != null) {
+                        evidence.add("virtualized_fd:" + marker);
+                        break;
+                    }
+                } catch (Exception ignored) {
+                    // Descriptors can disappear while being inspected.
                 }
             }
+            return true;
         } catch (Exception e) {
             CLog.e("FD check failed", e);
+            return false;
         }
     }
 
-    private void checkMultiUser(List<String> evidence) {
-        try {
-            int uid = android.os.Process.myUid();
-            int userId = uid / 100000;
-            if (userId != 0) {
-                evidence.add("non_primary_user:" + userId);
+    private String findVirtualizationMarker(String path) {
+        String[] markers = {
+                "/virtual-app/",
+                "/virtual/data/",
+                "parallel_space",
+                "/dualspace/",
+                "com.lbe.parallel",
+                "com.excelliance.dualaid",
+                "com.parallel.space"
+        };
+        for (String marker : markers) {
+            if (path.contains(marker)) {
+                return marker;
             }
-        } catch (Exception e) {
-            CLog.e("Multi-user check failed", e);
         }
+        return null;
     }
+
 }

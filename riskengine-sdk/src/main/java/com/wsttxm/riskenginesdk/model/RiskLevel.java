@@ -5,7 +5,8 @@ public enum RiskLevel {
     LOW(1),
     MEDIUM(2),
     HIGH(3),
-    DEADLY(4);
+    DEADLY(4),
+    UNKNOWN(-1);
 
     private final int value;
 

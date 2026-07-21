@@ -10,6 +10,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class MountAnalysisDetector extends BaseDetector {
 
@@ -26,52 +27,65 @@ public class MountAnalysisDetector extends BaseDetector {
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
 
-        checkMounts(evidence);
-        checkMountInfo(evidence);
+        boolean mountsAvailable = checkMounts(evidence);
+        boolean mountInfoAvailable = checkMountInfo(evidence);
 
         if (!evidence.isEmpty()) {
             return risk(RiskLevel.MEDIUM, String.join("; ", evidence));
         }
+        if (!mountsAvailable && !mountInfoAvailable) {
+            return unavailable("procfs_mounts_unavailable");
+        }
         return safe();
     }
 
-    private void checkMounts(List<String> evidence) {
+    private boolean checkMounts(List<String> evidence) {
         try (BufferedReader br = new BufferedReader(new FileReader("/proc/mounts"))) {
             String line;
             while ((line = br.readLine()) != null) {
-                String lower = line.toLowerCase();
+                String lower = line.toLowerCase(Locale.ROOT);
                 // Magisk overlay
                 if (lower.contains("magisk") || lower.contains("tmpfs /system") ||
                         lower.contains("tmpfs /vendor")) {
-                    evidence.add("magisk_mount:" + line.trim());
+                    addUnique(evidence, "magisk_mount");
                 }
                 // Docker/container markers
                 if (lower.contains("docker") || lower.contains("overlay") && lower.contains("lowerdir")) {
                     if (lower.contains("/docker/")) {
-                        evidence.add("docker_mount:" + line.trim());
+                        addUnique(evidence, "docker_mount");
                     }
                 }
                 // Check for bind mounts on system partitions (common in modification frameworks)
                 if (lower.contains("/data/adb/modules")) {
-                    evidence.add("module_mount:" + line.trim());
+                    addUnique(evidence, "module_mount");
                 }
             }
+            return true;
         } catch (Exception e) {
             CLog.e("Mount check failed", e);
+            return false;
         }
     }
 
-    private void checkMountInfo(List<String> evidence) {
+    private boolean checkMountInfo(List<String> evidence) {
         try (BufferedReader br = new BufferedReader(new FileReader("/proc/self/mountinfo"))) {
             String line;
             while ((line = br.readLine()) != null) {
                 if (line.contains("magisk") || line.contains("core/mirror")) {
-                    evidence.add("mountinfo:" + line.trim());
+                    addUnique(evidence, "mountinfo:magisk");
                     break;
                 }
             }
+            return true;
         } catch (Exception e) {
             CLog.e("MountInfo check failed", e);
+            return false;
+        }
+    }
+
+    private void addUnique(List<String> evidence, String signal) {
+        if (!evidence.contains(signal)) {
+            evidence.add(signal);
         }
     }
 }

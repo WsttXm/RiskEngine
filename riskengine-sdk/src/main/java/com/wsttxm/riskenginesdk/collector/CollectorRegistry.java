@@ -6,6 +6,7 @@ import com.wsttxm.riskenginesdk.collector.java_layer.*;
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class CollectorRegistry {
@@ -31,11 +32,10 @@ public class CollectorRegistry {
         collectors.add(nativeBridge.getSystemPropertyCollector());
         collectors.add(nativeBridge.getCpuInfoCollector());
         collectors.add(nativeBridge.getDiskSizeCollector());
-        collectors.add(nativeBridge.getMacNetlinkCollector());
         collectors.add(nativeBridge.getKernelInfoCollector());
     }
 
     public List<BaseCollector> getCollectors() {
-        return collectors;
+        return Collections.unmodifiableList(collectors);
     }
 }
