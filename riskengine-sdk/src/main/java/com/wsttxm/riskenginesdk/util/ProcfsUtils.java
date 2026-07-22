@@ -46,6 +46,22 @@ public final class ProcfsUtils {
         }
     }
 
+    public static final class ProcessInfo {
+        private final int pid;
+        private final String comm;
+        private final String cmdline;
+
+        public ProcessInfo(int pid, String comm, String cmdline) {
+            this.pid = pid;
+            this.comm = comm == null ? "" : comm;
+            this.cmdline = cmdline == null ? "" : cmdline;
+        }
+
+        public int getPid() { return pid; }
+        public String getComm() { return comm; }
+        public String getCmdline() { return cmdline; }
+    }
+
     public static List<TcpEntry> readTcpTable(String path) {
         List<TcpEntry> entries = new ArrayList<>();
         File file = new File(path);
@@ -109,32 +125,24 @@ public final class ProcfsUtils {
     }
 
     public static List<Integer> findPidsByNameFragments(String... keywords) {
+        return findPidsByNameFragments(snapshotProcesses(), keywords);
+    }
+
+    public static List<Integer> findPidsByNameFragments(List<ProcessInfo> processes,
+                                                        String... keywords) {
         List<Integer> pids = new ArrayList<>();
         if (keywords == null || keywords.length == 0) {
             return pids;
         }
-        File proc = new File("/proc");
-        File[] dirs = proc.listFiles();
-        if (dirs == null) {
-            return pids;
-        }
-        for (File dir : dirs) {
-            if (!dir.isDirectory()) {
-                continue;
-            }
-            String name = dir.getName();
-            if (!name.matches("\\d+")) {
-                continue;
-            }
-            String comm = readFirstLine(new File(dir, "comm").getAbsolutePath());
-            String cmdline = readCmdline(Integer.parseInt(name));
-            String haystack = (comm + " " + cmdline).toLowerCase(Locale.ROOT);
+        for (ProcessInfo process : processes) {
+            String haystack = (process.getComm() + " " + process.getCmdline())
+                    .toLowerCase(Locale.ROOT);
             for (String keyword : keywords) {
                 if (keyword == null || keyword.isBlank()) {
                     continue;
                 }
                 if (haystack.contains(keyword.toLowerCase(Locale.ROOT))) {
-                    pids.add(Integer.parseInt(name));
+                    pids.add(process.getPid());
                     break;
                 }
             }
@@ -143,6 +151,11 @@ public final class ProcfsUtils {
     }
 
     public static List<Integer> findPidsByProcessNames(String... processNames) {
+        return findPidsByProcessNames(snapshotProcesses(), processNames);
+    }
+
+    public static List<Integer> findPidsByProcessNames(List<ProcessInfo> processes,
+                                                       String... processNames) {
         LinkedHashSet<String> expected = new LinkedHashSet<>();
         if (processNames == null || processNames.length == 0) {
             return new ArrayList<>();
@@ -157,28 +170,31 @@ public final class ProcfsUtils {
         if (expected.isEmpty()) {
             return pids;
         }
-        File[] dirs = new File("/proc").listFiles();
-        if (dirs == null) {
-            return pids;
-        }
-        for (File dir : dirs) {
-            String name = dir.getName();
-            if (!dir.isDirectory() || !name.matches("\\d+")) {
-                continue;
-            }
-            int pid;
-            try {
-                pid = Integer.parseInt(name);
-            } catch (NumberFormatException ignored) {
-                continue;
-            }
-            String comm = readFirstLine(new File(dir, "comm").getAbsolutePath());
-            String cmdline = readCmdline(pid);
-            if (matchesProcessName(comm, cmdline, expected)) {
-                pids.add(pid);
+        for (ProcessInfo process : processes) {
+            if (matchesProcessName(process.getComm(), process.getCmdline(), expected)) {
+                pids.add(process.getPid());
             }
         }
         return pids;
+    }
+
+    public static List<ProcessInfo> snapshotProcesses() {
+        List<ProcessInfo> processes = new ArrayList<>();
+        File[] dirs = new File("/proc").listFiles();
+        if (dirs == null) return processes;
+        for (File dir : dirs) {
+            String name = dir.getName();
+            if (!dir.isDirectory() || !name.matches("\\d+")) continue;
+            try {
+                int pid = Integer.parseInt(name);
+                processes.add(new ProcessInfo(pid,
+                        readFirstLine(new File(dir, "comm").getAbsolutePath()),
+                        readCmdline(pid)));
+            } catch (NumberFormatException ignored) {
+                // PID disappeared or overflowed during the scan.
+            }
+        }
+        return processes;
     }
 
     public static String readCmdline(int pid) {

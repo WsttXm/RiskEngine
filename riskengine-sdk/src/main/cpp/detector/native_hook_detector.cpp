@@ -2,13 +2,13 @@
 #include "../util/syscall_wrapper.h"
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <sys/syscall.h>
@@ -49,7 +49,29 @@ void add_evidence(std::vector<std::string> &evidence, const std::string &value) 
 
 std::vector<MapEntry> read_maps() {
     std::vector<MapEntry> entries;
-    std::ifstream maps("/proc/self/maps");
+    constexpr size_t kMaxMapsBytes = 2 * 1024 * 1024;
+    long fd = my_openat(AT_FDCWD, "/proc/self/maps", O_RDONLY, 0);
+    if (fd < 0) {
+        return entries;
+    }
+    std::string maps_content;
+    maps_content.reserve(64 * 1024);
+    char buffer[8192];
+    while (maps_content.size() < kMaxMapsBytes) {
+        size_t remaining = kMaxMapsBytes - maps_content.size();
+        long count = my_read(static_cast<int>(fd), buffer,
+                             std::min(sizeof(buffer), remaining));
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            break;
+        }
+        maps_content.append(buffer, static_cast<size_t>(count));
+    }
+    my_close(static_cast<int>(fd));
+
+    std::istringstream maps(maps_content);
     std::string line;
     while (std::getline(maps, line)) {
         MapEntry entry;

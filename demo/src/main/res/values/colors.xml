@@ -3,9 +3,9 @@
     <color name="white">#FFFFFFFF</color>
 
     <!-- Apple-inspired semantic palette. -->
-    <color name="primary">#FF007AFF</color>
-    <color name="primary_pressed">#FF0062CC</color>
-    <color name="accent">#FF007AFF</color>
+    <color name="primary">#FF0066CC</color>
+    <color name="primary_pressed">#FF0054A8</color>
+    <color name="accent">#FF0066CC</color>
     <color name="background">#FFF2F2F7</color>
     <color name="background_top">#FFF8FAFF</color>
     <color name="surface">#FFFFFFFF</color>
@@ -14,13 +14,13 @@
     <color name="surface_tinted">#FFF2F7FF</color>
     <color name="text_primary">#FF1C1C1E</color>
     <color name="text_secondary">#FF636366</color>
-    <color name="text_tertiary">#FF8E8E93</color>
+    <color name="text_tertiary">#FF6E6E73</color>
     <color name="divider">#1F3C3C43</color>
     <color name="track">#1A787880</color>
     <color name="chip_bg">#1F007AFF</color>
 
     <!-- Risk semantics mirror iOS system colors. -->
-    <color name="risk_safe">#FF34C759</color>
+    <color name="risk_safe">#FF248A3D</color>
     <color name="risk_low">#FF32ADE6</color>
     <color name="risk_medium">#FFFF9500</color>
     <color name="risk_high">#FFFF7A00</color>

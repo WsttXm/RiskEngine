@@ -74,7 +74,13 @@ jobs:
       - name: Build SDK AAR and demo APK
         run: |
           ./gradlew \
+            :riskengine-sdk:test \
+            :riskengine-sdk:lint \
             :riskengine-sdk:assembleRelease \
+            :riskengine-sdk:sourceReleaseJar \
+            :riskengine-sdk:generatePomFileForReleasePublication \
+            :integration-test:assembleDebug \
+            :demo:lintDebug \
             :demo:assembleDebug \
             -PreleaseVersionName="${{ steps.version.outputs.name }}" \
             -PreleaseVersionCode="${{ steps.version.outputs.code }}" \
@@ -89,10 +95,22 @@ jobs:
           mkdir -p release-artifacts
 
           sdk_aar="riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"
+          sdk_sources="riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar"
+          sdk_pom="riskengine-sdk/build/publications/release/pom-default.xml"
           demo_apk="demo/build/outputs/apk/debug/demo-debug.apk"
 
           if [[ ! -f "$sdk_aar" ]]; then
             echo "SDK AAR not found: $sdk_aar"
+            exit 1
+          fi
+
+          if [[ ! -f "$sdk_sources" ]]; then
+            echo "SDK sources JAR not found: $sdk_sources"
+            exit 1
+          fi
+
+          if [[ ! -f "$sdk_pom" ]]; then
+            echo "SDK POM not found: $sdk_pom"
             exit 1
           fi
 
@@ -102,10 +120,12 @@ jobs:
           fi
 
           cp "$sdk_aar" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}.aar"
+          cp "$sdk_sources" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}-sources.jar"
+          cp "$sdk_pom" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}.pom"
           cp "$demo_apk" "release-artifacts/RiskEngine-Demo-${VERSION_NAME}-debug.apk"
 
           cd release-artifacts
-          sha256sum ./*.aar ./*.apk > SHA256SUMS
+          sha256sum ./*.aar ./*.jar ./*.pom ./*.apk > SHA256SUMS
 
           ls -lah
 
@@ -117,4 +137,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release-artifacts/* \
             --verify-tag \
             --title "RiskEngine ${{ steps.version.outputs.name }}" \
-            --generate-notes
+            --generate-notes \
+            --notes "The Demo APK is intentionally signed with a temporary CI debug key and is provided only for sideload testing. It is not intended for production distribution or app stores. A later release may not install as an update because its temporary signing key can differ; uninstall the previous Demo first if Android reports a signature mismatch. No production signing secret is stored by this workflow."

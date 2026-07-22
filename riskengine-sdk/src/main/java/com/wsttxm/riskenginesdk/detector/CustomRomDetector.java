@@ -2,16 +2,17 @@ package com.wsttxm.riskenginesdk.detector;
 
 import android.content.Context;
 
-import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
-import com.wsttxm.riskenginesdk.util.ShellExecutor;
+import com.wsttxm.riskenginesdk.core.SignalResult;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class CustomRomDetector extends BaseDetector {
+    private final SignalSnapshot signals;
     // Stock OEM Android distributions are intentionally excluded.
     private static final String[][] COMMUNITY_ROM_PROPS = {
             {"ro.lineage.version", "LineageOS"},
@@ -23,7 +24,12 @@ public class CustomRomDetector extends BaseDetector {
     };
 
     public CustomRomDetector(Context context) {
+        this(context, new SignalSnapshot(context));
+    }
+
+    public CustomRomDetector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -34,11 +40,20 @@ public class CustomRomDetector extends BaseDetector {
     @Override
     protected DetectionResult detect() {
         List<String> evidence = new ArrayList<>();
-        if (readProperty("ro.build.fingerprint").isEmpty()) {
+        SignalResult<String> fingerprint = signals.getSystemProperty("ro.build.fingerprint");
+        if (!fingerprint.isSuccess() || valueOf(fingerprint).isEmpty()) {
             return unavailable("system_properties_unavailable");
         }
+        CheckCoverage coverage = new CheckCoverage();
+        coverage.success();
         for (String[] romProperty : COMMUNITY_ROM_PROPS) {
-            String value = readProperty(romProperty[0]);
+            SignalResult<String> property = signals.getSystemProperty(romProperty[0]);
+            if (!property.isSuccess()) {
+                coverage.failure(romProperty[0] + ":" + property.getFailureReason());
+                continue;
+            }
+            coverage.success();
+            String value = valueOf(property);
             if (!value.isEmpty()) {
                 evidence.add("community_rom:" + romProperty[1] + "=" + value);
             }
@@ -47,22 +62,12 @@ public class CustomRomDetector extends BaseDetector {
         if (!evidence.isEmpty()) {
             // A community ROM is context, not proof of compromise/root.
             return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
-                    evidence, String.join("; ", evidence));
+                    evidence, String.join("; ", evidence), coverage);
         }
-        return safe();
+        return safe(coverage);
     }
 
-    private String readProperty(String name) {
-        if (NativeCollectorBridge.isNativeAvailable()) {
-            try {
-                String value = NativeCollectorBridge.getSystemProperty(name);
-                if (value != null && !value.isBlank()) {
-                    return value.trim();
-                }
-            } catch (Exception | LinkageError ignored) {
-                // Fall through to the bounded shell fallback.
-            }
-        }
-        return ShellExecutor.execute("getprop " + name).trim();
+    private static String valueOf(SignalResult<String> result) {
+        return result.getValue() == null ? "" : result.getValue().trim();
     }
 }

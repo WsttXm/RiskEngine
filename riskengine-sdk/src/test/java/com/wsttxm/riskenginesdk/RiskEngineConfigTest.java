@@ -15,6 +15,33 @@ public class RiskEngineConfigTest {
         assertTrue(config.isEnableRoot());
         assertTrue(config.isEnableHookDetection());
         assertEquals(10_000, config.getCollectTimeoutMs());
+        assertEquals(PrivacyProfile.BALANCED, config.getPrivacyProfile());
+        assertTrue(config.isCollectAndroidId());
+        assertFalse(config.isCollectBootId());
+        assertFalse(config.isCollectDrmId());
+    }
+
+    @Test
+    public void privacyProfilesAndOverridesAreResolvedAtBuildTime() {
+        RiskEngineConfig minimal = new RiskEngineConfig.Builder()
+                .privacyProfile(PrivacyProfile.MINIMAL)
+                .build();
+        assertFalse(minimal.isCollectAndroidId());
+        assertFalse(minimal.isCollectBootId());
+        assertFalse(minimal.isCollectDrmId());
+
+        RiskEngineConfig diagnostic = new RiskEngineConfig.Builder()
+                .privacyProfile(PrivacyProfile.DIAGNOSTIC)
+                .collectDrmId(false)
+                .build();
+        assertTrue(diagnostic.isCollectAndroidId());
+        assertTrue(diagnostic.isCollectBootId());
+        assertFalse(diagnostic.isCollectDrmId());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rejectsNullPrivacyProfile() {
+        new RiskEngineConfig.Builder().privacyProfile(null);
     }
 
     @Test

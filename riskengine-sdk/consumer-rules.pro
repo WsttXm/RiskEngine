@@ -1,5 +1,5 @@
 # Keep the complete source-level SDK contract, including nested builders and
-# model fields serialized by Gson.
+# Public model accessors and constructors are consumed by host applications.
 -keep public class com.wsttxm.riskenginesdk.RiskEngine { *; }
 -keep public class com.wsttxm.riskenginesdk.RiskEngineConfig { *; }
 -keep public class com.wsttxm.riskenginesdk.RiskEngineConfig$Builder { *; }

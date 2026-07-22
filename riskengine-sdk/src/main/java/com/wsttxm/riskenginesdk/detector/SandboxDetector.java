@@ -28,17 +28,20 @@ public class SandboxDetector extends BaseDetector {
         List<String> evidence = new ArrayList<>();
 
         boolean fdInspectionAvailable = checkFdCount(evidence);
+        CheckCoverage coverage = new CheckCoverage();
+        if (fdInspectionAvailable) coverage.success();
+        else coverage.failure("procfs_fd_unavailable");
 
         if (!evidence.isEmpty()) {
             // A virtualized path is useful context, but one path alone is not
             // proof that the current app is executing inside a sandbox.
             return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
-                    evidence, String.join("; ", evidence));
+                    evidence, String.join("; ", evidence), coverage);
         }
         if (!fdInspectionAvailable) {
             return unavailable("procfs_fd_unavailable");
         }
-        return safe();
+        return safe(coverage);
     }
 
     private boolean checkFdCount(List<String> evidence) {

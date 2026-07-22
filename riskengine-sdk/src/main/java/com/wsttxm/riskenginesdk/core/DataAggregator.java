@@ -113,7 +113,7 @@ public class DataAggregator {
             } else if (detection.getStatus() == DetectionStatus.WARNING) {
                 warningCount++;
             }
-            if (!detection.isWarnOnly()) {
+            if (!detection.isInformational()) {
                 score += detection.getScore();
             }
             statusMap.add(detection.getDetectorName() + ":" + detection.getStatus());

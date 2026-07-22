@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
-val releaseVersionName = providers.gradleProperty("releaseVersionName").orElse("1.0.0")
+val releaseVersionName = providers.gradleProperty("releaseVersionName")
+    .orElse(providers.gradleProperty("riskEngineVersion"))
 val releaseVersionCode = providers.gradleProperty("releaseVersionCode").map(String::toInt).orElse(1)
 
 android {
@@ -41,5 +42,4 @@ dependencies {
     implementation(project(":riskengine-sdk"))
     implementation(libs.appcompat)
     implementation(libs.material)
-    implementation(libs.gson)
 }

@@ -8,7 +8,10 @@ import java.security.MessageDigest;
 public final class PrivacyUtils {
     private PrivacyUtils() {}
 
-    /** Returns a per-application, non-reversible representation of an identifier. */
+    /**
+     * Returns a deterministic, app-scoped pseudonymous representation.
+     * This limits direct disclosure but is not encryption or anonymization.
+     */
     public static String hashIdentifier(Context context, String value) {
         if (value == null || value.isBlank()) {
             return "";

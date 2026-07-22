@@ -6,14 +6,8 @@ import android.provider.Settings;
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
-import com.wsttxm.riskenginesdk.util.PrivacyUtils;
 
 public class SettingsCollector extends BaseCollector {
-
-    private static final String[] SECURE_KEYS = {
-            "bluetooth_address",
-            "android_id"
-    };
 
     public SettingsCollector(Context context) {
         super(context);
@@ -26,17 +20,12 @@ public class SettingsCollector extends BaseCollector {
 
     @Override
     protected void collect(CollectorResult result) {
-        for (String key : SECURE_KEYS) {
-            try {
-                String value = Settings.Secure.getString(context.getContentResolver(), key);
-                if (value != null) {
-                    result.addValue("secure_" + key,
-                            PrivacyUtils.hashIdentifier(context, value));
-                }
-            } catch (Exception e) {
-                CLog.e("Settings.Secure." + key + " failed", e);
-            }
+        try {
+            int development = Settings.Global.getInt(context.getContentResolver(),
+                    Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0);
+            result.addValue("development_settings_enabled", String.valueOf(development == 1));
+        } catch (Exception e) {
+            CLog.e("Development settings collection failed", e);
         }
-
     }
 }

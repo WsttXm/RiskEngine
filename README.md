@@ -9,11 +9,11 @@ An Android SDK for local device fingerprinting and runtime risk detection. Built
 This revision focuses on reliable failure semantics, privacy-safe collection, and a redesigned Demo:
 
 - Collector outcomes are explicit: `SUCCESS`, `EMPTY`, `ERROR`, or `UNSUPPORTED`.
-- Failed, timed-out, or unavailable detectors return `DetectionStatus.UNKNOWN` and `RiskLevel.UNKNOWN` instead of being treated as safe.
-- Reports expose risk score capacity and status counts, preserve partial coverage, and become immutable after aggregation.
+- Detectors report risk presentation separately from `DetectionExecutionStatus`; failures, timeouts, unavailable checks, and partial execution are never treated as safe.
+- Reports expose the fixed severe threshold (18), next threshold, complete/partial coverage, and status counts, and become immutable after aggregation.
 - Collection uses one bounded deadline, serializes concurrent requests, rejects main-thread synchronous calls, and cancels cleanly across `shutdown()`.
-- Raw persistent identifiers are not returned. Values used for correlation are converted to package-scoped SHA-256 hashes.
-- The Demo now presents a Chinese-first risk summary, coverage, elapsed time, collector status, expandable English technical evidence, dark mode, accessible touch feedback, and reduced-motion behavior.
+- The default `BALANCED` privacy profile keeps only an app-scoped pseudonymous Android ID hash. Boot ID and Widevine hashes require `DIAGNOSTIC` or explicit opt-in.
+- The Demo uses localized semantic states, evidence-based summaries, consistent coverage, redacted report copy, expandable raw evidence, dark mode, accessible interaction, and reduced-motion behavior.
 
 ## Requirements
 
@@ -37,8 +37,8 @@ Build the SDK and demo:
 Or use Gradle directly:
 
 ```bash
-./gradlew :riskengine-sdk:testDebugUnitTest :riskengine-sdk:lintDebug
-./gradlew :riskengine-sdk:assembleRelease
+./gradlew :riskengine-sdk:test :riskengine-sdk:lint
+./gradlew :riskengine-sdk:assembleRelease :riskengine-sdk:sourceReleaseJar
 ./gradlew :demo:lintDebug :demo:assembleDebug :demo:assembleRelease
 ```
 
@@ -47,19 +47,23 @@ Build artifacts:
 | Artifact | Path | Notes |
 | --- | --- | --- |
 | SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | Ready for host-app integration |
-| Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | Debug-signed and directly installable |
+| SDK sources | `riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar` | Source archive for distribution |
+| Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | Temporarily debug-signed for sideload testing only |
 | Demo Release APK | `demo/build/outputs/apk/release/demo-release-unsigned.apk` | Minified; sign with your release key before distribution |
 
 The SDK packages native libraries for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`.
+
+Tag releases attach the AAR, sources JAR, POM, temporary Debug APK, and `SHA256SUMS`. The temporary APK is not for production or stores. A later release can use a different temporary key; uninstall the older Demo first if Android reports a signature mismatch.
 
 Initialize and collect:
 
 ```java
 RiskEngineConfig config = new RiskEngineConfig.Builder()
+        .privacyProfile(PrivacyProfile.BALANCED)
         .collectTimeout(15000)
         .build();
 
-RiskEngine.init(context, config);
+RiskEngine.initIfNeeded(context, config);
 
 RiskEngine.collect(new RiskEngineCallback() {
     @Override
@@ -81,12 +85,13 @@ Synchronous collection:
 
 ```java
 RiskReport report = RiskEngine.collectSync();
-String json = RiskEngine.getReportJson();
+String json = RiskEngine.reportToJson(report);       // no second collection
+String freshJson = RiskEngine.collectReportJson();  // collect then serialize
 ```
 
 Synchronous APIs reject calls from the Android main thread to prevent ANRs.
 
-Call `RiskEngine.shutdown()` when the SDK is no longer needed. A second `init` call is rejected until the previous instance has been shut down.
+Call `RiskEngine.shutdown()` when the SDK is no longer needed. `init` rejects duplicate initialization; multi-entry applications can use atomic `initIfNeeded`.
 
 ## Core Detections
 
@@ -111,9 +116,12 @@ Individual collector or detector failures do not silently become safe results. T
 | `CollectorResult.Status.EMPTY` | Collection completed but returned no usable value |
 | `CollectorResult.Status.ERROR` | The collector failed or exceeded the available request time |
 | `CollectorResult.Status.UNSUPPORTED` | The current device or platform does not expose this signal |
-| `DetectionStatus.UNKNOWN` / `RiskLevel.UNKNOWN` | A detector could not produce a reliable conclusion |
+| `DetectionStatus` | Risk presentation: `NORMAL` / `WARNING` / `DANGER` / `UNKNOWN` |
+| `DetectionExecutionStatus` | Execution: `SAFE` / `RISK` / `PARTIAL` / `UNAVAILABLE` / `DISABLED` / `TIMEOUT` / `ERROR` |
 
-`UNKNOWN` means insufficient coverage, not “no risk.” When no warning or danger signal exists but one or more checks are unknown, the report-level risk is `UNKNOWN`. Multi-source inconsistency is emitted as a detection signal and raises an otherwise lower result to at least `MEDIUM`.
+`UNKNOWN` means insufficient coverage, not “no risk.” `PARTIAL` lowers report coverage even when completed subchecks found no issue. When no warning or danger exists but one or more checks are unknown, report risk is `UNKNOWN`. Multi-source inconsistency raises an otherwise lower result to at least `MEDIUM`.
+
+Only actionable results contribute to `riskScore`. Informational results (the deprecated compatibility name is `warnOnly`) contribute no score but can raise an otherwise safe presentation to `LOW`. Thresholds are `MEDIUM >= 4`, `HIGH >= 10`, and `DEADLY >= 18`; hard triggers can enter `DEADLY` directly. `maxRiskScore` is diagnostic capacity, not the Demo progress denominator.
 
 ## Output
 
@@ -127,6 +135,8 @@ Individual collector or detector failures do not silently become safe results. T
 | `riskScore` / `maxRiskScore` | Actionable score and the maximum score represented by the report |
 | `warningCount` / `dangerCount` | Number of warning and danger detection results |
 | `unknownCount` | Number of unavailable, timed-out, or unsupported checks |
+| `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Unified detector + raw-collector coverage without double-counting synthesized SDK fields |
 | `timestampMs` | Collection timestamp |
 | `sdkVersion` | SDK version string |
 
@@ -134,11 +144,12 @@ Individual collector or detector failures do not silently become safe results. T
 
 The Demo is designed as a local diagnostic console rather than an automatic collector:
 
-- It starts in `READY` and collects only after an explicit tap; results are never uploaded automatically.
-- The top card shows the Chinese risk conclusion, English enum code, risk score, coverage percentage, and elapsed time.
-- Risk items are sorted first. Detection rows expand to English technical evidence, while collector rows expose source values and `SUCCESS` / `EMPTY` / `ERROR` / `UNSUPPORTED` status.
+- It starts in a localized ready state and collects only after an explicit tap; results are never uploaded automatically.
+- The top card uses localized semantic status and risk color. Progress uses the severe threshold of 18; collection errors use gray and 0%.
+- Risk items are sorted first. Rows explain the actual reason before showing raw evidence, score, and subcheck coverage. Collector fields use localized labels and units, with synthesized SDK fields in a separate section.
 - `UNKNOWN` is displayed as insufficient coverage and is never styled or described as safe.
-- In-flight and completed UI state survives Activity recreation. Press feedback and detail transitions are interruptible, and system reduced-motion settings are respected.
+- In-flight and completed UI state survives Activity recreation. Haptics fire only when a new result arrives, not after rotation or foreground return.
+- A redacted summary can be copied without identifier hashes, raw system properties, paths, or PIDs.
 - Semantic light/dark palettes, readable type sizes, accessibility click behavior, and meaningful completion/error haptics are included.
 
 ## Public API
@@ -146,21 +157,26 @@ The Demo is designed as a local diagnostic console rather than an automatic coll
 | API | Description |
 | --- | --- |
 | `RiskEngine.init(Context, RiskEngineConfig)` | Initialize the SDK |
+| `RiskEngine.initIfNeeded(Context, RiskEngineConfig)` | Atomically initialize when needed and report whether this call did it |
 | `RiskEngine.collect(RiskEngineCallback)` | Run collection asynchronously |
 | `RiskEngine.collectSync()` | Run collection synchronously |
-| `RiskEngine.getReportJson()` | Collect and return the report as JSON |
+| `RiskEngine.collectReportJson()` | Collect a fresh report and return JSON |
+| `RiskEngine.reportToJson(RiskReport)` | Serialize an existing report without collecting again |
+| `RiskEngine.getReportJson()` | Deprecated compatibility alias for `collectReportJson()` |
 | `RiskEngine.shutdown()` | Release SDK resources |
 | `RiskEngineConfig.Builder.debugLog(boolean)` | Toggle SDK logs |
 | `RiskEngineConfig.Builder.collectTimeout(long)` | Set collection timeout (1-120,000 ms) |
+| `RiskEngineConfig.Builder.privacyProfile(PrivacyProfile)` | Select `MINIMAL`, `BALANCED`, or `DIAGNOSTIC` |
+| `collectAndroidId/collectBootId/collectDrmId(boolean)` | Override individual identifier collection |
 | `RiskEngineConfig.Builder.enableRoot/enableHookDetection/...` | Enable or disable individual detector groups |
 
 The SDK ships with `consumer-rules.pro`; host apps need no extra ProGuard rules for the public API.
 
-The report never exposes raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID. Identifiers needed for stable correlation are converted to package-scoped SHA-256 values first. The Demo also disables cloud backup and device-transfer extraction.
+The report never exposes raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID. Deterministic package-scoped SHA-256 values are pseudonyms, not encryption, anonymization, or an absolute non-reversibility guarantee. The Demo also disables cloud backup and device-transfer extraction.
 
 ## Documentation
 
-See [doc/Implementation_Details.md](./doc/Implementation_Details.md) for the full implementation details.
+See [doc/Implementation_Details.md](./doc/Implementation_Details.md) for implementation details and [doc/Pending_Items.md](./doc/Pending_Items.md) for validation work that requires external devices or deployment infrastructure.
 
 ## License
 

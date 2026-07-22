@@ -1,9 +1,12 @@
 plugins {
     alias(libs.plugins.android.library)
+    id("maven-publish")
 }
 
-val releaseVersionName = providers.gradleProperty("releaseVersionName").orElse("1.0.0")
+val releaseVersionName = providers.gradleProperty("releaseVersionName")
+    .orElse(providers.gradleProperty("riskEngineVersion"))
 version = releaseVersionName.get()
+group = "com.wsttxm"
 
 android {
     namespace = "com.wsttxm.riskenginesdk"
@@ -57,18 +60,33 @@ android {
         buildConfig = true
     }
 
-    @Suppress("UnstableApiUsage")
-    testOptions {
-        unitTests.all {
-            it.enabled = it.name != "testReleaseUnitTest"
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = project.group.toString()
+                artifactId = "riskengine-sdk"
+                version = project.version.toString()
+                pom {
+                    name.set("RiskEngine Android SDK")
+                    description.set("On-device Android security risk signal SDK")
+                }
+            }
         }
     }
 }
 
 dependencies {
-    implementation(libs.gson)
-
     testImplementation(libs.junit)
+    testImplementation(libs.json)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }
