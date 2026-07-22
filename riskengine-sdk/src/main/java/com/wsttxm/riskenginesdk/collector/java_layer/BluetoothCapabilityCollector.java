@@ -6,9 +6,9 @@ import android.content.pm.PackageManager;
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 
-/** Collects non-sensitive Bluetooth capability information; local MAC is inaccessible to apps. */
-public class BluetoothMacCollector extends BaseCollector {
-    public BluetoothMacCollector(Context context) {
+/** Collects non-sensitive Bluetooth capability information; no MAC is requested. */
+public class BluetoothCapabilityCollector extends BaseCollector {
+    public BluetoothCapabilityCollector(Context context) {
         super(context);
     }
 

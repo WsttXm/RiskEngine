@@ -34,16 +34,23 @@ public class CloudPhoneDetector extends BaseDetector {
         boolean batteryAvailable = checkBatteryAnomaly(evidence);
         boolean cameraAvailable = checkCameraCount(evidence);
         boolean sensorsAvailable = checkSensorCount(evidence);
+        CheckCoverage coverage = new CheckCoverage();
+        if (batteryAvailable) coverage.success();
+        else coverage.failure("battery_unavailable");
+        if (cameraAvailable) coverage.success();
+        else coverage.failure("camera_unavailable");
+        if (sensorsAvailable) coverage.success();
+        else coverage.failure("sensors_unavailable");
 
         if (!evidence.isEmpty()) {
             RiskLevel level = evidence.size() >= 3 ? RiskLevel.MEDIUM : RiskLevel.LOW;
             return result(level, DetectionStatus.WARNING, 1, 10, true,
-                    evidence, String.join("; ", evidence));
+                    evidence, String.join("; ", evidence), coverage);
         }
         if (!batteryAvailable && !cameraAvailable && !sensorsAvailable) {
             return unavailable("hardware_signals_unavailable");
         }
-        return safe();
+        return safe(coverage);
     }
 
     private boolean checkBatteryAnomaly(List<String> evidence) {

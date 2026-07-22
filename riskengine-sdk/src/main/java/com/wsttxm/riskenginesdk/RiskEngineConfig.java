@@ -14,6 +14,10 @@ public final class RiskEngineConfig {
     private final boolean enableAdbDetection;
     private final boolean debugLog;
     private final long collectTimeoutMs;
+    private final PrivacyProfile privacyProfile;
+    private final boolean collectAndroidId;
+    private final boolean collectBootId;
+    private final boolean collectDrmId;
 
     private RiskEngineConfig(Builder builder) {
         this.enableRoot = builder.enableRoot;
@@ -26,6 +30,16 @@ public final class RiskEngineConfig {
         this.enableAdbDetection = builder.enableAdbDetection;
         this.debugLog = builder.debugLog;
         this.collectTimeoutMs = builder.collectTimeoutMs;
+        this.privacyProfile = builder.privacyProfile;
+        this.collectAndroidId = builder.collectAndroidId != null
+                ? builder.collectAndroidId
+                : builder.privacyProfile != PrivacyProfile.MINIMAL;
+        this.collectBootId = builder.collectBootId != null
+                ? builder.collectBootId
+                : builder.privacyProfile == PrivacyProfile.DIAGNOSTIC;
+        this.collectDrmId = builder.collectDrmId != null
+                ? builder.collectDrmId
+                : builder.privacyProfile == PrivacyProfile.DIAGNOSTIC;
     }
 
     public static final class Builder {
@@ -39,6 +53,10 @@ public final class RiskEngineConfig {
         private boolean enableAdbDetection = true;
         private boolean debugLog;
         private long collectTimeoutMs = 10_000;
+        private PrivacyProfile privacyProfile = PrivacyProfile.BALANCED;
+        private Boolean collectAndroidId;
+        private Boolean collectBootId;
+        private Boolean collectDrmId;
 
         public Builder enableRoot(boolean value) { enableRoot = value; return this; }
         public Builder enableHookDetection(boolean value) { enableHookDetection = value; return this; }
@@ -49,6 +67,14 @@ public final class RiskEngineConfig {
         public Builder enableCustomRomDetection(boolean value) { enableCustomRomDetection = value; return this; }
         public Builder enableAdbDetection(boolean value) { enableAdbDetection = value; return this; }
         public Builder debugLog(boolean value) { debugLog = value; return this; }
+        public Builder privacyProfile(PrivacyProfile value) {
+            if (value == null) throw new IllegalArgumentException("privacyProfile must not be null");
+            privacyProfile = value;
+            return this;
+        }
+        public Builder collectAndroidId(boolean value) { collectAndroidId = value; return this; }
+        public Builder collectBootId(boolean value) { collectBootId = value; return this; }
+        public Builder collectDrmId(boolean value) { collectDrmId = value; return this; }
 
         public Builder collectTimeout(long timeoutMs) {
             if (timeoutMs <= 0 || timeoutMs > MAX_COLLECT_TIMEOUT_MS) {
@@ -75,4 +101,8 @@ public final class RiskEngineConfig {
     public boolean isEnableAdbDetection() { return enableAdbDetection; }
     public boolean isDebugLog() { return debugLog; }
     public long getCollectTimeoutMs() { return collectTimeoutMs; }
+    public PrivacyProfile getPrivacyProfile() { return privacyProfile; }
+    public boolean isCollectAndroidId() { return collectAndroidId; }
+    public boolean isCollectBootId() { return collectBootId; }
+    public boolean isCollectDrmId() { return collectDrmId; }
 }

@@ -5,14 +5,21 @@ import android.content.Context;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.AdbInspector;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class AdbDetector extends BaseDetector {
+    private final SignalSnapshot signals;
 
     public AdbDetector(Context context) {
+        this(context, new SignalSnapshot(context));
+    }
+
+    public AdbDetector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -22,10 +29,13 @@ public class AdbDetector extends BaseDetector {
 
     @Override
     protected com.wsttxm.riskenginesdk.model.DetectionResult detect() {
-        AdbInspector.Snapshot snapshot = AdbInspector.collect(context);
+        AdbInspector.Snapshot snapshot = AdbInspector.collect(signals);
         List<String> details = new ArrayList<>(snapshot.getDetails());
+        CheckCoverage coverage = new CheckCoverage();
+        for (int i = 0; i < snapshot.getChecksSucceeded(); i++) coverage.success();
+        for (String reason : snapshot.getFailureReasons()) coverage.failure(reason);
         if (!snapshot.isEnabled()) {
-            return safe();
+            return safe(coverage);
         }
 
         int score = snapshot.isWifiEnabled() ? 4 : 2;
@@ -37,7 +47,8 @@ public class AdbDetector extends BaseDetector {
                 10,
                 true,
                 details,
-                String.join("; ", details)
+                String.join("; ", details),
+                coverage
         );
     }
 }

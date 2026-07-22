@@ -8,6 +8,9 @@ import java.util.Objects;
 import com.wsttxm.riskenginesdk.BuildConfig;
 
 public class RiskReport {
+    public static final int MEDIUM_THRESHOLD = 4;
+    public static final int HIGH_THRESHOLD = 10;
+    public static final int DEADLY_THRESHOLD = 18;
     private final DeviceFingerprint fingerprint;
     private final List<DetectionResult> detections;
     private final long timestampMs;
@@ -18,6 +21,10 @@ public class RiskReport {
     private final int dangerCount;
     private final int unknownCount;
     private final RiskLevel overallRiskLevel;
+    private final ReportStatus reportStatus;
+    private final int availableDetectionCount;
+    private final int checkCount;
+    private final int completedCheckCount;
 
     public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections) {
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
@@ -37,6 +44,10 @@ public class RiskReport {
         this.dangerCount = computeCount(DetectionStatus.DANGER);
         this.unknownCount = computeCount(DetectionStatus.UNKNOWN);
         this.overallRiskLevel = computeOverallRisk();
+        this.availableDetectionCount = computeAvailableDetectionCount();
+        this.checkCount = computeCheckCount();
+        this.completedCheckCount = computeCompletedCheckCount();
+        this.reportStatus = computeReportStatus();
     }
 
     private RiskLevel computeOverallRisk() {
@@ -45,15 +56,15 @@ public class RiskReport {
         RiskLevel level;
         if (hasHardTrigger()) {
             level = RiskLevel.DEADLY;
-        } else if (riskScore >= 18 || actionableDangers >= 3) {
+        } else if (riskScore >= DEADLY_THRESHOLD || actionableDangers >= 3) {
             level = RiskLevel.DEADLY;
-        } else if (riskScore >= 10 || actionableDangers >= 1) {
+        } else if (riskScore >= HIGH_THRESHOLD || actionableDangers >= 1) {
             level = RiskLevel.HIGH;
-        } else if (riskScore >= 4 || actionableWarnings >= 2) {
+        } else if (riskScore >= MEDIUM_THRESHOLD || actionableWarnings >= 2) {
             level = RiskLevel.MEDIUM;
         } else if (riskScore > 0 || warningCount >= 1 || dangerCount >= 1) {
             level = RiskLevel.LOW;
-        } else if (unknownCount > 0) {
+        } else if (unknownCount > 0 || hasIncompleteDetectorExecution()) {
             level = RiskLevel.UNKNOWN;
         } else {
             level = RiskLevel.SAFE;
@@ -77,6 +88,26 @@ public class RiskReport {
     public int getDangerCount() { return dangerCount; }
     public int getUnknownCount() { return unknownCount; }
     public RiskLevel getOverallRiskLevel() { return overallRiskLevel; }
+    public ReportStatus getReportStatus() { return reportStatus; }
+    public int getAvailableDetectionCount() { return availableDetectionCount; }
+    public int getDetectionCount() { return detections.size(); }
+    public int getCheckCount() { return checkCount; }
+    public int getCompletedCheckCount() { return completedCheckCount; }
+    public int getIncompleteCheckCount() { return Math.max(0, checkCount - completedCheckCount); }
+    public int getCoveragePercent() {
+        return checkCount == 0 ? 100
+                : Math.round(completedCheckCount * 100f / checkCount);
+    }
+    public int getDisplayThresholdMaximum() { return DEADLY_THRESHOLD; }
+    public int getNextRiskThreshold() {
+        if (riskScore < MEDIUM_THRESHOLD) return MEDIUM_THRESHOLD;
+        if (riskScore < HIGH_THRESHOLD) return HIGH_THRESHOLD;
+        if (riskScore < DEADLY_THRESHOLD) return DEADLY_THRESHOLD;
+        return DEADLY_THRESHOLD;
+    }
+    public int getScoreToNextRiskThreshold() {
+        return Math.max(0, getNextRiskThreshold() - riskScore);
+    }
 
     public List<DetectionResult> getDetectionsByLevel(RiskLevel minLevel) {
         Objects.requireNonNull(minLevel, "minLevel must not be null");
@@ -92,7 +123,7 @@ public class RiskReport {
     private int computeRiskScore() {
         long total = 0;
         for (DetectionResult detection : detections) {
-            if (!detection.isWarnOnly()) {
+            if (!detection.isInformational()) {
                 total += detection.getScore();
             }
         }
@@ -120,7 +151,7 @@ public class RiskReport {
     private int computeActionableCount(DetectionStatus status) {
         int count = 0;
         for (DetectionResult detection : detections) {
-            if (!detection.isWarnOnly() && detection.getStatus() == status) {
+            if (!detection.isInformational() && detection.getStatus() == status) {
                 count++;
             }
         }
@@ -129,7 +160,7 @@ public class RiskReport {
 
     private boolean hasHardTrigger() {
         for (DetectionResult detection : detections) {
-            if (detection.isWarnOnly()) {
+            if (detection.isInformational()) {
                 continue;
             }
             if (detection.getRiskLevel().getValue() < RiskLevel.HIGH.getValue()) {
@@ -145,6 +176,21 @@ public class RiskReport {
         return false;
     }
 
+    private boolean hasIncompleteDetectorExecution() {
+        for (DetectionResult detection : detections) {
+            switch (detection.getExecutionStatus()) {
+                case PARTIAL:
+                case UNAVAILABLE:
+                case TIMEOUT:
+                case ERROR:
+                    return true;
+                default:
+                    break;
+            }
+        }
+        return false;
+    }
+
     private boolean containsAny(List<String> details, String... prefixes) {
         for (String detail : details) {
             for (String prefix : prefixes) {
@@ -154,5 +200,74 @@ public class RiskReport {
             }
         }
         return false;
+    }
+
+    private int computeAvailableDetectionCount() {
+        int count = 0;
+        for (DetectionResult detection : detections) {
+            switch (detection.getExecutionStatus()) {
+                case SAFE:
+                case RISK:
+                case PARTIAL:
+                    count++;
+                    break;
+                default:
+                    break;
+            }
+        }
+        return count;
+    }
+
+    private int computeCheckCount() {
+        int count = 0;
+        for (DetectionResult detection : detections) {
+            if (!detection.getDetectorName().startsWith("collector:")) {
+                count++;
+            }
+        }
+        for (String fieldName : fingerprint.getResults().keySet()) {
+            if (!isSyntheticCollector(fieldName)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int computeCompletedCheckCount() {
+        int count = 0;
+        for (DetectionResult detection : detections) {
+            if (detection.getDetectorName().startsWith("collector:")) {
+                continue;
+            }
+            switch (detection.getExecutionStatus()) {
+                case SAFE:
+                case RISK:
+                    count++;
+                    break;
+                default:
+                    break;
+            }
+        }
+        for (CollectorResult result : fingerprint.getResults().values()) {
+            if (!isSyntheticCollector(result.getFieldName())
+                    && result.getStatus() == CollectorResult.Status.SUCCESS) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean isSyntheticCollector(String fieldName) {
+        return "hook_memory_signals".equals(fieldName)
+                || "runtime_integrity_score_inputs".equals(fieldName);
+    }
+
+    private ReportStatus computeReportStatus() {
+        if (checkCount == 0 || completedCheckCount == checkCount) {
+            return ReportStatus.COMPLETE;
+        }
+        return completedCheckCount == 0 && availableDetectionCount == 0
+                ? ReportStatus.UNAVAILABLE
+                : ReportStatus.PARTIAL;
     }
 }

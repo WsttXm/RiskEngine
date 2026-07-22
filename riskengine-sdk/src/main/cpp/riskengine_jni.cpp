@@ -14,10 +14,99 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 static jstring toJString(JNIEnv *env, const std::string &str) {
-    return env->NewStringUTF(str.c_str());
+    if (env == nullptr || env->ExceptionCheck()) {
+        return nullptr;
+    }
+
+    try {
+    // NewStringUTF expects JNI modified UTF-8 and may abort under CheckJNI when
+    // procfs or hooked inputs contain malformed bytes. Decode standard UTF-8
+    // ourselves and replace malformed sequences before crossing the JNI edge.
+    constexpr size_t kMaxInputBytes = 1024 * 1024;
+    const size_t limit = std::min(str.size(), kMaxInputBytes);
+    std::vector<jchar> utf16;
+    utf16.reserve(limit);
+    size_t index = 0;
+    while (index < limit) {
+        const auto first = static_cast<uint8_t>(str[index]);
+        uint32_t codepoint = 0;
+        size_t length = 0;
+        if (first < 0x80) {
+            codepoint = first;
+            length = 1;
+        } else if ((first & 0xE0) == 0xC0) {
+            codepoint = first & 0x1F;
+            length = 2;
+        } else if ((first & 0xF0) == 0xE0) {
+            codepoint = first & 0x0F;
+            length = 3;
+        } else if ((first & 0xF8) == 0xF0) {
+            codepoint = first & 0x07;
+            length = 4;
+        } else {
+            utf16.push_back(0xFFFD);
+            ++index;
+            continue;
+        }
+
+        bool valid = index + length <= limit;
+        for (size_t offset = 1; valid && offset < length; ++offset) {
+            const auto continuation = static_cast<uint8_t>(str[index + offset]);
+            if ((continuation & 0xC0) != 0x80) {
+                valid = false;
+            } else {
+                codepoint = (codepoint << 6) | (continuation & 0x3F);
+            }
+        }
+        const bool overlong = (length == 2 && codepoint < 0x80)
+                || (length == 3 && codepoint < 0x800)
+                || (length == 4 && codepoint < 0x10000);
+        if (!valid || overlong || codepoint > 0x10FFFF
+                || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+            utf16.push_back(0xFFFD);
+            ++index;
+            continue;
+        }
+
+        if (codepoint <= 0xFFFF) {
+            utf16.push_back(static_cast<jchar>(codepoint));
+        } else {
+            codepoint -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xD800 + (codepoint >> 10)));
+            utf16.push_back(static_cast<jchar>(0xDC00 + (codepoint & 0x3FF)));
+        }
+        index += length;
+    }
+
+    jstring result = env->NewString(
+            utf16.empty() ? nullptr : utf16.data(),
+            static_cast<jsize>(utf16.size()));
+    if (result == nullptr && env->ExceptionCheck()) {
+        // Native collectors are best-effort. Never leave a pending JNI
+        // exception that would abort a subsequent framework call.
+        env->ExceptionClear();
+    }
+    return result;
+    } catch (...) {
+        // Never let a C++ allocation failure cross the JNI boundary.
+        const jchar emptyValue = 0;
+        jstring empty = env->NewString(&emptyValue, 0);
+        if (empty == nullptr && env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        return empty;
+    }
+}
+
+static void clearPendingException(JNIEnv *env) {
+    if (env != nullptr && env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
 }
 
 static bool isAllowedSystemProperty(const std::string &name) {
@@ -46,7 +135,10 @@ static jstring jni_getBootId(JNIEnv *env, jclass) {
 static jstring jni_getSystemProperty(JNIEnv *env, jclass, jstring jname) {
     if (jname == nullptr) return toJString(env, "");
     const char *name = env->GetStringUTFChars(jname, nullptr);
-    if (name == nullptr) return toJString(env, "");
+    if (name == nullptr) {
+        clearPendingException(env);
+        return toJString(env, "");
+    }
     std::string propertyName(name);
     env->ReleaseStringUTFChars(jname, name);
     if (!isAllowedSystemProperty(propertyName)) {
@@ -63,7 +155,10 @@ static jstring jni_getCpuInfo(JNIEnv *env, jclass) {
 static jlong jni_getDiskSize(JNIEnv *env, jclass, jstring jpath) {
     if (jpath == nullptr) return static_cast<jlong>(-1);
     const char *path = env->GetStringUTFChars(jpath, nullptr);
-    if (path == nullptr) return static_cast<jlong>(-1);
+    if (path == nullptr) {
+        clearPendingException(env);
+        return static_cast<jlong>(-1);
+    }
     long long size = get_disk_total_size(path);
     env->ReleaseStringUTFChars(jpath, path);
     return (jlong) size;

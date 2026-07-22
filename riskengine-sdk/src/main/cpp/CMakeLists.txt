@@ -22,9 +22,22 @@ target_include_directories(riskengine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+target_compile_options(riskengine PRIVATE
+    -Wall
+    -Wextra
+    -Wformat
+    -Wformat-security
+    -fstack-protector-strong
+    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-D_FORTIFY_SOURCE=2>"
+)
+
+find_library(android_log_lib log)
+target_link_libraries(riskengine PRIVATE ${android_log_lib})
+
 # Support 4 KiB/16 KiB pages and minimize the exported native attack surface.
 target_link_options(riskengine PRIVATE
     "-Wl,-z,max-page-size=16384"
     "-Wl,-z,relro,-z,now"
+    "-Wl,-z,noexecstack"
     "-Wl,--exclude-libs,ALL"
 )

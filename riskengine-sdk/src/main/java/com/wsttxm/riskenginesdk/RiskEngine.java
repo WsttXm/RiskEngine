@@ -3,18 +3,18 @@ package com.wsttxm.riskenginesdk;
 import android.content.Context;
 import android.os.Looper;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.collector.CollectorRegistry;
 import com.wsttxm.riskenginesdk.core.DataAggregator;
 import com.wsttxm.riskenginesdk.core.TaskScheduler;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.detector.BaseDetector;
 import com.wsttxm.riskenginesdk.detector.DetectorRegistry;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.RiskReport;
 import com.wsttxm.riskenginesdk.util.CLog;
+import com.wsttxm.riskenginesdk.util.RiskReportJsonSerializer;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,8 +36,8 @@ public final class RiskEngine {
     private CollectorRegistry collectorRegistry;
     private DetectorRegistry detectorRegistry;
     private DataAggregator dataAggregator;
-    private Gson gson;
     private ReentrantLock collectionLock;
+    private SignalSnapshot signalSnapshot;
     private volatile boolean initialized;
     private volatile long lifecycleGeneration;
 
@@ -56,6 +56,18 @@ public final class RiskEngine {
 
     public static void init(Context context, RiskEngineConfig config) {
         getInstance().doInit(context, config);
+    }
+
+    /** Atomically initializes the singleton once. Returns true when this call initialized it. */
+    public static boolean initIfNeeded(Context context, RiskEngineConfig config) {
+        RiskEngine engine = getInstance();
+        synchronized (engine.lifecycleLock) {
+            if (engine.initialized) {
+                return false;
+            }
+            engine.doInit(context, config);
+            return true;
+        }
     }
 
     private void doInit(Context context, RiskEngineConfig requestedConfig) {
@@ -77,10 +89,10 @@ public final class RiskEngine {
             config = requestedConfig;
             CLog.setEnabled(config.isDebugLog());
             taskScheduler = new TaskScheduler();
-            collectorRegistry = new CollectorRegistry(appContext);
-            detectorRegistry = new DetectorRegistry(appContext, config);
+            signalSnapshot = new SignalSnapshot(appContext);
+            collectorRegistry = new CollectorRegistry(appContext, config, signalSnapshot);
+            detectorRegistry = new DetectorRegistry(appContext, config, signalSnapshot);
             dataAggregator = new DataAggregator();
-            gson = new GsonBuilder().create();
             collectionLock = new ReentrantLock(true);
             lifecycleGeneration++;
             initialized = true;
@@ -157,6 +169,7 @@ public final class RiskEngine {
         }
         try {
             ensureCollectionActive(snapshot);
+            snapshot.signalSnapshot.reset();
 
             List<BaseCollector> collectors = snapshot.collectorRegistry.getCollectors();
             List<CollectorResult> collectorResults = snapshot.scheduler.submitAllAndWait(
@@ -231,8 +244,8 @@ public final class RiskEngine {
             engine.collectorRegistry = null;
             engine.detectorRegistry = null;
             engine.dataAggregator = null;
-            engine.gson = null;
             engine.collectionLock = null;
+            engine.signalSnapshot = null;
             engine.config = null;
             engine.appContext = null;
         }
@@ -242,17 +255,26 @@ public final class RiskEngine {
         CLog.i("RiskEngine shutdown");
     }
 
+    /** Collects a fresh report and serializes it. */
+    public static String collectReportJson() {
+        return RiskReportJsonSerializer.serialize(getInstance().doCollectSync());
+    }
+
+    /**
+     * @deprecated The old name obscures that a full collection is performed.
+     * Use {@link #collectReportJson()}.
+     */
+    @Deprecated
     public static String getReportJson() {
-        RiskEngine engine = getInstance();
-        Gson serializer;
-        synchronized (engine.lifecycleLock) {
-            serializer = engine.gson;
+        return collectReportJson();
+    }
+
+    /** Serializes an existing report without performing another collection. */
+    public static String reportToJson(RiskReport report) {
+        if (report == null) {
+            throw new IllegalArgumentException("report must not be null");
         }
-        if (serializer == null) {
-            throw new IllegalStateException("RiskEngine not initialized");
-        }
-        RiskReport report = engine.doCollectSync();
-        return serializer.toJson(report);
+        return RiskReportJsonSerializer.serialize(report);
     }
 
     public static boolean isInitialized() {
@@ -266,7 +288,7 @@ public final class RiskEngine {
             }
             return new EngineSnapshot(
                     config, taskScheduler, collectorRegistry, detectorRegistry, dataAggregator,
-                    collectionLock, lifecycleGeneration);
+                    collectionLock, signalSnapshot, lifecycleGeneration);
         }
     }
 
@@ -309,8 +331,8 @@ public final class RiskEngine {
         }
         for (BaseDetector detector : expected) {
             if (!completed.contains(detector.getName())) {
-                actual.add(DetectionResult.unavailable(
-                        detector.getName(), "timeout_or_execution_failure"));
+                actual.add(DetectionResult.timeout(
+                        detector.getName(), "collection_deadline_exceeded"));
             }
         }
     }
@@ -333,6 +355,7 @@ public final class RiskEngine {
         private final DetectorRegistry detectorRegistry;
         private final DataAggregator dataAggregator;
         private final ReentrantLock collectionLock;
+        private final SignalSnapshot signalSnapshot;
         private final long generation;
 
         private EngineSnapshot(RiskEngineConfig config,
@@ -341,6 +364,7 @@ public final class RiskEngine {
                                DetectorRegistry detectorRegistry,
                                DataAggregator dataAggregator,
                                ReentrantLock collectionLock,
+                               SignalSnapshot signalSnapshot,
                                long generation) {
             this.config = config;
             this.scheduler = scheduler;
@@ -348,6 +372,7 @@ public final class RiskEngine {
             this.detectorRegistry = detectorRegistry;
             this.dataAggregator = dataAggregator;
             this.collectionLock = collectionLock;
+            this.signalSnapshot = signalSnapshot;
             this.generation = generation;
         }
     }

@@ -9,7 +9,10 @@
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="58dp"
+        android:layout_height="wrap_content"
+        android:minHeight="58dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:background="@color/surface_elevated"
         android:elevation="0dp"
         app:contentInsetEnd="20dp"
@@ -224,7 +227,7 @@
                             android:paddingBottom="13dp">
 
                             <TextView
-                                android:id="@+id/tvStatDetections"
+                                android:id="@+id/tvStatRiskScore"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:includeFontPadding="false"
@@ -447,6 +450,18 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="11sp" />
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnCopyReport"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_gravity="end"
+                        android:layout_marginTop="4dp"
+                        android:contentDescription="@string/copy_redacted_report"
+                        android:text="@string/copy_redacted_report"
+                        android:visibility="gone"
+                        app:iconTint="@color/primary" />
+
                     <LinearLayout
                         android:id="@+id/layoutFingerprint"
                         android:layout_width="match_parent"
@@ -471,7 +486,8 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCollect"
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="wrap_content"
+            android:minHeight="54dp"
             android:contentDescription="@string/collect_action"
             android:letterSpacing="0.01"
             android:text="@string/collect_action"

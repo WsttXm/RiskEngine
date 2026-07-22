@@ -4,18 +4,25 @@ import android.content.Context;
 
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.util.CLog;
+import com.wsttxm.riskenginesdk.core.SignalResult;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 public class MountAnalysisDetector extends BaseDetector {
+    private final SignalSnapshot signals;
 
     public MountAnalysisDetector(Context context) {
+        this(context, new SignalSnapshot(context));
+    }
+
+    public MountAnalysisDetector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -29,20 +36,27 @@ public class MountAnalysisDetector extends BaseDetector {
 
         boolean mountsAvailable = checkMounts(evidence);
         boolean mountInfoAvailable = checkMountInfo(evidence);
+        CheckCoverage coverage = new CheckCoverage();
+        if (mountsAvailable) coverage.success();
+        else coverage.failure("proc_mounts_unavailable");
+        if (mountInfoAvailable) coverage.success();
+        else coverage.failure("proc_mountinfo_unavailable");
 
         if (!evidence.isEmpty()) {
-            return risk(RiskLevel.MEDIUM, String.join("; ", evidence));
+            return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 4, 10, false,
+                    evidence, String.join("; ", evidence), coverage);
         }
         if (!mountsAvailable && !mountInfoAvailable) {
             return unavailable("procfs_mounts_unavailable");
         }
-        return safe();
+        return safe(coverage);
     }
 
     private boolean checkMounts(List<String> evidence) {
-        try (BufferedReader br = new BufferedReader(new FileReader("/proc/mounts"))) {
-            String line;
-            while ((line = br.readLine()) != null) {
+        try {
+            SignalResult<String> mounts = signals.getTextFile("/proc/mounts");
+            if (!mounts.isSuccess() || mounts.getValue() == null) return false;
+            for (String line : mounts.getValue().split("\\n")) {
                 String lower = line.toLowerCase(Locale.ROOT);
                 // Magisk overlay
                 if (lower.contains("magisk") || lower.contains("tmpfs /system") ||
@@ -68,9 +82,10 @@ public class MountAnalysisDetector extends BaseDetector {
     }
 
     private boolean checkMountInfo(List<String> evidence) {
-        try (BufferedReader br = new BufferedReader(new FileReader("/proc/self/mountinfo"))) {
-            String line;
-            while ((line = br.readLine()) != null) {
+        try {
+            SignalResult<String> mountInfo = signals.getTextFile("/proc/self/mountinfo");
+            if (!mountInfo.isSuccess() || mountInfo.getValue() == null) return false;
+            for (String line : mountInfo.getValue().split("\\n")) {
                 if (line.contains("magisk") || line.contains("core/mirror")) {
                     addUnique(evidence, "mountinfo:magisk");
                     break;

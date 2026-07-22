@@ -41,25 +41,44 @@ check_java() {
         err "Java not found. Install JDK 17+."
         exit 1
     fi
-    local ver
-    ver=$(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/' | cut -d. -f1)
-    if [[ "$ver" -lt 17 ]]; then
-        err "JDK 17+ required, found version $ver"
+    local version_line major
+    version_line=$(java -version 2>&1 | head -1)
+    if [[ "$version_line" =~ \"1\.([0-9]+)\. ]]; then
+        major="${BASH_REMATCH[1]}"
+    elif [[ "$version_line" =~ \"([0-9]+)(\.|\") ]]; then
+        major="${BASH_REMATCH[1]}"
+    else
+        err "Unable to parse Java version: $version_line"
         exit 1
     fi
-    ok "Java $ver"
+    if (( major < 17 )); then
+        err "JDK 17+ required, found version $major"
+        exit 1
+    fi
+    ok "Java $major"
 }
 
 check_android_sdk() {
     if [[ -z "${ANDROID_HOME:-}" && -z "${ANDROID_SDK_ROOT:-}" ]]; then
-        local default_sdk="$HOME/Library/Android/sdk"
-        if [[ -d "$default_sdk" ]]; then
-            export ANDROID_HOME="$default_sdk"
-            warn "ANDROID_HOME not set, using default: $default_sdk"
-        else
-            err "ANDROID_HOME or ANDROID_SDK_ROOT not set and SDK not found at default path."
+        local user_home="${HOME:?HOME is not set}"
+        local candidates=(
+            "$user_home/Library/Android/sdk"
+            "$user_home/Android/Sdk"
+            "$user_home/android-sdk"
+        )
+        local candidate selected=""
+        for candidate in "${candidates[@]}"; do
+            if [[ -d "$candidate" ]]; then
+                selected="$candidate"
+                break
+            fi
+        done
+        if [[ -z "$selected" ]]; then
+            err "ANDROID_HOME or ANDROID_SDK_ROOT not set and no standard SDK path exists."
             exit 1
         fi
+        export ANDROID_HOME="$selected"
+        warn "ANDROID_HOME not set, using default: $selected"
     fi
     ok "Android SDK: ${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
 }
@@ -74,7 +93,10 @@ build_sdk() {
     info "Building RiskEngine SDK..."
     check_java
     check_android_sdk
-    run_gradle :riskengine-sdk:assembleRelease
+    run_gradle :riskengine-sdk:test :riskengine-sdk:lint \
+        :riskengine-sdk:assembleRelease :riskengine-sdk:sourceReleaseJar \
+        :riskengine-sdk:generatePomFileForReleasePublication \
+        :integration-test:assembleDebug
     local aar="$ROOT_DIR/riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"
     if [[ -f "$aar" ]]; then
         ok "SDK AAR: $aar"
@@ -87,7 +109,7 @@ build_demo() {
     info "Building Demo APK..."
     check_java
     check_android_sdk
-    run_gradle :demo:assembleDebug
+    run_gradle :demo:lintDebug :demo:assembleDebug
     local apk="$ROOT_DIR/demo/build/outputs/apk/debug/demo-debug.apk"
     if [[ -f "$apk" ]]; then
         ok "Demo APK: $apk"
@@ -124,9 +146,9 @@ clean_all() {
 
 build_all() {
     build_sdk
-    echo ""
+    printf '\n'
     build_demo
-    echo ""
+    printf '\n'
     ok "All builds completed."
 }
 

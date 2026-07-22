@@ -6,11 +6,14 @@ import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.PrivacyUtils;
+import com.wsttxm.riskenginesdk.core.SignalResult;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
 import java.util.Set;
 
 public class NativeCollectorBridge {
     private final Context context;
+    private final SignalSnapshot signals;
     private static final boolean NATIVE_AVAILABLE;
     private static final Set<String> ALLOWED_PROPERTIES = Set.of(
             "service.adb.tcp.port", "persist.adb.tcp.port",
@@ -34,8 +37,13 @@ public class NativeCollectorBridge {
     }
 
     public NativeCollectorBridge(Context context) {
+        this(context, null);
+    }
+
+    public NativeCollectorBridge(Context context, SignalSnapshot signals) {
         Context application = context == null ? null : context.getApplicationContext();
         this.context = application != null ? application : context;
+        this.signals = signals;
     }
 
     public static boolean isNativeAvailable() {
@@ -72,44 +80,79 @@ public class NativeCollectorBridge {
     private static native int nativeGetTracerPidRaw();
 
     public static boolean checkRoot() {
-        return callNative(false, NativeCollectorBridge::nativeCheckRootRaw);
+        return valueOr(checkRootResult(), false);
+    }
+
+    public static SignalResult<Boolean> checkRootResult() {
+        return callNativeResult(NativeCollectorBridge::nativeCheckRootRaw);
     }
 
     public static String getRootEvidence() {
-        return callNative("", NativeCollectorBridge::nativeGetRootEvidenceRaw);
+        return valueOr(getRootEvidenceResult(), "");
+    }
+
+    public static SignalResult<String> getRootEvidenceResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetRootEvidenceRaw);
     }
 
     public static String getHookEvidence() {
-        return callNative("", NativeCollectorBridge::nativeGetHookEvidenceRaw);
+        return valueOr(getHookEvidenceResult(), "");
+    }
+
+    public static SignalResult<String> getHookEvidenceResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetHookEvidenceRaw);
     }
 
     public static String checkEmulatorFiles() {
-        return callNative("", NativeCollectorBridge::nativeCheckEmulatorFilesRaw);
+        return valueOr(checkEmulatorFilesResult(), "");
+    }
+
+    public static SignalResult<String> checkEmulatorFilesResult() {
+        return callNativeResult(NativeCollectorBridge::nativeCheckEmulatorFilesRaw);
     }
 
     public static int getThermalZoneCount() {
-        return callNative(-1, NativeCollectorBridge::nativeGetThermalZoneCountRaw);
+        return valueOr(getThermalZoneCountResult(), -1);
+    }
+
+    public static SignalResult<Integer> getThermalZoneCountResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetThermalZoneCountRaw);
     }
 
     public static String getRuntimeArch() {
-        return callNative("", NativeCollectorBridge::nativeGetRuntimeArchRaw);
+        return valueOr(getRuntimeArchResult(), "");
+    }
+
+    public static SignalResult<String> getRuntimeArchResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetRuntimeArchRaw);
     }
 
     public static int getTracerPid() {
-        return callNative(-1, NativeCollectorBridge::nativeGetTracerPidRaw);
+        return valueOr(getTracerPidResult(), -1);
     }
 
-    private static <T> T callNative(T fallback, NativeCall<T> call) {
+    public static SignalResult<Integer> getTracerPidResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetTracerPidRaw);
+    }
+
+    private static <T> SignalResult<T> callNativeResult(NativeCall<T> call) {
         if (!NATIVE_AVAILABLE) {
-            return fallback;
+            return SignalResult.unavailable("native_library_unavailable");
         }
         try {
             T result = call.run();
-            return result == null ? fallback : result;
+            return result == null
+                    ? SignalResult.error("native_returned_null")
+                    : SignalResult.success(result);
         } catch (Exception | LinkageError e) {
             CLog.e("Native detector call failed", e);
-            return fallback;
+            return SignalResult.error(e.getClass().getSimpleName());
         }
+    }
+
+    private static <T> T valueOr(SignalResult<T> result, T fallback) {
+        return result != null && result.isSuccess() && result.getValue() != null
+                ? result.getValue() : fallback;
     }
 
     private interface NativeCall<T> {
@@ -170,7 +213,10 @@ public class NativeCollectorBridge {
                             "persist.sys.timezone", "gsm.version.baseband"
                     };
                     for (String prop : props) {
-                        String value = getSystemProperty(prop);
+                        SignalResult<String> cached = signals == null
+                                ? null : signals.getSystemProperty(prop);
+                        String value = cached == null || cached.getValue() == null
+                                ? getSystemProperty(prop) : cached.getValue();
                         if (value != null && !value.isEmpty()) {
                             result.addValue(prop, value);
                         }

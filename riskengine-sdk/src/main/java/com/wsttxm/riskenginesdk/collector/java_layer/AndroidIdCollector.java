@@ -7,15 +7,24 @@ import android.os.Bundle;
 import android.provider.Settings;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.PrivacyUtils;
 import com.wsttxm.riskenginesdk.util.ShellExecutor;
 
 public class AndroidIdCollector extends BaseCollector {
+    private static final String CONTENT_QUERY_COMMAND =
+            "content query --uri content://settings/secure --where \"name=\\'android_id\\'\"";
+    private final SignalSnapshot signals;
 
     public AndroidIdCollector(Context context) {
+        this(context, new SignalSnapshot(context));
+    }
+
+    public AndroidIdCollector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -65,15 +74,17 @@ public class AndroidIdCollector extends BaseCollector {
 
     private void collectViaContentQuery(CollectorResult result) {
         try {
-            String raw = ShellExecutor.execute(
-                    "content query --uri content://settings/secure --where \"name=\\'android_id\\'\"");
-            if (raw != null && raw.contains("value=")) {
+            ShellExecutor.Result query = signals.getShellResult(CONTENT_QUERY_COMMAND);
+            String raw = query.getStdout();
+            if (query.isSuccess() && raw.contains("value=")) {
                 int idx = raw.indexOf("value=");
                 String value = raw.substring(idx + 6).trim();
                 if (value.contains(",")) {
                     value = value.substring(0, value.indexOf(","));
                 }
-                addHashed(result, "content_query", value);
+                if (!"NULL".equalsIgnoreCase(value) && !"null".equalsIgnoreCase(value)) {
+                    addHashed(result, "content_query", value);
+                }
             }
         } catch (Exception e) {
             CLog.e("AndroidId content_query failed", e);

@@ -15,6 +15,15 @@ import static org.junit.Assert.assertEquals;
 public class RiskScoringModelTest {
 
     @Test
+    public void scoreThresholdsHaveStableBoundaries() {
+        assertEquals(RiskLevel.SAFE, reportAtScore(0).getOverallRiskLevel());
+        assertEquals(RiskLevel.LOW, reportAtScore(1).getOverallRiskLevel());
+        assertEquals(RiskLevel.MEDIUM, reportAtScore(4).getOverallRiskLevel());
+        assertEquals(RiskLevel.HIGH, reportAtScore(10).getOverallRiskLevel());
+        assertEquals(RiskLevel.DEADLY, reportAtScore(18).getOverallRiskLevel());
+    }
+
+    @Test
     public void aggregatesWeightedScoreInsteadOfOnlyTakingMaxLevel() {
         RiskReport report = new RiskReport(
                 new DeviceFingerprint(),
@@ -67,5 +76,16 @@ public class RiskScoringModelTest {
         assertEquals(2, report.getWarningCount());
         assertEquals(0, report.getRiskScore());
         assertEquals(RiskLevel.LOW, report.getOverallRiskLevel());
+    }
+
+    private RiskReport reportAtScore(int score) {
+        if (score == 0) {
+            return new RiskReport(new DeviceFingerprint(), List.of(
+                    new DetectionResult("test", RiskLevel.SAFE, DetectionStatus.NORMAL,
+                            0, 18, false, List.of(), "")));
+        }
+        return new RiskReport(new DeviceFingerprint(), List.of(
+                new DetectionResult("test", RiskLevel.MEDIUM, DetectionStatus.WARNING,
+                        score, Math.max(18, score), false, List.of("signal"), "signal")));
     }
 }

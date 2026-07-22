@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "RiskEngineSDK"
 include(":demo")
 include(":riskengine-sdk")
+include(":integration-test")

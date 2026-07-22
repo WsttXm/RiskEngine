@@ -1,0 +1,74 @@
+name: Android CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build dependencies
+        run: |
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973"
+
+      - name: Test, lint and build
+        run: |
+          ./gradlew \
+            :riskengine-sdk:test \
+            :riskengine-sdk:lint \
+            :riskengine-sdk:assembleRelease \
+            :riskengine-sdk:sourceReleaseJar \
+            :riskengine-sdk:generatePomFileForReleasePublication \
+            :integration-test:assembleDebug \
+            :demo:lintDebug \
+            :demo:assembleDebug \
+            --no-daemon
+
+      - name: Verify distributable artifacts
+        run: |
+          test -s riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar
+          test -s riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar
+          test -s riskengine-sdk/build/publications/release/pom-default.xml
+          test -s demo/build/outputs/apk/debug/demo-debug.apk
+          test -s integration-test/build/outputs/apk/debug/integration-test-debug.apk
+          unzip -t riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar
+          unzip -t demo/build/outputs/apk/debug/demo-debug.apk
+          unzip -t integration-test/build/outputs/apk/debug/integration-test-debug.apk
+
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: riskengine-ci-${{ github.sha }}
+          path: |
+            riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar
+            riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar
+            riskengine-sdk/build/publications/release/pom-default.xml
+            demo/build/outputs/apk/debug/demo-debug.apk
+          if-no-files-found: error

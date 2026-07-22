@@ -8,6 +8,8 @@ import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.ProcfsUtils;
+import com.wsttxm.riskenginesdk.core.SignalResult;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -22,9 +24,15 @@ import java.util.Set;
 public class HookFrameworkDetector extends BaseDetector {
 
     private static final int DEFAULT_FRIDA_PORT = 27042;
+    private final SignalSnapshot signals;
 
     public HookFrameworkDetector(Context context) {
+        this(context, new SignalSnapshot(context));
+    }
+
+    public HookFrameworkDetector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -36,36 +44,36 @@ public class HookFrameworkDetector extends BaseDetector {
     protected DetectionResult detect() {
         LinkedHashSet<String> details = new LinkedHashSet<>();
         SignalScore score = new SignalScore();
+        CheckCoverage coverage = new CheckCoverage();
 
-        checkXposed(details, score);
-        checkFrida(details, score);
-        checkNativeHooks(details, score);
+        checkXposed(details, score, coverage);
+        checkFrida(details, score, coverage);
+        checkNativeHooks(details, score, coverage);
 
         if (!details.isEmpty()) {
             List<String> detailList = new ArrayList<>(details);
             if (score.strong >= 2 || (score.strong >= 1 && score.medium >= 2)) {
                 return result(RiskLevel.DEADLY, DetectionStatus.DANGER, 10, 10, false,
-                        detailList, String.join("; ", detailList));
+                        detailList, String.join("; ", detailList), coverage);
             }
             if (score.strong >= 1 || score.medium >= 2) {
                 return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
-                        detailList, String.join("; ", detailList));
+                        detailList, String.join("; ", detailList), coverage);
             }
             if (score.medium >= 1) {
                 return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 2, 10, true,
-                        detailList, String.join("; ", detailList));
+                        detailList, String.join("; ", detailList), coverage);
             }
             return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
-                    detailList, String.join("; ", detailList));
+                    detailList, String.join("; ", detailList), coverage);
         }
-        return safe();
+        return safe(coverage);
     }
 
-    private void checkXposed(Set<String> details, SignalScore score) {
+    private void checkXposed(Set<String> details, SignalScore score, CheckCoverage coverage) {
         // Check for Xposed's sHookedMethodCallbacks
         try {
-            ClassLoader cl = ClassLoader.getSystemClassLoader();
-            Class<?> xposedBridge = cl.loadClass("de.robv.android.xposed.XposedBridge");
+            Class<?> xposedBridge = loadXposedBridge();
             if (xposedBridge != null) {
                 addMedium(details, score, "xposed_class_found");
                 Field field = xposedBridge.getDeclaredField("sHookedMethodCallbacks");
@@ -75,10 +83,13 @@ public class HookFrameworkDetector extends BaseDetector {
                     addStrong(details, score, "xposed_hooks_active:" + ((Map<?, ?>) callbacks).size());
                 }
             }
+            coverage.success();
         } catch (ClassNotFoundException ignored) {
             // Xposed not present
+            coverage.success();
         } catch (Exception e) {
             CLog.e("Xposed check error", e);
+            coverage.failure("xposed_class:" + e.getClass().getSimpleName());
         }
 
         // Check stack trace for Xposed
@@ -92,28 +103,66 @@ public class HookFrameworkDetector extends BaseDetector {
                     break;
                 }
             }
-        } catch (Exception ignored) {}
+            coverage.success();
+        } catch (Exception e) {
+            coverage.failure("xposed_stack:" + e.getClass().getSimpleName());
+        }
     }
 
-    private void checkFrida(Set<String> details, SignalScore score) {
+    private Class<?> loadXposedBridge() throws ClassNotFoundException {
+        String className = "de.robv.android.xposed.XposedBridge";
+        ClassLoader[] loaders = {
+                context == null ? null : context.getClassLoader(),
+                HookFrameworkDetector.class.getClassLoader(),
+                Thread.currentThread().getContextClassLoader(),
+                ClassLoader.getSystemClassLoader()
+        };
+        for (ClassLoader loader : loaders) {
+            if (loader == null) {
+                continue;
+            }
+            try {
+                return Class.forName(className, false, loader);
+            } catch (ClassNotFoundException ignored) {
+                // Try the next loader. Injected frameworks are commonly visible
+                // from the application loader but not the system loader.
+            }
+        }
+        throw new ClassNotFoundException(className);
+    }
+
+    private void checkFrida(Set<String> details, SignalScore score, CheckCoverage coverage) {
         // Check /proc/self/maps for Frida
-        try (BufferedReader br = new BufferedReader(new FileReader("/proc/self/maps"))) {
-            String line;
-            while ((line = br.readLine()) != null) {
+        try {
+            SignalResult<List<String>> maps = signals.getSelfMaps();
+            if (!maps.isSuccess() || maps.getValue() == null) {
+                coverage.failure("frida_maps:" + maps.getFailureReason());
+            } else {
+            for (String line : maps.getValue()) {
                 String lower = line.toLowerCase(Locale.ROOT);
                 if (lower.contains("frida") || lower.contains("libgadget.so")) {
                     addStrong(details, score, "frida_maps");
                     break;
                 }
             }
-        } catch (Exception ignored) {}
+            coverage.success();
+            }
+        } catch (Exception e) {
+            coverage.failure("frida_maps:" + e.getClass().getSimpleName());
+        }
 
         // Observe the TCP table without actively connecting to local services.
         try {
-            if (ProcfsUtils.findLoopbackListeningPorts().contains(DEFAULT_FRIDA_PORT)) {
+            SignalResult<Set<Integer>> ports = signals.getLoopbackListeningPorts();
+            if (!ports.isSuccess() || ports.getValue() == null) {
+                coverage.failure("frida_ports:" + ports.getFailureReason());
+            } else if (ports.getValue().contains(DEFAULT_FRIDA_PORT)) {
                 addMedium(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
             }
-        } catch (Exception ignored) {}
+            if (ports.isSuccess()) coverage.success();
+        } catch (Exception e) {
+            coverage.failure("frida_ports:" + e.getClass().getSimpleName());
+        }
 
         // Check threads for Frida
         try {
@@ -135,18 +184,33 @@ public class HookFrameworkDetector extends BaseDetector {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+            if (tasks == null) {
+                coverage.failure("frida_threads:procfs_unavailable");
+            } else {
+                coverage.success();
+            }
+        } catch (Exception e) {
+            coverage.failure("frida_threads:" + e.getClass().getSimpleName());
+        }
 
         try {
-            List<Integer> pids = ProcfsUtils.findPidsByNameFragments("frida-server", "frida_helper");
+            SignalResult<List<ProcfsUtils.ProcessInfo>> processes = signals.getProcesses();
+            if (!processes.isSuccess() || processes.getValue() == null) {
+                coverage.failure("frida_processes:" + processes.getFailureReason());
+                return;
+            }
+            List<Integer> pids = ProcfsUtils.findPidsByNameFragments(
+                    processes.getValue(), "frida-server", "frida_helper");
             for (Integer pid : pids) {
                 addStrong(details, score, "frida_pid:" + pid);
                 for (Integer port : ProcfsUtils.findPidLoopbackListeningPorts(pid)) {
                     addStrong(details, score, "frida_pid_port:" + port);
                 }
             }
+            coverage.success();
         } catch (Exception e) {
             CLog.e("Frida pid correlation failed", e);
+            coverage.failure("frida_processes:" + e.getClass().getSimpleName());
         }
     }
 
@@ -156,12 +220,18 @@ public class HookFrameworkDetector extends BaseDetector {
         return "gmain";
     }
 
-    private void checkNativeHooks(Set<String> details, SignalScore score) {
+    private void checkNativeHooks(Set<String> details, SignalScore score, CheckCoverage coverage) {
         if (!NativeCollectorBridge.isNativeAvailable()) {
+            coverage.failure("native_hook:unavailable");
             return;
         }
         try {
-            String nativeEvidence = NativeCollectorBridge.getHookEvidence();
+            SignalResult<String> nativeResult = NativeCollectorBridge.getHookEvidenceResult();
+            if (!nativeResult.isSuccess()) {
+                coverage.failure("native_hook:" + nativeResult.getFailureReason());
+                return;
+            }
+            String nativeEvidence = nativeResult.getValue();
             if (nativeEvidence != null && !nativeEvidence.isEmpty()) {
                 for (String item : nativeEvidence.split(",")) {
                     String token = item.trim();
@@ -171,18 +241,23 @@ public class HookFrameworkDetector extends BaseDetector {
                     if (token.startsWith("maps:frida")
                             || token.startsWith("maps:gadget")) {
                         addStrong(details, score, token);
-                    } else if (token.startsWith("anon_exec:")
-                            || token.startsWith("thread:")
+                    } else if (token.startsWith("thread:")
                             || token.startsWith("maps:xposed")
                             || token.startsWith("maps:substrate")) {
                         addMedium(details, score, token);
+                    } else if (token.startsWith("anon_exec:")) {
+                        // ART and OEM runtimes can legitimately create anonymous
+                        // executable regions. Keep it as correlating context only.
+                        addWeak(details, score, token);
                     } else {
                         addWeak(details, score, token);
                     }
                 }
             }
+            coverage.success();
         } catch (Exception | LinkageError e) {
             CLog.e("Native hook check failed", e);
+            coverage.failure("native_hook:" + e.getClass().getSimpleName());
         }
     }
 
