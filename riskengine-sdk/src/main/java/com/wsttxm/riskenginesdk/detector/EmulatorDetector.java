@@ -7,12 +7,14 @@ import android.hardware.SensorManager;
 import android.os.Build;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
-import com.wsttxm.riskenginesdk.model.DetectionStatus;
-import com.wsttxm.riskenginesdk.model.DetectionResult;
-import com.wsttxm.riskenginesdk.model.RiskLevel;
-import com.wsttxm.riskenginesdk.util.CLog;
+import com.wsttxm.riskenginesdk.core.EmulatorEvidenceClassifier;
 import com.wsttxm.riskenginesdk.core.SignalResult;
 import com.wsttxm.riskenginesdk.core.SignalSnapshot;
+import com.wsttxm.riskenginesdk.generated.DetectionLists;
+import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DetectionStatus;
+import com.wsttxm.riskenginesdk.model.RiskLevel;
+import com.wsttxm.riskenginesdk.util.CLog;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -45,24 +47,33 @@ public class EmulatorDetector extends BaseDetector {
         CheckCoverage coverage = new CheckCoverage();
 
         checkBuildProperties(evidence, coverage);
+        checkQemuProperties(evidence, coverage);
         checkHardwareFeatures(evidence, coverage);
         checkEmulatorFiles(evidence, coverage);
         checkThermalZones(evidence, coverage);
         checkRuntimeArch(evidence, coverage);
+        checkCpuAndDisk(evidence, coverage);
+        checkScreen(evidence, coverage);
         checkSensors(evidence, coverage);
         checkEmulatorIp(evidence, coverage);
         checkEmulatorPackages(evidence, coverage);
         checkContainerSignals(evidence, coverage);
 
         int strongSignals = 0;
+        int weakSignals = 0;
+        int noiseWeak = 0;
         for (String signal : evidence) {
-            if (isStrongSignal(signal)) {
+            EmulatorEvidenceClassifier.Rank rank = EmulatorEvidenceClassifier.rank(signal);
+            if (rank == EmulatorEvidenceClassifier.Rank.STRONG) {
                 strongSignals++;
+            } else {
+                weakSignals++;
+                if (EmulatorEvidenceClassifier.isHardwareNoise(signal)) noiseWeak++;
             }
         }
-        int weakSignals = evidence.size() - strongSignals;
+        int usefulWeak = weakSignals - noiseWeak;
 
-        if (strongSignals >= 2 || (strongSignals >= 1 && weakSignals >= 2)) {
+        if (strongSignals >= 2 || (strongSignals >= 1 && usefulWeak >= 1)) {
             return result(RiskLevel.HIGH, DetectionStatus.DANGER, 8, 10, false,
                     evidence, String.join("; ", evidence), coverage);
         } else if (strongSignals == 1) {
@@ -75,24 +86,11 @@ public class EmulatorDetector extends BaseDetector {
         return safe(coverage);
     }
 
-    private boolean isStrongSignal(String signal) {
-        return signal.startsWith("fingerprint:")
-                || signal.startsWith("model:")
-                || signal.startsWith("manufacturer:")
-                || signal.startsWith("product:")
-                || signal.startsWith("hardware:")
-                || signal.startsWith("board:")
-                || signal.startsWith("emu_file:")
-                || signal.startsWith("emu_pkg:");
-    }
-
     private void checkBuildProperties(List<String> evidence, CheckCoverage coverage) {
         String fingerprint = Build.FINGERPRINT.toLowerCase(Locale.ROOT);
         if (fingerprint.contains("vbox")) {
             evidence.add("fingerprint:" + Build.FINGERPRINT);
-        } else if (fingerprint.contains("generic")) {
-            // "generic" is also used by legitimate AOSP-derived and embedded
-            // builds, so it must be correlated with stronger evidence.
+        } else if (fingerprint.contains("generic") || fingerprint.contains("emulator")) {
             evidence.add("generic_fingerprint:" + Build.FINGERPRINT);
         }
 
@@ -116,7 +114,7 @@ public class EmulatorDetector extends BaseDetector {
             }
         }
 
-        String[] hwKeywords = {"ranchu", "vbox86", "goldfish"};
+        String[] hwKeywords = {"ranchu", "goldfish", "vbox86"};
         for (String kw : hwKeywords) {
             if (Build.HARDWARE.equalsIgnoreCase(kw)) {
                 evidence.add("hardware:" + Build.HARDWARE);
@@ -130,22 +128,35 @@ public class EmulatorDetector extends BaseDetector {
         coverage.success();
     }
 
+    private void checkQemuProperties(List<String> evidence, CheckCoverage coverage) {
+        try {
+            for (String prop : new String[]{"ro.kernel.qemu", "ro.boot.qemu"}) {
+                SignalResult<String> value = signals.getSystemProperty(prop);
+                if (!value.isSuccess()) continue;
+                String raw = value.getValue() == null ? "" : value.getValue().trim();
+                if ("1".equals(raw)) {
+                    evidence.add("qemu_prop:" + prop);
+                }
+            }
+            SignalResult<String> virtual = signals.getSystemProperty("ro.hardware.virtual");
+            if (virtual.isSuccess() && virtual.getValue() != null && !virtual.getValue().isBlank()) {
+                evidence.add("qemu_prop:ro.hardware.virtual");
+            }
+            coverage.success();
+        } catch (Exception e) {
+            coverage.failure("qemu_props:" + e.getClass().getSimpleName());
+        }
+    }
+
     private void checkHardwareFeatures(List<String> evidence, CheckCoverage coverage) {
         try {
             PackageManager pm = context.getPackageManager();
-            String[] features = {
-                    PackageManager.FEATURE_BLUETOOTH,
-                    PackageManager.FEATURE_CAMERA_FLASH,
-                    PackageManager.FEATURE_TELEPHONY
-            };
-            int missing = 0;
-            for (String feature : features) {
-                if (!pm.hasSystemFeature(feature)) {
-                    missing++;
-                }
-            }
-            if (missing > 0) {
-                evidence.add("limited_hardware_features:" + missing);
+            boolean touchscreen = pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
+            boolean telephony = pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
+            String radio = Build.getRadioVersion();
+            if (touchscreen && !telephony && radio != null && !radio.isBlank()
+                    && !"unknown".equalsIgnoreCase(radio)) {
+                evidence.add("missing_feature:telephony");
             }
             coverage.success();
         } catch (Exception e) {
@@ -167,7 +178,14 @@ public class EmulatorDetector extends BaseDetector {
             }
             String found = nativeResult.getValue();
             if (found != null && !found.isEmpty()) {
-                evidence.add("emu_file:" + found);
+                for (String path : found.split(",")) {
+                    if (path.contains("qemu_pipe") || path.contains("goldfish_pipe")
+                            || path.contains("qemu_trace") || path.contains("qemud")) {
+                        evidence.add("qemu_pipe:" + path.trim());
+                    } else {
+                        evidence.add("emu_file:" + path.trim());
+                    }
+                }
             }
             coverage.success();
         } catch (Exception | LinkageError e) {
@@ -187,8 +205,7 @@ public class EmulatorDetector extends BaseDetector {
                 coverage.failure("thermal_zones:" + nativeResult.getFailureReason());
                 return;
             }
-            int count = nativeResult.getValue();
-            if (count == 0) {
+            if (nativeResult.getValue() == 0) {
                 evidence.add("no_thermal_zones");
             }
             coverage.success();
@@ -220,6 +237,76 @@ public class EmulatorDetector extends BaseDetector {
         }
     }
 
+    private void checkCpuAndDisk(List<String> evidence, CheckCoverage coverage) {
+        try {
+            SignalResult<String> cpu = signals.getCpuInfo();
+            if (cpu.isSuccess() && cpu.getValue() != null) {
+                String lower = cpu.getValue().toLowerCase(Locale.ROOT);
+                if (lower.contains("goldfish") || lower.contains("ranchu")
+                        || lower.contains("qemu") || lower.contains("hypervisor")) {
+                    evidence.add("cpu:hypervisor");
+                }
+                coverage.success();
+            } else {
+                coverage.failure("cpu_info:" + cpu.getFailureReason());
+            }
+        } catch (Exception e) {
+            coverage.failure("cpu_info:" + e.getClass().getSimpleName());
+        }
+        try {
+            SignalResult<Long> disk = signals.getDiskSizeData();
+            if (disk.isSuccess() && disk.getValue() != null) {
+                if (disk.getValue() > 0 && disk.getValue() < 4L * 1024 * 1024 * 1024) {
+                    evidence.add("disk_small");
+                }
+                coverage.success();
+            } else {
+                coverage.failure("disk_size:" + disk.getFailureReason());
+            }
+        } catch (Exception e) {
+            coverage.failure("disk_size:" + e.getClass().getSimpleName());
+        }
+        try {
+            SignalResult<String> kernel = signals.getKernelInfo();
+            if (kernel.isSuccess() && kernel.getValue() != null) {
+                String lower = kernel.getValue().toLowerCase(Locale.ROOT);
+                if (lower.contains("x86_64") || lower.contains("i686") || lower.contains("i386")) {
+                    if (!containsPrefix(evidence, "runtime_arch:")) {
+                        evidence.add("runtime_arch:X86_64");
+                    }
+                }
+                coverage.success();
+            } else {
+                coverage.failure("kernel_info:" + kernel.getFailureReason());
+            }
+        } catch (Exception e) {
+            coverage.failure("kernel_info:" + e.getClass().getSimpleName());
+        }
+    }
+
+    private void checkScreen(List<String> evidence, CheckCoverage coverage) {
+        try {
+            SignalResult<SignalSnapshot.ScreenMetrics> screen = signals.getScreenMetrics();
+            if (!screen.isSuccess() || screen.getValue() == null) {
+                coverage.failure("screen:" + screen.getFailureReason());
+                return;
+            }
+            SignalSnapshot.ScreenMetrics metrics = screen.getValue();
+            boolean stockDensity = metrics.densityDpi == 160 || metrics.densityDpi == 240;
+            boolean equalDpi = Math.abs(metrics.xdpi - metrics.ydpi) < 0.01f;
+            boolean stockRes = (metrics.width == 1080 && metrics.height == 1920)
+                    || (metrics.width == 720 && metrics.height == 1280)
+                    || (metrics.width == 1920 && metrics.height == 1080)
+                    || (metrics.width == 1280 && metrics.height == 720);
+            if (stockDensity && equalDpi && stockRes) {
+                evidence.add("screen_stock");
+            }
+            coverage.success();
+        } catch (Exception e) {
+            coverage.failure("screen:" + e.getClass().getSimpleName());
+        }
+    }
+
     private void checkSensors(List<String> evidence, CheckCoverage coverage) {
         try {
             SensorManager sm = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
@@ -228,7 +315,6 @@ public class EmulatorDetector extends BaseDetector {
                 if (sensors.size() < 5) {
                     evidence.add("low_sensor_count:" + sensors.size());
                 }
-                // Check for AOSP vendor
                 for (Sensor s : sensors) {
                     if ("AOSP".equalsIgnoreCase(s.getVendor())) {
                         evidence.add("aosp_sensor_vendor:" + s.getName());
@@ -269,14 +355,9 @@ public class EmulatorDetector extends BaseDetector {
     }
 
     private void checkEmulatorPackages(List<String> evidence, CheckCoverage coverage) {
-        String[] emulatorPackages = {
-                "com.google.android.launcher.layouts.genymotion",
-                "com.bluestacks",
-                "com.bignox.app"
-        };
         try {
             PackageManager pm = context.getPackageManager();
-            for (String pkg : emulatorPackages) {
+            for (String pkg : DetectionLists.EMULATOR_PACKAGES) {
                 try {
                     pm.getPackageInfo(pkg, 0);
                     evidence.add("emu_pkg:" + pkg);
@@ -295,11 +376,23 @@ public class EmulatorDetector extends BaseDetector {
                 coverage.failure("container_signals:" + container.getFailureReason());
                 return;
             }
-            evidence.addAll(container.getValue());
+            for (String signal : container.getValue()) {
+                if ("mount_overlay".equals(signal)) {
+                    continue;
+                }
+                evidence.add(signal);
+            }
             coverage.success();
         } catch (Exception e) {
             CLog.e("Container signal check failed", e);
             coverage.failure("container_signals:" + e.getClass().getSimpleName());
         }
+    }
+
+    private static boolean containsPrefix(List<String> evidence, String prefix) {
+        for (String item : evidence) {
+            if (item.startsWith(prefix)) return true;
+        }
+        return false;
     }
 }

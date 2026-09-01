@@ -1,5 +1,6 @@
 package com.wsttxm.riskenginesdk.core;
 
+import com.wsttxm.riskenginesdk.CollectScene;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
@@ -17,6 +18,12 @@ public class DataAggregator {
 
     public RiskReport aggregate(List<CollectorResult> collectorResults,
                                 List<DetectionResult> detectionResults) {
+        return aggregate(collectorResults, detectionResults, CollectScene.STANDARD);
+    }
+
+    public RiskReport aggregate(List<CollectorResult> collectorResults,
+                                List<DetectionResult> detectionResults,
+                                CollectScene scene) {
         Objects.requireNonNull(collectorResults, "collectorResults must not be null");
         Objects.requireNonNull(detectionResults, "detectionResults must not be null");
         DeviceFingerprint fingerprint = new DeviceFingerprint();
@@ -25,8 +32,12 @@ public class DataAggregator {
             fingerprint.addResult(cr);
         }
 
-        // Add inconsistency detections
-        List<DetectionResult> allDetections = new ArrayList<>(detectionResults);
+        List<DetectionResult> allDetections = CorrelationEngine.applyScene(
+                CorrelationEngine.dedupeFamilies(detectionResults), scene);
+        DetectionResult correlated = CorrelationEngine.correlate(allDetections, scene);
+        if (correlated != null) {
+            allDetections.add(correlated);
+        }
         addCollectionCoverageSignal(collectorResults, allDetections);
         if (fingerprint.hasInconsistency()) {
             List<String> inconsistent = fingerprint.getInconsistentFields();
@@ -46,7 +57,7 @@ public class DataAggregator {
         }
 
         addSyntheticFingerprintSignals(fingerprint, allDetections);
-        return new RiskReport(fingerprint, allDetections);
+        return new RiskReport(fingerprint, allDetections, scene);
     }
 
     private void addCollectionCoverageSignal(List<CollectorResult> collectorResults,

@@ -16,6 +16,7 @@ public class RiskEngineConfigTest {
         assertTrue(config.isEnableHookDetection());
         assertEquals(10_000, config.getCollectTimeoutMs());
         assertEquals(PrivacyProfile.BALANCED, config.getPrivacyProfile());
+        assertEquals(CollectScene.STANDARD, config.getCollectScene());
         assertTrue(config.isCollectAndroidId());
         assertFalse(config.isCollectBootId());
         assertFalse(config.isCollectDrmId());
@@ -91,6 +92,8 @@ public class RiskEngineConfigTest {
                 .enableCustomRomDetection(false)
                 .build();
 
-        assertTrue(new DetectorRegistry(null, config).getDetectors().isEmpty());
+        assertEquals(1, new DetectorRegistry(null, config).getDetectors().size());
+        assertEquals("native_tamper",
+                new DetectorRegistry(null, config).getDetectors().get(0).getName());
     }
 }

@@ -1,134 +1,423 @@
 # RiskEngine 实现说明
 
-本文档描述当前源码中的实际契约。公开用法以 [README_zh.md](../README_zh.md) 为准。
+本文档是当前源码中的契约，而不是设计意向。宿主集成以 [README_zh.md](../README_zh.md) 为准。典型环境下的预期证据族见 [Adversarial_Matrix.md](./Adversarial_Matrix.md)。
 
-## 1. 架构与采集流程
+## 1. 定位与模块
+
+RiskEngine 是本地 Android 风险信号 SDK：Java 负责编排、隐私、评分与报告；C++17 JNI 负责抗 libc hook 的 I/O、maps 解析、路径探测与完整性检查。没有服务端、没有上报、不依赖 Play Integrity。
+
+仓库模块：
+
+| 模块 | 作用 |
+| --- | --- |
+| `riskengine-sdk` | 可发布 AAR。Java 11 字节码，minSdk 30，compileSdk 36。AAR 自身不 minify |
+| `demo` | 本地诊断控制台。Debug 临时签名；Release 混淆但未签正式证书 |
+| `integration-test` | 只依赖生成的 Release AAR，验证独立宿主能编译并链接公开 API |
+
+当前开发版本：`1.1.0-SNAPSHOT`（`gradle.properties` 的 `riskEngineVersion`）。Tag 发布工作流会覆盖 `releaseVersionName`。
+
+## 2. 架构与采集流程
 
 ```text
 宿主调用
-  -> RiskEngine 生命周期快照
-  -> coordinator 单线程串行请求
-  -> collectionLock（总时限包含排队）
+  -> RiskEngine 生命周期快照（generation、config、registries、lock）
+  -> coordinator 单线程串行请求（队列上限 16）
+  -> collectionLock（总时限包含排队等待）
   -> SignalSnapshot.reset()
-  -> worker 池并行 Collector
+  -> worker 池（4 线程）并行 Collector
   -> worker 池并行 Detector
   -> DataAggregator
+       applyScene -> dedupeFamilies -> correlate
+       collector 覆盖信号 / 多来源不一致 / 合成字段
   -> 不可变 RiskReport
 ```
 
-- `TaskScheduler` 使用独立 coordinator 与 4 线程 worker，避免等待批任务时占满 worker。
-- coordinator 队列上限为 16；队列满或关闭时异步接口调用 `onError`。
-- `collectTimeout` 是从请求入队开始计算的总期限。未在期限内返回的任务会生成明确的超时/错误覆盖项。
-- 同步采集禁止在主线程执行。异步回调不自动切换到主线程。
-- `shutdown()` 增加生命周期代次、取消任务并清空注册表；旧代次结果不会交付。
+要点：
 
-## 2. 生命周期 API
+- `TaskScheduler` 把 coordinator 与 worker 分开，避免等待批任务的线程占满执行该批任务的池。
+- 异步请求在队列满或 SDK 关闭时调用 `onError`（`RejectedExecutionException` 包装为 `IllegalStateException`）。
+- `collectTimeout` 从请求入队开始计算。未在期限内返回的任务由 `addMissingCollectorResults` / `addMissingDetectionResults` 补成明确的超时/错误覆盖项。
+- 同步采集禁止 Android 主线程。异步回调不自动切到主线程。
+- `shutdown()` 增加生命周期代次、取消任务并清空注册表。旧代次结果不会交付；进行中的 `doCollectSync` 会在锁边界检查 generation。
+
+并发请求被 `collectionLock` 公平串行化。第二次请求若在期限内拿不到锁，返回超时报告而不是并行再跑一遍。
+
+## 3. 生命周期 API
 
 | API | 行为 |
 | --- | --- |
-| `init(context, config)` | 严格初始化；重复调用抛出 `IllegalStateException` |
+| `init(context, config)` | 严格初始化；重复调用抛 `IllegalStateException` |
 | `initIfNeeded(context, config)` | 原子按需初始化；已初始化时返回 `false` |
-| `collect(callback)` | 异步完整采集；回调运行在线程池线程 |
-| `collectSync()` | 同步完整采集；主线程调用会被拒绝 |
-| `collectReportJson()` | 完整采集后序列化 JSON |
-| `reportToJson(report)` | 只序列化已有报告，不重复采集 |
-| `getReportJson()` | 已弃用兼容入口，等价于 `collectReportJson()` |
-| `shutdown()` | 取消任务并释放 SDK 资源 |
+| `collect(callback)` | 使用配置中的默认 `CollectScene` 异步采集 |
+| `collect(scene, callback)` | 覆盖本次场景 |
+| `collectSync()` / `collectSync(scene)` | 同步完整采集；主线程抛异常 |
+| `collectReportJson()` | `collectSync()` 后序列化 |
+| `reportToJson(report)` | 只序列化，不采集 |
+| `getReportJson()` | 已弃用，等价于 `collectReportJson()` |
+| `shutdown()` | 取消任务并释放资源 |
 
-## 3. 结果语义
+配置默认值：所有检测器组开启、`debugLog=false`、超时 10_000 ms、`PrivacyProfile.BALANCED`、`CollectScene.STANDARD`。`native_tamper` 不受配置开关控制，始终注册。
 
-### 3.1 Collector
+## 4. Collector
 
-`CollectorResult.Status`：
+`CollectorResult.Status`：`SUCCESS`、`EMPTY`、`ERROR`、`UNSUPPORTED`。
 
-- `SUCCESS`：至少一个值可用；
-- `EMPTY`：执行完成但没有可用值；
-- `ERROR`：执行失败或未能在总期限内返回；
-- `UNSUPPORTED`：平台或 Native 库不支持该信号。
+`compareSources=true` 仅用于「同一语义值的多个来源」。来源不一致时 `DeviceFingerprint` 记录字段名，聚合器生成 `multi_source_validation`（`MEDIUM` / `WARNING` / 分数 4 / 可处置）。
 
-`compareSources=true` 仅用于“同一语义值的多个来源”。来源值不一致时，`DeviceFingerprint` 记录字段名，并由聚合器生成 `multi_source_validation` 信号。
+### 4.1 Java 层
 
-### 3.2 Detector
+| `fieldName` | 类 | 内容 | 隐私约束 |
+| --- | --- | --- | --- |
+| `android_id` | `AndroidIdCollector` | 应用范围 SHA-256（包名加盐） | `BALANCED`/`DIAGNOSTIC`，可被 `collectAndroidId` 覆盖 |
+| `build_props` | `BuildPropsCollector` | `Build.*` 非敏感属性 | 始终 |
+| `screen_info` | `ScreenInfoCollector` | 宽高、dpi、密度 | 始终；与 `SignalSnapshot` 共享 |
+| `apk_signature` | `ApkSignatureCollector` | 签名证书哈希 | 始终 |
+| `bluetooth_info` | `BluetoothCapabilityCollector` | 能力，不含 MAC | 始终 |
+| `wifi_info` | `WifiInfoCollector` | 能力（如 Wi-Fi Direct），不含 SSID/BSSID/MAC | 始终 |
+| `telephony` | `TelephonyCollector` | 电话类型、SIM 状态等能力，不含 IMEI/IMSI | 始终 |
+| `settings` | `SettingsCollector` | 开发者选项等 | 始终 |
+| `adb_state` | `AdbStateCollector` | USB/Wi-Fi ADB | 始终；与 Detector 共享 `AdbInspector` |
+| `container_signals` | `ContainerSignalCollector` | cgroup / 容器路径 | 始终 |
 
-风险表现与执行状态互相独立：
+### 4.2 Native 层（JNI bridge）
 
-| 类型 | 枚举 |
+| `fieldName` | 内容 | 隐私约束 |
+| --- | --- | --- |
+| `drm_id` | Widevine 应用范围哈希 | 仅 `DIAGNOSTIC` 或 `collectDrmId(true)` |
+| `boot_id` | `/proc/sys/kernel/random/boot_id` 应用范围哈希 | 仅 `DIAGNOSTIC` 或 `collectBootId(true)` |
+| `system_properties_native` | 白名单属性，见 ini `[properties]` | 始终 |
+| `cpu_info` | `/proc/cpuinfo` 摘要 | 始终 |
+| `disk_size` | 数据分区大小 | 始终 |
+| `kernel_info` | `uname` 等 | 始终 |
+
+系统属性查询经过 `DetectionLists.ALLOWED_PROPERTIES` 白名单；不在名单中的 key 返回空串。
+
+### 4.3 合成字段
+
+聚合器在指纹中追加，**不计入覆盖率**：
+
+- `hook_memory_signals`：来自 `hook_framework` 的 `anon_exec:` / `maps:` / `frida_pid_port:` 摘要
+- `runtime_integrity_score_inputs`：各检测器状态与可处置分数汇总
+
+失败的 Collector 会在 `detections` 中追加 `collector:<fieldName>` 的 `UNAVAILABLE` 项，供覆盖统计，Demo 不把它当作独立风险行展示。
+
+## 5. Detector
+
+风险展示（`DetectionStatus`）与执行状态（`DetectionExecutionStatus`）互相独立。`BaseDetector.result(..., CheckCoverage)` 约定：
+
+- `attempted == 0` → `UNAVAILABLE` / `no_checks_attempted`
+- `succeeded == 0` → `UNAVAILABLE`，附失败原因
+- `failed > 0` 且有成功子检查 → `PARTIAL`
+- 全部成功且无风险 → `SAFE`；有风险 → `RISK`
+
+`isInformational()` 表示提示性信号：解释环境，不进入 `riskScore`。旧名 `isWarnOnly()` 保留兼容并已弃用。
+
+注册由 `DetectorRegistry` 按配置开关决定。`NativeTamperDetector` 始终加入。
+
+### 5.1 `root`
+
+Java 路径探测 + Native `nativeGetRootEvidenceRaw`。
+
+| 证据强度 | Token 示例 | 评分 |
+| --- | --- | --- |
+| 强 | `su_found:`、`magisk_found:`、`ksu_found:`、`apatch_found:`、`modules_found:`、`native:su:` / `native:magisk:` / `native:mount:magisk` / `native:mount:module` | `HIGH` / `DANGER` / 8 |
+| 中 | `native:syscall_mismatch:...`（access/stat/open 不一致） | `MEDIUM` / `WARNING` / 4 |
+| 弱 | `selinux_permissive`、`test_keys` | `LOW` / `WARNING` / 1 / informational |
+
+路径名单来自 ini：`[su]` `[magisk]` `[kernelsu]` `[apatch]` `[modules]`。Native 另扫 `PATH` 中的 `su`/`ksud`/`apd`/`magisk`，以及 `/proc/self/mountinfo` 中的 Magisk/模块挂载。
+
+### 5.2 `mount_analysis`
+
+读 `/proc/mounts` 与 `/proc/self/mountinfo`。命中 Magisk / `debug_ramdisk` / `/data/adb/modules` / docker overlay 时：`MEDIUM` / `WARNING` / 4 / 可处置。两份 proc 都读不到 → `UNAVAILABLE`。
+
+### 5.3 `hook_framework`
+
+Java：Xposed 类与 `sHookedMethodCallbacks`、栈帧、Frida 默认端口 27042、进程名。Native：raw-syscall 读 maps、`getdents64` 扫 `/proc/self/task/*/comm`、GOT/inline hook、JNI 表。
+
+内部用 `HookEvidenceClassifier` 分档（Detector 自身按 strong/medium 计数）：
+
+| Rank | Token |
 | --- | --- |
-| 风险表现 | `DetectionStatus.NORMAL / WARNING / DANGER / UNKNOWN` |
-| 执行状态 | `SAFE / RISK / PARTIAL / UNAVAILABLE / DISABLED / TIMEOUT / ERROR` |
+| STRONG | `inline_hook:`、`got_hook:`、`jni_table_hook:`、`maps:frida`、`maps:gadget`、`frida_pid`、`frida_pid_port` |
+| MEDIUM | `thread:gum-js-loop`、`thread:frida`、`maps:xposed`、`maps:lsposed`、`maps:substrate`、`xposed_hooks_active`、`xposed_class_found`、`xposed_stack` |
+| WEAK | `anon_exec:`、`frida_port_open`、含 `27042` |
+| IGNORE | 单独的 `thread:gmain`（仅当已有 Frida 族时 Native 才会附带） |
 
-`DetectionResult` 还提供 `checksAttempted`、`checksSucceeded`、`checksFailed` 与 `failureReasons`。Root、Hook、Emulator、Debug 等多子检查 Detector 会记录实际覆盖；所有关键子检查都失败时不会返回安全。
+评分：strong≥2 或 (strong≥1 且 medium≥2) → `DEADLY`/10；strong≥1 或 medium≥2 → `HIGH`/8；medium≥1 → `MEDIUM`/2/**informational**；其余弱信号 → `LOW`/1/informational。
 
-`isInformational()` 表示提示性信号：它可以帮助解释环境，但不进入 `riskScore`。旧的 `isWarnOnly()` 保留兼容并已弃用。
+### 5.4 `process_scan`
 
-### 3.3 报告与评分
+Java `/proc` 进程列表 + Native `getdents64` 扫 `/proc` comm。Token 必须整词匹配（`ProcessScanDetector.containsProcessToken`），避免 `chrome` 命中 `me` 这类假阳性。
 
-可处置分数阈值固定为：
+含 frida / magisk / ksud / lspd / zygisk → `HIGH`/`DANGER`/8；其他命中 → `MEDIUM`/`WARNING`/4。Java 与 Native 一侧有证据、另一侧没有时追加 `process_source_mismatch`。两侧都不可用 → `UNAVAILABLE`。
 
-| 等级 | 条件 |
+### 5.5 `native_tamper`
+
+始终运行。读取 Native `nGetSoIntegrityRaw`：
+
+| Token | 处理 |
 | --- | --- |
-| `SAFE` | 分数 0、无提示/风险且覆盖完整 |
-| `LOW` | 分数 1–3，或仅有提示性信号 |
-| `MEDIUM` | 分数至少 4，或至少 2 个可处置 Warning |
-| `HIGH` | 分数至少 10，或至少 1 个可处置 Danger |
-| `DEADLY` | 分数至少 18、至少 3 个可处置 Danger，或硬触发 |
-| `UNKNOWN` | 没有已知风险，但关键覆盖不足 |
+| `text_mismatch` | 内存 RX 与文件前 4 KiB CRC 不一致 → `HIGH`/`DANGER`/8 |
+| `text_mismatch:anonymous_map` | maps 路径为空 / memfd / ashmem → 同上，可处置 |
+| `text_mismatch:missing_map` | maps 中找不到 `libriskengine.so` → **`UNAVAILABLE`** |
+| `text_mismatch:file_unreadable` | 文件打不开 → `UNAVAILABLE` |
+| `text_mismatch:bad_elf` | ELF 解析失败 → `UNAVAILABLE` |
 
-Frida PID/端口、maps 中的 Frida/Gadget 等高置信度组合可硬触发 `DEADLY`。多来源不一致会把更低的已知结果至少提升到 `MEDIUM`。
+`missing_map` 常见于 Magisk Hide 把 SO 从 maps 抹掉。记为覆盖不足而不是安全，也不把它当成已证实篡改——用户态无法区分「被隐藏」与「加载失败」。
 
-- `riskScore`：只累加非 informational 分数；
-- `maxRiskScore`：本报告技术容量，不是 UI 百分比分母；
-- `displayThresholdMaximum`：固定为严重阈值 18；
-- `reportStatus`：`COMPLETE / PARTIAL / UNAVAILABLE`；
-- `checkCount` 与 `completedCheckCount`：Detector 加原始 Collector；不重复计算 `collector:*` 覆盖信号或 SDK 合成字段；
-- `coveragePercent`：`completedCheckCount / checkCount`。
+GOT/inline hook 与 JNI 表检查由 `native_get_integrity_evidence` 产出，经 `hook_framework` 消费，不走 `native_tamper`。
 
-聚合后 `RiskReport`、`DeviceFingerprint` 与内部 `CollectorResult` 被冻结。
+### 5.6 `emulator`
 
-## 4. 隐私配置
+`EmulatorEvidenceClassifier` 分 STRONG / WEAK，并把 `aosp_sensor`、`missing_feature`、`limited_hardware` 标为硬件噪声。
 
-| 档位 | 默认标识采集 |
+| Rank | 示例 |
 | --- | --- |
-| `MINIMAL` | 不采 Android ID、Boot ID、Widevine |
-| `BALANCED` | 仅 Android ID 应用范围哈希；默认档位 |
-| `DIAGNOSTIC` | Android ID、Boot ID、Widevine 的应用范围哈希 |
+| STRONG | `emu_file:`、`emu_pkg:`、`qemu_prop`、`qemu_pipe`、`cpu:hypervisor`、明确的 fingerprint/model/manufacturer/product/hardware/board、`runtime_arch:x86` / `i386` |
+| WEAK | `generic_fingerprint:`、`disk_small`、`screen_stock`、`no_thermal`、`emulator_ip:`、`cgroup:`、`mount_overlay`、`cmdline_mismatch` |
+| 噪声弱 | `aosp_sensor`、`missing_feature`、`limited_hardware`（平板/精简 OEM 常见，不单独升级） |
 
-`collectAndroidId`、`collectBootId`、`collectDrmId` 可以覆盖档位默认值。SDK 不采集原始 IMEI、IMSI、MAC、SSID 或 BSSID。哈希输入包含宿主包名，因此结果是确定性的应用范围假名；这不等同于加密、匿名化或绝对不可逆。
+评分：strong≥2 或 (strong≥1 且有用弱信号≥1) → `HIGH`/8；仅 1 个 strong → `MEDIUM`/4；只有弱信号 → `LOW`/1/**informational**。
 
-## 5. 共享信号与性能
+### 5.7 `debug`
 
-每次报告开始前重置一个 `SignalSnapshot`。它以 `SignalResult<T>` 保存成功、空值、不可用或错误状态，并在 Collector/Detector 之间共享：
+TracerPid > 0 → `HIGH`/`DANGER`/8。调试器连接或 maps 可执行调试路径 → `MEDIUM`/4。仅 `debuggable_flag` 或 IDA 端口 → `LOW`/1/informational。`DIAGNOSTIC` 场景仍保持「仅 debuggable」为 informational，避免 Debug APK 把自己打成高风险。
 
-- ADB 状态；
-- 系统属性；
-- `/proc/self/maps`；
-- 本机监听端口；
-- 进程快照、文本文件、路径存在性与容器信号；
-- 同一命令的结构化 Shell 结果。
+### 5.8 `adb`
 
-因此 ADB Collector 与 Detector 不再各执行一遍完整扫描，Hook 与 Debug 也复用 Java maps/端口快照。Native Hook maps 仍通过 raw-syscall 路径独立读取，以减少 libc hook 造成的盲区。
+默认 informational。USB ADB：`LOW`/2；Wi-Fi ADB：`MEDIUM`/4。`CollectScene.PAYMENT` 与 `DIAGNOSTIC` 会改为可处置。
 
-## 6. Shell 与 Native 边界
+### 5.9 `sandbox` / `cloud_phone` / `custom_rom`
 
-`ShellExecutor.Result` 区分：`SUCCESS`、`INVALID_COMMAND`、`TIMEOUT`、`NON_ZERO_EXIT`、`INTERRUPTED`、`EXECUTION_ERROR`，并包含 `stdout`、`stderr`、`exitCode`、`durationMs` 与 `failureReason`。兼容的字符串接口已弃用。
+| 检测器 | 强证据 | 弱证据 | 默认评分 |
+| --- | --- | --- | --- |
+| `sandbox` | 双开包、异常 data 目录、ClassLoader 标记 | 虚拟化 fd | 强 `MEDIUM`/4；弱 `LOW`/1/informational |
+| `cloud_phone` | `cloud_pkg:` | 电池/摄像头/传感器异常 | 同上 |
+| `custom_rom` | — | `community_rom:`、`prop_mismatch:fingerprint` | 一律 `LOW`/1/informational。社区 ROM 不是 Root 证明 |
 
-Native 检测公开结构化的 `SignalResult<T>` 包装，Java Detector 可以区分库不可用、JNI 错误与有效的否定结果。
+`LOGIN`/`PAYMENT` 会把 sandbox 与 cloud_phone 改为可处置。
 
-JNI 字符串不会直接把不可信字节交给 `NewStringUTF`：实现会限制输入长度、校验 UTF-8、用替换字符处理非法序列，再通过 UTF-16 `NewString` 创建 Java 字符串；C++ 分配失败与 JNI 字符获取失败也不会跨边界遗留异常。JNI 注册失败会清理挂起异常并记录具体类名。Native 构建显式启用强栈保护、Release FORTIFY、格式检查、RELRO/NOW、不可执行栈、16 KiB page 对齐、隐藏符号及编译警告。
+### 5.10 聚合追加的检测项
 
-## 7. Demo 展示契约
+| 名称 | 来源 |
+| --- | --- |
+| `signal_correlation` | `CorrelationEngine.correlate`，见第 8 节 |
+| `multi_source_validation` | 指纹多来源不一致 |
+| `collector:<field>` | 非 SUCCESS 的 Collector 覆盖占位 |
 
-Demo 按以下层次呈现：
+## 6. Native 层
 
-1. 中文风险结论、主要依据与处置建议；
-2. 风险分（以 18 为严重阈值）、覆盖率、耗时和状态计数；
-3. Detector 条目：可读依据、风险/执行状态、评分与子检查覆盖；
-4. Collector 条目：中文字段名、可读单位与来源详情；
-5. SDK 合成字段独立分区。
+共享库名 `libriskengine.so`，CMake 3.22.1，C++17，静态 libc++，符号隐藏。
 
-错误状态使用灰色和 0% 进度，不与最高风险混淆。内部不可用 token 不直接展示。标识哈希在摘要中缩写，字节容量转换为 GB。复制功能只输出脱敏摘要，不包含标识哈希、原始系统属性、路径或 PID。触觉反馈只在新结果到达时触发，Activity 重建不会重放。
+### 6.1 内联 syscall
 
-## 8. 构建、测试与发布
+`raw_syscall.h` 按 ABI 直接发指令，**禁止**走 libc `syscall()`：
+
+| ABI | 指令 |
+| --- | --- |
+| aarch64 | `svc #0`（x8 号、x0–x5 参数） |
+| arm | `svc #0`（r7 号） |
+| x86_64 | `syscall` |
+| i386 | `int $0x80`（最多 5 个参数；第 6 个忽略） |
+
+`syscall_wrapper.cpp` 封装 `openat`/`faccessat`/`fstatat`/`read`/`close`/`mmap`/`munmap` 等。读文件、探测路径、maps 都走这条路径。
+
+### 6.2 目录遍历
+
+`raw_dir.cpp` 用 `getdents64` 列目录，避免 `opendir`/`readdir` 被 hook。用于 `/proc/self/task`、`/proc` 进程扫描、thermal zone。
+
+### 6.3 字符串混淆
+
+`obf_str.h` 的 `OBF("...")` 在编译期 XOR `0x5A`，运行时还原。路径、Frida/Magisk 关键字、符号名不在 `.rodata` 中明文出现。这是静态字符串隐藏，不是密码学保护。
+
+### 6.4 maps
+
+`maps_parser.cpp` 用 raw syscall 读 `/proc/self/maps`，解析起止地址、权限、路径。Java `SignalSnapshot.getSelfMaps()` 是另一条 Java 路径，供 Hook/Debug 的 Java 侧复用；Native Hook maps **故意独立**，减少 libc hook 造成的同一盲区。
+
+### 6.5 完整性
+
+`native_integrity.cpp`：
+
+1. **libc GOT / inline hook**：mmap 磁盘上的 `libc.so`，解析 ELF 动态表，检查 `openat`/`faccessat`/`read`/`connect`/`ptrace`/`fopen`。GOT 目标落在 libc RX 之外 → `got_hook:<name>`。ARM64 识别 `LDR X16/X17 + BR` 与越界 `B`；ARM32 识别 `bx/blx` 与 `ldr pc`。x86 无 trampoline 启发式。
+2. **JNI 表**：`JNIEnv->FindClass` / `GetVersion` 函数指针若落在 `libart.so` RX 之外 → `jni_table_hook:...`。
+3. **自身 SO CRC**：在 maps 中定位 `libriskengine.so`，比较第一个可执行 PT_LOAD 的文件与内存前 4 KiB CRC-32。缺失/匿名/不可读/坏 ELF 产出带后缀的 `text_mismatch:*` token。
+
+### 6.6 Native Detector 入口
+
+| JNI | Native | 用途 |
+| --- | --- | --- |
+| `nativeCheckRootRaw` / `nativeGetRootEvidenceRaw` | `native_root_detector` | Root 路径、挂载、syscall 不一致 |
+| `nativeGetHookEvidenceRaw` | `native_hook_detector` | maps / 线程 / 完整性 token |
+| `nativeCheckEmulatorFilesRaw` | `native_emulator_detector` | 模拟器文件 |
+| `nativeGetThermalZoneCountRaw` | 同上 | thermal zone 计数 |
+| `nativeGetRuntimeArchRaw` | `runtime_arch_checker` | 运行时 ABI |
+| `nativeGetTracerPidRaw` | `native_debug_detector` | TracerPid |
+| `nGetSelinuxEnforceRaw` | root detector | SELinux |
+| `nGetBuildPropFingerprintRaw` | 读 `/system/build.prop` | 与 `ro.build.fingerprint` 对照 |
+| `nScanProcessTokensRaw` | integrity 中的 process scan | Native 进程 token |
+| `nGetSoIntegrityRaw` | `native_get_so_integrity_evidence` | SO CRC |
+
+JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 UTF-8、非法序列替换后走 UTF-16 `NewString`。C++ 分配失败与 JNI 字符获取失败不跨边界遗留异常。注册失败会清理挂起异常并记录目标类名。
+
+### 6.7 Native 构建加固
+
+- `-fstack-protector-strong`、Release `_FORTIFY_SOURCE=2`、`-Wformat -Wformat-security`
+- `-fvisibility=hidden`
+- 链接：`relro,now`、`noexecstack`、`max-page-size=16384`、`--exclude-libs,ALL`
+
+## 7. 共享信号
+
+每次报告开始前 `SignalSnapshot.reset()`。`SignalResult<T>` 保留 success / empty / unavailable / error。Collector 与 Detector 共享：
+
+- ADB 状态、系统属性、`/proc/self/maps`（Java 路径）
+- 本机监听端口、进程快照、文本文件、路径存在性、容器信号
+- 同一命令的结构化 `ShellExecutor.Result`
+- SELinux、`build.prop` fingerprint、CPU/磁盘/内核、Native 进程 token、SO 完整性、屏幕度量
+
+因此 ADB Collector 与 Detector 不再各扫一遍；Java Hook/Debug 复用 maps 与端口。Native Hook maps 仍独立读取。
+
+`ShellExecutor.Result` 区分 `SUCCESS`、`INVALID_COMMAND`、`TIMEOUT`、`NON_ZERO_EXIT`、`INTERRUPTED`、`EXECUTION_ERROR`，并携带 stdout/stderr/exitCode/durationMs/failureReason。字符串-only 助手已弃用。
+
+## 8. 场景、家族去重与交叉规则
+
+`DataAggregator.aggregate` 顺序：
+
+1. `CorrelationEngine.dedupeFamilies`：同一 `EvidenceFamily`（`frida` / `debugger` / `xposed` / `root_fw` / `qemu`）若已被靠前的检测器占用，后到且 `score > 0` 的可处置结果改为 informational，避免 Magisk 同时给 `root` 与 `process_scan` 加两份分。
+2. `CorrelationEngine.applyScene`：按 `CollectScene` 把指定检测器从 informational 提升为 actionable。不关闭检测器，不降低已可处置的结果。
+3. `CorrelationEngine.correlate`：可能追加一条 `signal_correlation`。
+4. Collector 覆盖信号、多来源不一致、合成指纹字段。
+
+### 8.1 场景提升
+
+| 场景 | 提升为可处置 |
+| --- | --- |
+| `STANDARD` | 无 |
+| `LOGIN` | `emulator`、`cloud_phone`、`sandbox` |
+| `PAYMENT` | LOGIN + `adb` |
+| `DIAGNOSTIC` | 除「debug 且仅 `debuggable_flag`」外的全部 informational |
+
+### 8.2 交叉规则
+
+| ID | 条件 | 结果 |
+| --- | --- | --- |
+| C1 | 模拟器当前 ≤ `LOW`，且有 hypervisor 或 (小磁盘 + x86) | `MEDIUM` / `WARNING` / 4 |
+| C2 | 恰好 1 个 STRONG + hypervisor/QEMU，且模拟器已是 `MEDIUM` | 升至 `HIGH` / `DANGER` / 4 |
+| C3 | inline/GOT hook **且** Frida 族（hook 或 process_scan） | `DEADLY` / `DANGER` / 10，硬触发 |
+| C4 | `syscall_mismatch` **且** 模块/Magisk 挂载 | `HIGH` / `DANGER` / 8 |
+| C5 | `prop_mismatch:fingerprint`、无 `community_rom:`、模拟器 NORMAL | `LOW` / `WARNING` / 1 / informational（resetprop 提示） |
+| C7 | `LOGIN`/`PAYMENT` 下云真机无 `cloud_pkg:` 但弱证据 ≥ 2 | `LOW` / `WARNING` / 2 |
+
+无匹配则不追加 `signal_correlation`。C3 同时满足 `RiskReport.hasHardTrigger()`。
+
+## 9. 报告与评分
+
+阈值常量在 `RiskReport`：`MEDIUM_THRESHOLD=4`、`HIGH_THRESHOLD=10`、`DEADLY_THRESHOLD=18`。
+
+综合等级：
+
+| 等级 | 条件（先硬触发，再分数/计数） |
+| --- | --- |
+| `DEADLY` | 硬触发；或分数 ≥ 18；或可处置 Danger ≥ 3 |
+| `HIGH` | 分数 ≥ 10 或可处置 Danger ≥ 1 |
+| `MEDIUM` | 分数 ≥ 4 或可处置 Warning ≥ 2 |
+| `LOW` | 分数 > 0，或存在任意 Warning/Danger（含 informational） |
+| `UNKNOWN` | 以上都不满足，且 `unknownCount > 0` 或存在 `PARTIAL`/`UNAVAILABLE`/`TIMEOUT`/`ERROR` |
+| `SAFE` | 分数 0、无提示/风险、覆盖完整 |
+
+硬触发（跳过 informational）：
+
+- 任意检测器 details 含 `inline_hook:` 或 `got_hook:`，且该条风险 ≥ `HIGH`
+- `hook_framework` 含 `frida_pid_port` / `maps:frida` / `maps:gadget`
+- `signal_correlation` 含 `C3:`
+
+其他报告字段：
+
+- `riskScore`：非 informational 的 `score` 之和
+- `maxRiskScore`：所有 `maxScore` 之和（技术容量）
+- `displayThresholdMaximum`：固定 18
+- `warningCount` / `dangerCount` / `unknownCount`：按 `DetectionStatus` 计数，**含** informational
+- `checkCount`：非 `collector:*` 的检测项 + 非合成 Collector
+- `completedCheckCount`：执行状态为 `SAFE`/`RISK` 的检测项 + `SUCCESS` 的原始 Collector
+- `coveragePercent`：`round(completed / total * 100)`；total 为 0 时为 100
+- `reportStatus`：全部完成 `COMPLETE`；一个都没完成且无可用检测 `UNAVAILABLE`；否则 `PARTIAL`
+
+聚合后 `RiskReport`、`DeviceFingerprint` 与内部 `CollectorResult` 被 freeze。
+
+## 10. 隐私
+
+| 档位 | Android ID | Boot ID | Widevine |
+| --- | --- | --- | --- |
+| `MINIMAL` | 关 | 关 | 关 |
+| `BALANCED` | 开 | 关 | 关 |
+| `DIAGNOSTIC` | 开 | 开 | 开 |
+
+三项均可被 Builder 覆盖。`PrivacyUtils.hashIdentifier` 计算 `SHA-256(packageName + ":" + value)` 的 hex。这是应用范围假名，不是加密或匿名化。
+
+SDK 不采集原始 IMEI、IMSI、MAC、SSID、BSSID。Native 属性读取受 ini 白名单约束。
+
+## 11. 名单单源
+
+只读清单：`riskengine-sdk/src/main/resources/lists/artifact_paths.ini`。
+
+生成物（提交在仓库中，修改 ini 后必须同步）：
+
+- `riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/generated/DetectionLists.java`
+- `riskengine-sdk/src/main/cpp/generated/detection_lists.h`
+
+`RootPathListConsistencyTest` 校验 Java 数组与 ini 一致。节包括 su / magisk / kernelsu / apatch / modules / emulator_files / emulator_packages / cloud_packages / sandbox_packages / properties / process tokens 等。
+
+## 12. JSON
+
+`RiskReportJsonSerializer` 使用 `org.json`（Android 框架已提供；单元测试用 `org.json:json`）。根对象字段：
+
+`timestampMs`、`sdkVersion`、`riskScore`、`maxRiskScore`、`displayThresholdMaximum`、`warningCount`、`dangerCount`、`unknownCount`、`availableDetectionCount`、`detectionCount`、`checkCount`、`completedCheckCount`、`incompleteCheckCount`、`coveragePercent`、`reportStatus`、`overallRiskLevel`、`collectScene`、`fingerprint`、`detections`。
+
+每条 detection 含：`detectorName`、`riskLevel`、`status`、`executionStatus`、`score`、`maxScore`、`informational`、`checksAttempted`/`Succeeded`/`Failed`、`failureReasons`、`details`、`evidence`、`timestampMs`。
+
+## 13. ProGuard / R8
+
+- SDK AAR `isMinifyEnabled = false`。在库模块 minify 会拆掉嵌套公开类型，并让 Release 单元测试找不到类。
+- `consumer-rules.pro` keep：`RiskEngine`、`RiskEngineConfig`（含 `Builder`）、`RiskEngineCallback`、`PrivacyProfile`、`CollectScene`、`model.**`、`NativeCollectorBridge`（JNI 按名注册）、所有 `native` 方法。
+- Demo Release 开启 minify。
+
+## 14. Demo 展示契约
+
+Demo 直接依赖工程内 SDK，是诊断控制台：
+
+1. 无启动采集、无标题营销文案、无隐私说明卡。首屏即状态卡。
+2. 状态卡：中文风险结论、主要依据（已人话化）、风险分 / 18、覆盖率、耗时。「复制报告」在状态卡标题行，有结果后可见。
+3. 环境检测：风险项优先。折叠行 = 中文名 + 语义徽章 + 摘要，不含 `snake_case` id。展开后才出现「检测器：root」与原始 token。
+4. 摘要人话化：`native:mount:magisk` → Magisk 挂载；`text_mismatch:missing_map` → 未能在内存映射中找到 Native 库。原始 token 只在详情中出现一次，不与中文句重复。
+5. 「需关注」排除 informational（ADB、弱模拟器、社区 ROM、仅 debuggable 等）。
+6. `collector:*` 不作为环境检测行；覆盖缺口计入顶部覆盖率。
+7. SDK 合成字段（`hook_memory_signals`、`runtime_integrity_score_inputs`）独立分区。
+8. 错误状态灰色 + 0% 进度，不与最高风险混淆。
+9. 复制输出脱敏摘要：无标识哈希、原始属性、路径、PID。
+10. 展开行 ripple 画在 foreground，展开后清除 pressed/focus，避免残留灰底。
+11. 状态可跨 Activity 重建。触觉只在新结果到达时触发。
+12. `allowBackup=false`，禁止设备迁移导出。
+
+## 15. 测试
+
+单元测试（`riskengine-sdk/src/test`）：
+
+| 测试 | 覆盖 |
+| --- | --- |
+| `RiskScoringModelTest` | 等级阈值、informational 不加分、硬触发 |
+| `FailureSemanticsTest` | Collector/Detector 失败不变成 SAFE |
+| `DetectorCoverageTest` | `CheckCoverage` 全失败 → UNAVAILABLE |
+| `CorrelationEngineTest` | 场景提升、家族去重、C1–C7 |
+| `EmulatorScoringTest` | 强/弱/噪声弱信号 |
+| `HookTokenRankingTest` | Hook token 分档 |
+| `ProcessPatternNegativeTest` | 进程名整词匹配、负例 |
+| `RootPathListConsistencyTest` | Java 名单与 ini 一致 |
+| `RiskEngineConfigTest` | 隐私档位、场景、超时边界 |
+| `RiskReportJsonSerializerTest` | JSON 字段 |
+| `DataAggregatorTest` / `SignalSnapshotTest` / `TaskSchedulerTest` / `ShellExecutorTest` / `CollectorResultTest` / `ProcfsUtilsTest` | 聚合、缓存、线程、Shell、模型 |
+
+`integration-test` 只编译链接公开 API，不跑设备检测。Instrumentation 矩阵（API 30/33/35/36 x86_64）在 CI 中按周/手动触发，不能替代 ARM64 OEM 真机。
+
+## 16. 构建与发布
 
 ```bash
 ./gradlew :riskengine-sdk:test :riskengine-sdk:lint
@@ -136,14 +425,14 @@ Demo 按以下层次呈现：
 ./gradlew :demo:lintDebug :demo:assembleDebug
 ```
 
-- PR 与所有分支 Push 执行单测、Lint、AAR、POM、sources JAR 和 Demo Debug APK 构建及压缩包完整性检查。
-- `integration-test` 只依赖生成的 Release AAR，用于验证独立宿主可以编译和链接公开 API。
-- 每周/手动设备矩阵在 API 30、33、35、36 x86_64 模拟器执行 instrumentation test。
-- `vMAJOR.MINOR.PATCH` Tag 发布 AAR、sources JAR、POM、临时 Debug APK 与 SHA-256 清单。
-- Debug APK 明确只用于侧载测试。流水线不保存生产签名密钥；不同 Tag 的临时证书可能不同，签名冲突时需卸载旧 Demo。
+- PR 与分支 Push：单测、Lint、AAR/POM/sources、Demo Debug APK、压缩包完整性。
+- `vMAJOR.MINOR.PATCH` Tag：AAR、sources JAR、POM、临时 Debug APK、SHA-256。流水线不保存生产签名密钥。
+- `maven-publish` publication 已就绪，远端仓库尚未选定；当前分发以 GitHub Release 文件为准。
 
-## 9. 已知验证边界
+## 17. 已知边界
 
-- x86_64 模拟器矩阵不能替代真实 ARM64 厂商设备；Native 反 Hook 策略、匿名可执行区白名单和厂商 ROM 误报率仍需持续真实设备回归。
-- 本地风险信号可被高级对手对抗，不能替代服务端风控、硬件证明或 Play Integrity；宿主应将本 SDK 作为多源决策的一部分。
-- 具体待解决项与验收方法见 [Pending_Items_zh.md](./Pending_Items_zh.md)。
+- 内核 mount namespace 隐藏（完整 Magisk DenyList / Shamiko）无法在无 attestation 的用户态保证识破。相关检查失败必须是 `UNKNOWN`/`PARTIAL`/`UNAVAILABLE`，不能变成 `SAFE`。
+- `native_tamper` 的 `missing_map` 按设计是覆盖缺口。若宿主要把「SO 从 maps 消失」当作风险，应在宿主侧解释该 `UNAVAILABLE`，而不是指望 SDK 把它打成 DANGER。
+- x86/i386 无 ARM trampoline 检测；GOT 检查与 CRC 仍可用。
+- 匿名可执行区有 JIT/zygote/scudo 等白名单；OEM 差异仍可能误报，需要真机回归。
+- 本地信号可被高级对手对抗。本 SDK 补充、而不是替代服务端风控、硬件证明或 Play Integrity。

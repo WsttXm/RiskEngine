@@ -5,6 +5,19 @@
         <package android:name="com.google.android.launcher.layouts.genymotion" />
         <package android:name="com.bluestacks" />
         <package android:name="com.bignox.app" />
+        <package android:name="com.ldmnq.launcher3" />
+        <package android:name="com.ldmnq" />
+        <package android:name="com.mumu.launcher" />
+        <package android:name="com.netease.mumu" />
+        <package android:name="com.microvirt.launcher" />
+        <package android:name="com.tencent.tinput" />
+        <package android:name="com.redfinger.app" />
+        <package android:name="com.redfinger.virtualphone" />
+        <package android:name="com.vmos.pro" />
+        <package android:name="com.vmos.app" />
+        <package android:name="com.lbe.parallel" />
+        <package android:name="com.excelliance.dualaid" />
+        <package android:name="com.parallel.space" />
     </queries>
 
 </manifest>

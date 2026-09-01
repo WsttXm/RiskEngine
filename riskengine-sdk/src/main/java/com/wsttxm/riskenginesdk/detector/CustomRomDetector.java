@@ -59,6 +59,14 @@ public class CustomRomDetector extends BaseDetector {
             }
         }
 
+        SignalResult<String> fileFingerprint = signals.getBuildPropFingerprint();
+        if (fileFingerprint.isSuccess() && fileFingerprint.getValue() != null
+                && !fileFingerprint.getValue().isEmpty()
+                && fingerprint.isSuccess() && fingerprint.getValue() != null
+                && !fileFingerprint.getValue().equals(fingerprint.getValue().trim())) {
+            evidence.add("prop_mismatch:fingerprint");
+        }
+
         if (!evidence.isEmpty()) {
             // A community ROM is context, not proof of compromise/root.
             return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,

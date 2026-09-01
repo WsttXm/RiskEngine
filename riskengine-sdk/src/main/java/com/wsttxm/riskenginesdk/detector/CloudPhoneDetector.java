@@ -3,11 +3,13 @@ package com.wsttxm.riskenginesdk.detector;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
 import android.hardware.camera2.CameraManager;
 import android.os.BatteryManager;
 
+import com.wsttxm.riskenginesdk.generated.DetectionLists;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
@@ -29,28 +31,45 @@ public class CloudPhoneDetector extends BaseDetector {
 
     @Override
     protected DetectionResult detect() {
-        List<String> evidence = new ArrayList<>();
-
-        boolean batteryAvailable = checkBatteryAnomaly(evidence);
-        boolean cameraAvailable = checkCameraCount(evidence);
-        boolean sensorsAvailable = checkSensorCount(evidence);
+        List<String> strong = new ArrayList<>();
+        List<String> weak = new ArrayList<>();
         CheckCoverage coverage = new CheckCoverage();
-        if (batteryAvailable) coverage.success();
+
+        if (checkPackages(strong)) coverage.success();
+        else coverage.failure("packages_unavailable");
+        if (checkBatteryAnomaly(weak)) coverage.success();
         else coverage.failure("battery_unavailable");
-        if (cameraAvailable) coverage.success();
+        if (checkCameraCount(weak)) coverage.success();
         else coverage.failure("camera_unavailable");
-        if (sensorsAvailable) coverage.success();
+        if (checkSensorCount(weak)) coverage.success();
         else coverage.failure("sensors_unavailable");
 
-        if (!evidence.isEmpty()) {
-            RiskLevel level = evidence.size() >= 3 ? RiskLevel.MEDIUM : RiskLevel.LOW;
-            return result(level, DetectionStatus.WARNING, 1, 10, true,
+        List<String> evidence = new ArrayList<>(strong);
+        evidence.addAll(weak);
+        if (!strong.isEmpty()) {
+            return result(RiskLevel.MEDIUM, DetectionStatus.WARNING, 4, 10, false,
                     evidence, String.join("; ", evidence), coverage);
         }
-        if (!batteryAvailable && !cameraAvailable && !sensorsAvailable) {
-            return unavailable("hardware_signals_unavailable");
+        if (!weak.isEmpty()) {
+            return result(RiskLevel.LOW, DetectionStatus.WARNING, 1, 10, true,
+                    evidence, String.join("; ", evidence), coverage);
         }
         return safe(coverage);
+    }
+
+    private boolean checkPackages(List<String> evidence) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            for (String pkg : DetectionLists.CLOUD_PACKAGES) {
+                try {
+                    pm.getPackageInfo(pkg, 0);
+                    evidence.add("cloud_pkg:" + pkg);
+                } catch (PackageManager.NameNotFoundException ignored) {}
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private boolean checkBatteryAnomaly(List<String> evidence) {
@@ -62,12 +81,9 @@ public class CloudPhoneDetector extends BaseDetector {
             }
             int voltage = battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1);
             int temperature = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
-
-            // Cloud phones often have abnormal battery values
             if (voltage == 0 || temperature == 0) {
                 evidence.add("battery_zero:v=" + voltage + ",t=" + temperature);
             }
-
             int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
             int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
             if (level == 100 && status == BatteryManager.BATTERY_STATUS_CHARGING) {
@@ -85,14 +101,18 @@ public class CloudPhoneDetector extends BaseDetector {
 
     private boolean checkCameraCount(List<String> evidence) {
         try {
+            PackageManager pm = context.getPackageManager();
+            if (pm.hasSystemFeature(PackageManager.FEATURE_CAMERA)) {
+                return true;
+            }
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
             if (cm == null) {
                 evidence.add("low_camera_count:0");
                 return true;
             }
             String[] cameras = cm.getCameraIdList();
-            if (cameras.length < 2) {
-                evidence.add("low_camera_count:" + cameras.length);
+            if (cameras.length == 0) {
+                evidence.add("low_camera_count:0");
             }
             return true;
         } catch (Exception e) {
@@ -108,9 +128,17 @@ public class CloudPhoneDetector extends BaseDetector {
                 evidence.add("very_low_sensor_count:0");
                 return true;
             }
-            List<Sensor> sensors = sm.getSensorList(Sensor.TYPE_ALL);
-            if (sensors.size() < 3) {
-                evidence.add("very_low_sensor_count:" + sensors.size());
+            int physical = 0;
+            for (Sensor sensor : sm.getSensorList(Sensor.TYPE_ALL)) {
+                if (sensor.getType() == Sensor.TYPE_SIGNIFICANT_MOTION
+                        || sensor.getType() == Sensor.TYPE_STEP_DETECTOR
+                        || sensor.getType() == Sensor.TYPE_STEP_COUNTER) {
+                    continue;
+                }
+                physical++;
+            }
+            if (physical < 2) {
+                evidence.add("very_low_sensor_count:" + physical);
             }
             return true;
         } catch (Exception e) {

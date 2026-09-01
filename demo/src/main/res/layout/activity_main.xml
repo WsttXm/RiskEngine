@@ -37,71 +37,14 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingStart="20dp"
-            android:paddingTop="22dp"
+            android:paddingTop="16dp"
             android:paddingEnd="20dp"
             android:paddingBottom="30dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:accessibilityHeading="true"
-                android:fontFamily="sans"
-                android:includeFontPadding="false"
-                android:letterSpacing="-0.025"
-                android:text="@string/screen_title"
-                android:textColor="@color/text_primary"
-                android:textSize="32sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:lineSpacingExtra="3dp"
-                android:text="@string/screen_subtitle"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                app:cardBackgroundColor="@color/surface_tinted"
-                app:cardCornerRadius="18dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/divider"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/privacy_title"
-                        android:textColor="@color/primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:lineSpacingExtra="2dp"
-                        android:text="@string/privacy_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
                 app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="28dp"
                 app:cardElevation="1dp"
@@ -112,7 +55,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="22dp">
+                    android:padding="18dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -149,12 +92,28 @@
                             app:indicatorColor="@color/primary"
                             app:indicatorSize="24dp"
                             app:trackThickness="2dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCopyReport"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="32dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="0dp"
+                            android:contentDescription="@string/copy_redacted_report"
+                            android:text="@string/copy_report_short"
+                            android:textSize="12sp"
+                            android:visibility="gone"
+                            app:iconTint="@color/primary" />
                     </LinearLayout>
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="20dp"
+                        android:layout_marginTop="12dp"
                         android:letterSpacing="0.04"
                         android:text="@string/status_label"
                         android:textColor="@color/text_secondary"
@@ -171,14 +130,14 @@
                         android:letterSpacing="-0.025"
                         android:text="@string/status_ready"
                         android:textColor="@color/text_primary"
-                        android:textSize="42sp"
+                        android:textSize="34sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/tvStatusInfo"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
+                        android:layout_marginTop="6dp"
                         android:lineSpacingExtra="3dp"
                         android:text="@string/status_ready_description"
                         android:textColor="@color/text_secondary"
@@ -188,7 +147,7 @@
                         android:id="@+id/progressRisk"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="20dp"
+                        android:layout_marginTop="12dp"
                         android:max="100"
                         android:progress="0"
                         app:indicatorColor="@color/primary"
@@ -209,7 +168,7 @@
                         android:id="@+id/layoutStats"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
+                        android:layout_marginTop="12dp"
                         android:baselineAligned="false"
                         android:orientation="horizontal"
                         android:visibility="gone"
@@ -449,18 +408,6 @@
                         android:text="@string/fingerprint_subtitle"
                         android:textColor="@color/text_secondary"
                         android:textSize="11sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnCopyReport"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="48dp"
-                        android:layout_gravity="end"
-                        android:layout_marginTop="4dp"
-                        android:contentDescription="@string/copy_redacted_report"
-                        android:text="@string/copy_redacted_report"
-                        android:visibility="gone"
-                        app:iconTint="@color/primary" />
 
                     <LinearLayout
                         android:id="@+id/layoutFingerprint"

@@ -3,27 +3,22 @@ package com.wsttxm.riskenginesdk.collector.native_layer;
 import android.content.Context;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
+import com.wsttxm.riskenginesdk.generated.DetectionLists;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.PrivacyUtils;
 import com.wsttxm.riskenginesdk.core.SignalResult;
 import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
+import java.util.Arrays;
 import java.util.Set;
 
 public class NativeCollectorBridge {
     private final Context context;
     private final SignalSnapshot signals;
     private static final boolean NATIVE_AVAILABLE;
-    private static final Set<String> ALLOWED_PROPERTIES = Set.of(
-            "service.adb.tcp.port", "persist.adb.tcp.port",
-            "ro.build.fingerprint", "ro.build.display.id", "ro.product.model",
-            "ro.product.brand", "ro.product.device", "ro.product.manufacturer",
-            "ro.hardware", "ro.board.platform", "persist.sys.timezone",
-            "gsm.version.baseband", "ro.lineage.version", "ro.cm.version",
-            "ro.mokee.version", "ro.rr.version", "ro.pixelexperience.version",
-            "ro.modversion"
-    );
+    private static final Set<String> ALLOWED_PROPERTIES =
+            Set.copyOf(Arrays.asList(DetectionLists.ALLOWED_PROPERTIES));
 
     static {
         boolean loaded = false;
@@ -78,6 +73,10 @@ public class NativeCollectorBridge {
     private static native int nativeGetThermalZoneCountRaw();
     private static native String nativeGetRuntimeArchRaw();
     private static native int nativeGetTracerPidRaw();
+    private static native int nGetSelinuxEnforceRaw();
+    private static native String nGetBuildPropFingerprintRaw();
+    private static native String nScanProcessTokensRaw();
+    private static native String nGetSoIntegrityRaw();
 
     public static boolean checkRoot() {
         return valueOr(checkRootResult(), false);
@@ -133,6 +132,34 @@ public class NativeCollectorBridge {
 
     public static SignalResult<Integer> getTracerPidResult() {
         return callNativeResult(NativeCollectorBridge::nativeGetTracerPidRaw);
+    }
+
+    public static SignalResult<Integer> getSelinuxEnforceResult() {
+        return callNativeResult(NativeCollectorBridge::nGetSelinuxEnforceRaw);
+    }
+
+    public static SignalResult<String> getBuildPropFingerprintResult() {
+        return callNativeResult(NativeCollectorBridge::nGetBuildPropFingerprintRaw);
+    }
+
+    public static SignalResult<String> scanProcessTokensResult() {
+        return callNativeResult(NativeCollectorBridge::nScanProcessTokensRaw);
+    }
+
+    public static SignalResult<String> getSoIntegrityResult() {
+        return callNativeResult(NativeCollectorBridge::nGetSoIntegrityRaw);
+    }
+
+    public static SignalResult<String> getCpuInfoResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetCpuInfo);
+    }
+
+    public static SignalResult<Long> getDiskSizeResult(String path) {
+        return callNativeResult(() -> nativeGetDiskSize(path));
+    }
+
+    public static SignalResult<String> getKernelInfoResult() {
+        return callNativeResult(NativeCollectorBridge::nativeGetKernelInfo);
     }
 
     private static <T> SignalResult<T> callNativeResult(NativeCall<T> call) {
@@ -210,7 +237,9 @@ public class NativeCollectorBridge {
                             "ro.product.model", "ro.product.brand",
                             "ro.product.device", "ro.product.manufacturer",
                             "ro.hardware", "ro.board.platform",
-                            "persist.sys.timezone", "gsm.version.baseband"
+                            "persist.sys.timezone", "gsm.version.baseband",
+                            "ro.kernel.qemu", "ro.boot.qemu", "ro.hardware.virtual",
+                            "ro.secure", "ro.debuggable", "ro.build.type"
                     };
                     for (String prop : props) {
                         SignalResult<String> cached = signals == null
@@ -238,7 +267,10 @@ public class NativeCollectorBridge {
             protected void collect(CollectorResult result) {
                 if (!ensureNative(result)) return;
                 try {
-                    result.addValue("native", nativeGetCpuInfo());
+                    SignalResult<String> cached = signals == null ? null : signals.getCpuInfo();
+                    String value = cached != null && cached.isSuccess()
+                            ? cached.getValue() : nativeGetCpuInfo();
+                    if (value != null && !value.isEmpty()) result.addValue("native", value);
                 } catch (Exception e) {
                     CLog.e("CpuInfo collector failed", e);
                     result.markError(e);
@@ -256,7 +288,9 @@ public class NativeCollectorBridge {
             protected void collect(CollectorResult result) {
                 if (!ensureNative(result)) return;
                 try {
-                    long size = nativeGetDiskSize("/data");
+                    SignalResult<Long> cached = signals == null ? null : signals.getDiskSizeData();
+                    long size = cached != null && cached.isSuccess() && cached.getValue() != null
+                            ? cached.getValue() : nativeGetDiskSize("/data");
                     long sizeStorage = nativeGetDiskSize("/storage/emulated/0");
                     if (size >= 0) result.addValue("native_data", String.valueOf(size));
                     if (sizeStorage >= 0) {
@@ -282,7 +316,10 @@ public class NativeCollectorBridge {
             protected void collect(CollectorResult result) {
                 if (!ensureNative(result)) return;
                 try {
-                    result.addValue("native", nativeGetKernelInfo());
+                    SignalResult<String> cached = signals == null ? null : signals.getKernelInfo();
+                    String value = cached != null && cached.isSuccess()
+                            ? cached.getValue() : nativeGetKernelInfo();
+                    if (value != null && !value.isEmpty()) result.addValue("native", value);
                 } catch (Exception e) {
                     CLog.e("KernelInfo collector failed", e);
                     result.markError(e);

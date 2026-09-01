@@ -142,6 +142,16 @@ public class DetectionResult {
     public String getEvidence() { return evidence; }
     public long getTimestampMs() { return timestampMs; }
 
+    public DetectionResult withInformational(boolean informational) {
+        if (this.warnOnly == informational) {
+            return this;
+        }
+        return new DetectionResult(
+                detectorName, riskLevel, status, score, maxScore, informational,
+                executionStatus, checksAttempted, checksSucceeded, checksFailed,
+                failureReasons, details, evidence, timestampMs);
+    }
+
     public static DetectionResult unavailable(String detectorName, String reason) {
         return executionFailure(detectorName, DetectionExecutionStatus.UNAVAILABLE, reason);
     }

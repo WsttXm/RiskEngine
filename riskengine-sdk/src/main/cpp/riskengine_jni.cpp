@@ -10,7 +10,9 @@
 #include "detector/native_hook_detector.h"
 #include "detector/native_emulator_detector.h"
 #include "detector/native_debug_detector.h"
+#include "detector/native_integrity.h"
 #include "detector/runtime_arch_checker.h"
+#include "generated/detection_lists.h"
 
 #include <algorithm>
 #include <array>
@@ -110,16 +112,10 @@ static void clearPendingException(JNIEnv *env) {
 }
 
 static bool isAllowedSystemProperty(const std::string &name) {
-    static constexpr std::array<const char *, 18> allowed = {
-            "service.adb.tcp.port", "persist.adb.tcp.port",
-            "ro.build.fingerprint", "ro.build.display.id", "ro.product.model",
-            "ro.product.brand", "ro.product.device", "ro.product.manufacturer",
-            "ro.hardware", "ro.board.platform", "persist.sys.timezone",
-            "gsm.version.baseband", "ro.lineage.version", "ro.cm.version",
-            "ro.mokee.version", "ro.rr.version", "ro.pixelexperience.version",
-            "ro.modversion"
-    };
-    return std::find(allowed.begin(), allowed.end(), name) != allowed.end();
+    for (const auto &allowed : list_allowed_properties()) {
+        if (allowed == name) return true;
+    }
+    return false;
 }
 
 // ==================== Collector JNI Methods ====================
@@ -179,7 +175,23 @@ static jstring jni_getRootEvidence(JNIEnv *env, jclass) {
 }
 
 static jstring jni_getHookEvidence(JNIEnv *env, jclass) {
-    return toJString(env, native_get_hook_evidence());
+    return toJString(env, native_get_hook_evidence(env));
+}
+
+static jint jni_getSelinuxEnforce(JNIEnv *, jclass) {
+    return (jint) native_get_selinux_enforce();
+}
+
+static jstring jni_getBuildPropFingerprint(JNIEnv *env, jclass) {
+    return toJString(env, native_get_build_prop_fingerprint());
+}
+
+static jstring jni_scanProcessTokens(JNIEnv *env, jclass) {
+    return toJString(env, native_scan_process_tokens());
+}
+
+static jstring jni_getSoIntegrity(JNIEnv *env, jclass) {
+    return toJString(env, native_get_so_integrity_evidence());
 }
 
 static jstring jni_checkEmulatorFiles(JNIEnv *env, jclass) {
@@ -220,6 +232,10 @@ static JNINativeMethod methods[] = {
         {"nativeGetThermalZoneCountRaw","()I",                                   (void *) jni_getThermalZoneCount},
         {"nativeGetRuntimeArchRaw",     "()Ljava/lang/String;",                  (void *) jni_getRuntimeArch},
         {"nativeGetTracerPidRaw",       "()I",                                   (void *) jni_getTracerPid},
+        {"nGetSelinuxEnforceRaw",       "()I",                                   (void *) jni_getSelinuxEnforce},
+        {"nGetBuildPropFingerprintRaw", "()Ljava/lang/String;",                  (void *) jni_getBuildPropFingerprint},
+        {"nScanProcessTokensRaw",       "()Ljava/lang/String;",                  (void *) jni_scanProcessTokens},
+        {"nGetSoIntegrityRaw",          "()Ljava/lang/String;",                  (void *) jni_getSoIntegrity},
 };
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {

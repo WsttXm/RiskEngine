@@ -33,6 +33,7 @@ public final class RiskReportJsonSerializer {
             root.put("coveragePercent", report.getCoveragePercent());
             root.put("reportStatus", report.getReportStatus().name());
             root.put("overallRiskLevel", report.getOverallRiskLevel().name());
+            root.put("collectScene", report.getCollectScene().name());
 
             JSONObject fingerprint = new JSONObject();
             for (Map.Entry<String, CollectorResult> entry

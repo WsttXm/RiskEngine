@@ -43,6 +43,7 @@ public class DetectorRegistry {
         if (config.isEnableCustomRomDetection()) {
             detectors.add(new CustomRomDetector(context, signals));
         }
+        detectors.add(new NativeTamperDetector(context, signals));
     }
 
     public List<BaseDetector> getDetectors() {

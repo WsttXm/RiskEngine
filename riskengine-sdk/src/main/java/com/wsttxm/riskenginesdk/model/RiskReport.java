@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 
 import com.wsttxm.riskenginesdk.BuildConfig;
+import com.wsttxm.riskenginesdk.CollectScene;
 
 public class RiskReport {
     public static final int MEDIUM_THRESHOLD = 4;
@@ -25,9 +26,16 @@ public class RiskReport {
     private final int availableDetectionCount;
     private final int checkCount;
     private final int completedCheckCount;
+    private final CollectScene collectScene;
 
     public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections) {
+        this(fingerprint, detections, CollectScene.STANDARD);
+    }
+
+    public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections,
+                      CollectScene collectScene) {
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
+        this.collectScene = collectScene == null ? CollectScene.STANDARD : collectScene;
         Objects.requireNonNull(detections, "detections must not be null");
         List<DetectionResult> detectionCopy = new ArrayList<>(detections.size());
         for (DetectionResult detection : detections) {
@@ -108,6 +116,7 @@ public class RiskReport {
     public int getScoreToNextRiskThreshold() {
         return Math.max(0, getNextRiskThreshold() - riskScore);
     }
+    public CollectScene getCollectScene() { return collectScene; }
 
     public List<DetectionResult> getDetectionsByLevel(RiskLevel minLevel) {
         Objects.requireNonNull(minLevel, "minLevel must not be null");
@@ -168,8 +177,14 @@ public class RiskReport {
             }
             String name = detection.getDetectorName();
             List<String> details = detection.getDetails();
+            if (containsAny(details, "inline_hook:", "got_hook:")) {
+                return true;
+            }
             if ("hook_framework".equals(name) && containsAny(details,
                     "frida_pid_port", "maps:frida", "maps:gadget")) {
+                return true;
+            }
+            if ("signal_correlation".equals(name) && containsAny(details, "C3:")) {
                 return true;
             }
         }

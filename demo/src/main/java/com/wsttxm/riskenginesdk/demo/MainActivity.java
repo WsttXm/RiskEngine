@@ -36,9 +36,11 @@ import java.lang.ref.WeakReference;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -327,11 +329,11 @@ public class MainActivity extends AppCompatActivity {
                 DateFormat.SHORT, DateFormat.MEDIUM, Locale.getDefault())
                 .format(new Date(report.getTimestampMs()));
         tvScoreCaption.setText(getString(R.string.score_report_description,
-                report.getSdkVersion(), time, report.getRiskScore(),
-                report.getDisplayThresholdMaximum()));
+                time, report.getRiskScore(), report.getDisplayThresholdMaximum()));
 
         layoutStats.setVisibility(View.VISIBLE);
-        tvStatRiskScore.setText(String.valueOf(report.getRiskScore()));
+        tvStatRiskScore.setText(report.getRiskScore()
+                + "/" + report.getDisplayThresholdMaximum());
         tvStatFingerprints.setText(getString(
                 R.string.coverage_percent, report.getCoveragePercent()));
         tvStatElapsed.setText(formatElapsed(elapsedMs));
@@ -351,7 +353,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void displayDetections(RiskReport report) {
         layoutDetections.removeAllViews();
-        List<DetectionResult> detections = new ArrayList<>(report.getDetections());
+        List<DetectionResult> detections = environmentDetections(report);
         detections.sort((left, right) -> Integer.compare(
                 detectionPriority(left), detectionPriority(right)));
 
@@ -362,13 +364,23 @@ public class MainActivity extends AppCompatActivity {
 
         int attentionCount = 0;
         for (DetectionResult detection : detections) {
-            if (detection.getStatus() == DetectionStatus.DANGER
-                    || detection.getStatus() == DetectionStatus.WARNING) {
+            if (!detection.isInformational()
+                    && (detection.getStatus() == DetectionStatus.DANGER
+                    || detection.getStatus() == DetectionStatus.WARNING)) {
                 attentionCount++;
             }
         }
-        tvDetectionsHeader.setText(getString(R.string.detections_header_summary,
-                detections.size(), attentionCount, countIncompleteDetections(detections)));
+        int incomplete = countIncompleteDetections(detections);
+        if (attentionCount == 0 && incomplete == 0) {
+            tvDetectionsHeader.setText(getString(
+                    R.string.detections_header_summary_clear, detections.size()));
+        } else if (attentionCount == 0) {
+            tvDetectionsHeader.setText(getString(
+                    R.string.detections_header_summary_no_risk, detections.size(), incomplete));
+        } else {
+            tvDetectionsHeader.setText(getString(R.string.detections_header_summary,
+                    detections.size(), attentionCount, incomplete));
+        }
 
         for (int index = 0; index < detections.size(); index++) {
             layoutDetections.addView(createDetectionRow(detections.get(index)));
@@ -376,14 +388,41 @@ public class MainActivity extends AppCompatActivity {
                 layoutDetections.addView(createDivider());
             }
         }
+        int coverageGaps = countCollectorCoverageGaps(report);
+        if (coverageGaps > 0) {
+            TextView footer = createText(getString(R.string.coverage_gaps_footer, coverageGaps),
+                    11, R.color.text_tertiary, Typeface.NORMAL);
+            footer.setPadding(dp(2), dp(12), dp(2), dp(2));
+            layoutDetections.addView(footer);
+        }
         revealCard(cardDetections, 0);
+    }
+
+    private List<DetectionResult> environmentDetections(RiskReport report) {
+        List<DetectionResult> detections = new ArrayList<>();
+        for (DetectionResult detection : report.getDetections()) {
+            if (!detection.getDetectorName().startsWith("collector:")) {
+                detections.add(detection);
+            }
+        }
+        return detections;
+    }
+
+    private int countCollectorCoverageGaps(RiskReport report) {
+        int count = 0;
+        for (DetectionResult detection : report.getDetections()) {
+            if (detection.getDetectorName().startsWith("collector:")) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private View createDetectionRow(DetectionResult detection) {
         LinearLayout row = createInteractiveRow();
 
         TextView disclosure = addRowHeader(row, detectionStatusColor(detection),
-                detectorTitle(detection.getDetectorName()), detection.getDetectorName(),
+                detectorTitle(detection.getDetectorName()),
                 detectionStatusLabel(detection), detectionStatusColor(detection),
                 detectionStatusBackground(detection));
 
@@ -398,8 +437,16 @@ public class MainActivity extends AppCompatActivity {
         row.addView(summary);
 
         LinearLayout details = createDetailsContainer();
+        TextView detectorId = createText(getString(R.string.technical_detector_id,
+                detection.getDetectorName()), 11, R.color.text_tertiary, Typeface.NORMAL);
+        detectorId.setTypeface(Typeface.MONOSPACE);
+        details.addView(detectorId);
         TextView detailLabel = createText(getString(R.string.technical_evidence),
                 11, R.color.text_tertiary, Typeface.BOLD);
+        LinearLayout.LayoutParams detailLabelParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        detailLabelParams.topMargin = dp(8);
+        detailLabel.setLayoutParams(detailLabelParams);
         details.addView(detailLabel);
         TextView evidence = createText(detectionTechnicalDetails(detection),
                 11, R.color.text_secondary, Typeface.NORMAL);
@@ -538,8 +585,7 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row = createInteractiveRow();
         int statusColor = collectorStatusColor(result.getStatus());
         TextView disclosure = addRowHeader(row, null,
-                collectorTitle(result.getFieldName()), getString(R.string.field_meta,
-                        result.getFieldName(), collectorSensitivityLabel(result.getFieldName())),
+                collectorTitle(result.getFieldName()),
                 collectorStatusLabel(result.getStatus()), statusColor,
                 collectorStatusBackground(result.getStatus()));
 
@@ -554,8 +600,17 @@ public class MainActivity extends AppCompatActivity {
         row.addView(summary);
 
         LinearLayout details = createDetailsContainer();
+        TextView fieldId = createText(getString(R.string.field_meta,
+                result.getFieldName(), collectorSensitivityLabel(result.getFieldName())),
+                11, R.color.text_tertiary, Typeface.NORMAL);
+        fieldId.setTypeface(Typeface.MONOSPACE);
+        details.addView(fieldId);
         TextView detailLabel = createText(getString(R.string.source_values),
                 11, R.color.text_tertiary, Typeface.BOLD);
+        LinearLayout.LayoutParams detailLabelParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        detailLabelParams.topMargin = dp(8);
+        detailLabel.setLayoutParams(detailLabelParams);
         details.addView(detailLabel);
         TextView technicalValues = createText(collectorTechnicalDetails(result),
                 11, R.color.text_secondary, Typeface.NORMAL);
@@ -579,20 +634,20 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setClickable(true);
         row.setFocusable(true);
-        row.setMinimumHeight(dp(64));
+        row.setFocusableInTouchMode(false);
+        row.setMinimumHeight(dp(56));
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(2), dp(13), dp(2), dp(13));
+        row.setPadding(dp(2), dp(12), dp(2), dp(12));
         TypedValue selectable = new TypedValue();
         if (getTheme().resolveAttribute(
                 android.R.attr.selectableItemBackground, selectable, true)) {
-            row.setBackgroundResource(selectable.resourceId);
+            row.setForeground(getDrawable(selectable.resourceId));
         }
         return row;
     }
 
     private TextView addRowHeader(LinearLayout row, Integer dotColor, String titleText,
-                                  String technicalText, String badgeText, int badgeTextColor,
-                                  int badgeBackgroundColor) {
+                                  String badgeText, int badgeTextColor, int badgeBackgroundColor) {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -606,16 +661,10 @@ public class MainActivity extends AppCompatActivity {
             header.addView(dot);
         }
 
-        LinearLayout titleGroup = new LinearLayout(this);
-        titleGroup.setOrientation(LinearLayout.VERTICAL);
-        titleGroup.setLayoutParams(new LinearLayout.LayoutParams(
+        TextView title = createText(titleText, 14, R.color.text_primary, Typeface.BOLD);
+        title.setLayoutParams(new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        titleGroup.addView(createText(titleText, 14, R.color.text_primary, Typeface.BOLD));
-        TextView technicalName = createText(
-                technicalText, 11, R.color.text_tertiary, Typeface.NORMAL);
-        technicalName.setTypeface(Typeface.MONOSPACE);
-        titleGroup.addView(technicalName);
-        header.addView(titleGroup);
+        header.addView(title);
 
         header.addView(createStatusBadge(badgeText, badgeTextColor, badgeBackgroundColor));
         TextView disclosure = createText(getString(R.string.expand_details),
@@ -636,6 +685,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void toggleDetails(View details, TextView disclosure) {
+        if (details.getParent() instanceof View) {
+            View row = (View) details.getParent();
+            row.setPressed(false);
+            row.clearFocus();
+            row.jumpDrawablesToCurrentState();
+        }
         boolean expanding = !Boolean.TRUE.equals(details.getTag());
         details.setTag(expanding);
         disclosure.setText(expanding
@@ -756,6 +811,10 @@ public class MainActivity extends AppCompatActivity {
 
     private String detectionSummary(DetectionResult detection) {
         if (detection.getStatus() == DetectionStatus.UNKNOWN) {
+            String reason = firstReadableFailure(detection);
+            if (reason != null) {
+                return getString(R.string.detection_unavailable_reason_summary, reason);
+            }
             return getString(R.string.detection_unavailable_summary,
                     executionStatusLabel(detection));
         }
@@ -787,16 +846,26 @@ public class MainActivity extends AppCompatActivity {
                 detection.isInformational() ? getString(R.string.yes) : getString(R.string.no)));
         text.append('\n').append(getString(R.string.technical_check_coverage,
                 detection.getChecksSucceeded(), detection.getChecksAttempted()));
+        Set<String> shown = new HashSet<>();
         for (String reason : detection.getFailureReasons()) {
-            text.append('\n').append(getString(R.string.technical_failure_reason,
-                    humanizeFailureReason(reason)));
+            String human = humanizeFailureReason(reason);
+            text.append('\n').append(getString(R.string.technical_failure_reason, human));
+            shown.add(human);
         }
         if (detection.getDetails().isEmpty()) {
-            text.append('\n').append(getString(R.string.no_abnormal_signal));
+            if (shown.isEmpty()) {
+                text.append('\n').append(getString(R.string.no_abnormal_signal));
+            }
         } else {
             for (String detail : detection.getDetails()) {
-                text.append("\n• ").append(humanizeEvidence(detail));
-                if (!isInternalExecutionToken(detail)) {
+                String human = humanizeEvidence(detail);
+                if (!shown.add(human)) {
+                    continue;
+                }
+                text.append("\n• ").append(human);
+                if (!isInternalExecutionToken(detail)
+                        && !human.equals(detail)
+                        && !human.equals(detail.replace('_', ' '))) {
                     text.append("\n  ").append(detail);
                 }
             }
@@ -804,23 +873,53 @@ public class MainActivity extends AppCompatActivity {
         return text.toString();
     }
 
-    private String buildRiskDescription(RiskReport report) {
-        String base = getRiskDescription(report.getOverallRiskLevel());
-        if (report.getReportStatus()
-                != com.wsttxm.riskenginesdk.model.ReportStatus.COMPLETE) {
-            base += "\n" + getString(R.string.coverage_incomplete_advice,
-                    report.getIncompleteCheckCount());
-        }
-        for (DetectionResult detection : report.getDetections()) {
-            if (detection.getStatus() != DetectionStatus.NORMAL
-                    && detection.getStatus() != DetectionStatus.UNKNOWN
-                    && !detection.getDetails().isEmpty()) {
-                return base + "\n" + getString(R.string.primary_reason,
-                        detectorTitle(detection.getDetectorName()),
-                        humanizeEvidence(detection.getDetails().get(0)));
+    private String firstReadableFailure(DetectionResult detection) {
+        for (String reason : detection.getFailureReasons()) {
+            String human = humanizeFailureReason(reason);
+            if (!human.isBlank() && !human.equals(getString(R.string.unknown_error))) {
+                return human;
             }
         }
+        for (String detail : detection.getDetails()) {
+            if (isInternalExecutionToken(detail)
+                    || detail.contains("missing_map")
+                    || detail.contains("text_mismatch")) {
+                return humanizeEvidence(detail);
+            }
+        }
+        return null;
+    }
+
+    private String buildRiskDescription(RiskReport report) {
+        String base = getRiskDescription(report.getOverallRiskLevel());
+        DetectionResult primary = primaryDetection(report);
+        if (primary != null) {
+            return base + "\n" + getString(R.string.primary_reason,
+                    detectorTitle(primary.getDetectorName()),
+                    humanizeEvidence(primary.getDetails().get(0)));
+        }
         return base;
+    }
+
+    private DetectionResult primaryDetection(RiskReport report) {
+        List<DetectionResult> candidates = environmentDetections(report);
+        candidates.sort((left, right) -> Integer.compare(
+                detectionPriority(left), detectionPriority(right)));
+        DetectionResult informational = null;
+        for (DetectionResult detection : candidates) {
+            if (detection.getStatus() == DetectionStatus.NORMAL
+                    || detection.getStatus() == DetectionStatus.UNKNOWN
+                    || detection.getDetails().isEmpty()) {
+                continue;
+            }
+            if (!detection.isInformational()) {
+                return detection;
+            }
+            if (informational == null) {
+                informational = detection;
+            }
+        }
+        return informational;
     }
 
     private void styleLocalStatus(String label, int textColor, int backgroundColor) {
@@ -905,9 +1004,8 @@ public class MainActivity extends AppCompatActivity {
         }
         if (isInternalExecutionToken(detail)) {
             int separator = detail.indexOf(':');
-            return getString(R.string.evidence_check_unavailable,
-                    humanizeFailureReason(separator >= 0
-                            ? detail.substring(separator + 1) : detail));
+            return humanizeFailureReason(separator >= 0
+                    ? detail.substring(separator + 1) : detail);
         }
         if (detail.startsWith("settings_adb_wifi_enabled")) return getString(R.string.evidence_adb_wifi);
         if (detail.startsWith("settings_adb_enabled")) return getString(R.string.evidence_adb_usb);
@@ -915,18 +1013,98 @@ public class MainActivity extends AppCompatActivity {
         if (detail.startsWith("debuggable_flag")) return getString(R.string.evidence_debuggable);
         if (detail.startsWith("debugger_connected")) return getString(R.string.evidence_debugger);
         if (detail.startsWith("tracer_pid:")) return getString(R.string.evidence_tracer);
-        if (detail.startsWith("su_found:")) return getString(R.string.evidence_su);
-        if (detail.startsWith("magisk_found:") || detail.startsWith("native:magisk")) {
+        if (detail.startsWith("su_found:") || detail.startsWith("native:su:")
+                || detail.startsWith("path_su:")) {
+            return getString(R.string.evidence_su);
+        }
+        if (detail.startsWith("ksu_found:") || detail.startsWith("native:ksu:")) {
+            return getString(R.string.evidence_kernelsu);
+        }
+        if (detail.startsWith("apatch_found:") || detail.startsWith("native:apatch:")) {
+            return getString(R.string.evidence_apatch);
+        }
+        if (detail.startsWith("syscall_mismatch") || detail.contains("syscall_mismatch")) {
+            return getString(R.string.evidence_syscall_mismatch);
+        }
+        if (detail.contains("magisk_mount") || detail.contains("mount:magisk")
+                || detail.startsWith("mountinfo:magisk")) {
+            return getString(R.string.evidence_magisk_mount);
+        }
+        if (detail.contains("module_mount") || detail.contains("mount:module")
+                || detail.startsWith("modules_found:")) {
+            return getString(R.string.evidence_module_mount);
+        }
+        if (detail.startsWith("magisk_found:") || detail.contains("magisk:")
+                || detail.startsWith("native:magisk")) {
             return getString(R.string.evidence_magisk);
         }
         if (detail.startsWith("selinux_permissive")) return getString(R.string.evidence_selinux);
         if (detail.startsWith("test_keys")) return getString(R.string.evidence_test_keys);
+        if (detail.startsWith("inline_hook:")) return getString(R.string.evidence_inline_hook);
+        if (detail.startsWith("got_hook:")) return getString(R.string.evidence_got_hook);
+        if (detail.startsWith("jni_table_hook:")) return getString(R.string.evidence_jni_hook);
+        if (detail.startsWith("maps:gadget") || detail.contains("libgadget")) {
+            return getString(R.string.evidence_gadget);
+        }
+        if (detail.startsWith("anon_exec:")) return getString(R.string.evidence_anon_exec);
         if (detail.contains("frida")) return getString(R.string.evidence_frida);
-        if (detail.contains("xposed") || detail.contains("lsposed")) return getString(R.string.evidence_xposed);
+        if (detail.contains("xposed") || detail.contains("lsposed") || detail.contains("lspd")) {
+            return getString(R.string.evidence_xposed);
+        }
+        if (detail.startsWith("C1:")) return getString(R.string.evidence_correlation_c1);
+        if (detail.startsWith("C2:")) return getString(R.string.evidence_correlation_c2);
+        if (detail.startsWith("C3:")) return getString(R.string.evidence_correlation_c3);
+        if (detail.startsWith("C4:")) return getString(R.string.evidence_correlation_c4);
+        if (detail.startsWith("C5:")) return getString(R.string.evidence_correlation_c5);
+        if (detail.startsWith("C7:")) return getString(R.string.evidence_correlation_c7);
         if (detail.startsWith("community_rom:")) return getString(R.string.evidence_custom_rom);
+        if (detail.startsWith("prop_mismatch:")) return getString(R.string.evidence_prop_mismatch);
         if (detail.startsWith("runtime_arch:")) return getString(R.string.evidence_runtime_arch);
+        if (detail.startsWith("qemu_prop") || detail.startsWith("qemu_pipe")
+                || detail.startsWith("cpu:hypervisor")) {
+            return detail.startsWith("cpu:hypervisor")
+                    ? getString(R.string.evidence_hypervisor_cpu)
+                    : getString(R.string.evidence_qemu);
+        }
+        if (detail.startsWith("disk_small")) return getString(R.string.evidence_disk_small);
+        if (detail.startsWith("screen_stock")) return getString(R.string.evidence_screen_stock);
+        if (detail.startsWith("generic_fingerprint:")) return getString(R.string.evidence_generic_fingerprint);
+        if (detail.startsWith("emu_file:")) return getString(R.string.evidence_emu_file);
+        if (detail.startsWith("emu_pkg:")) return getString(R.string.evidence_emu_pkg);
+        if (detail.startsWith("missing_feature:")) return getString(R.string.evidence_missing_feature);
+        if (detail.startsWith("no_thermal")) return getString(R.string.evidence_no_thermal);
+        if (detail.startsWith("low_sensor") || detail.startsWith("aosp_sensor")
+                || detail.startsWith("very_low_sensor")) {
+            return getString(R.string.evidence_low_sensor);
+        }
+        if (detail.startsWith("cloud_pkg:")) return getString(R.string.evidence_cloud_pkg);
+        if (detail.startsWith("battery_")) return getString(R.string.evidence_battery_anomaly);
+        if (detail.startsWith("virtual_") || detail.startsWith("sandbox_pkg:")
+                || detail.startsWith("virtualized_fd:") || detail.startsWith("uid_datadir")) {
+            return getString(R.string.evidence_virtual_env);
+        }
+        if (detail.contains("missing_map") || detail.contains("missing map")) {
+            return getString(R.string.failure_so_missing_map);
+        }
+        if (detail.contains("anonymous_map") || detail.contains("anonymous map")) {
+            return getString(R.string.failure_so_anonymous_map);
+        }
+        if (detail.contains("file_unreadable") || detail.contains("file unreadable")) {
+            return getString(R.string.failure_so_unreadable);
+        }
+        if (detail.contains("bad_elf") || detail.contains("bad elf")) {
+            return getString(R.string.failure_so_bad_elf);
+        }
+        if (detail.startsWith("text_mismatch")) return getString(R.string.evidence_native_tamper);
+        if (detail.startsWith("process_source_mismatch")) {
+            return getString(R.string.evidence_process_mismatch);
+        }
+        if (detail.startsWith("suspicious_process:") || detail.startsWith("native_process:")) {
+            return getString(R.string.evidence_suspicious_process);
+        }
         if (detail.startsWith("fingerprint:") || detail.startsWith("model:")
-                || detail.startsWith("hardware:") || detail.startsWith("product:")) {
+                || detail.startsWith("hardware:") || detail.startsWith("product:")
+                || detail.startsWith("manufacturer:") || detail.startsWith("board:")) {
             return getString(R.string.evidence_emulator_build);
         }
         if (detail.startsWith("inconsistent_fields:")) return getString(R.string.evidence_inconsistent);
@@ -943,15 +1121,34 @@ public class MainActivity extends AppCompatActivity {
 
     private String humanizeFailureReason(String reason) {
         if (reason == null || reason.isBlank()) return getString(R.string.unknown_error);
-        String lower = reason.toLowerCase(Locale.ROOT);
+        String normalized = reason;
+        if (normalized.startsWith("unavailable:")) {
+            normalized = normalized.substring("unavailable:".length());
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
         if (lower.contains("timeout") || lower.contains("deadline")) return getString(R.string.failure_timeout);
         if (lower.contains("securityexception")) return getString(R.string.failure_access_denied);
         if (lower.contains("native_library_unavailable") || lower.contains("native_unavailable")) {
             return getString(R.string.failure_native_unavailable);
         }
+        if (lower.contains("missing_map") || lower.contains("missing map")) {
+            return getString(R.string.failure_so_missing_map);
+        }
+        if (lower.contains("anonymous_map") || lower.contains("anonymous map")) {
+            return getString(R.string.failure_so_anonymous_map);
+        }
+        if (lower.contains("file_unreadable") || lower.contains("file unreadable")) {
+            return getString(R.string.failure_so_unreadable);
+        }
+        if (lower.contains("bad_elf") || lower.contains("bad elf")) {
+            return getString(R.string.failure_so_bad_elf);
+        }
+        if (lower.contains("text_mismatch") || lower.contains("text mismatch")) {
+            return getString(R.string.evidence_native_tamper);
+        }
         if (lower.contains("unsupported")) return getString(R.string.failure_unsupported);
         if (lower.contains("disabled")) return getString(R.string.failure_disabled);
-        return reason.replace('_', ' ');
+        return normalized.replace('_', ' ');
     }
 
     private String detectorTitle(String name) {
@@ -967,6 +1164,8 @@ public class MainActivity extends AppCompatActivity {
             case "cloud_phone": return getString(R.string.detector_cloud_phone);
             case "custom_rom": return getString(R.string.detector_custom_rom);
             case "multi_source_validation": return getString(R.string.detector_multi_source);
+            case "signal_correlation": return getString(R.string.detector_correlation);
+            case "native_tamper": return getString(R.string.detector_native_tamper);
             default:
                 if (name.startsWith("collector:")) {
                     return getString(R.string.detector_collector_coverage,
@@ -1086,12 +1285,25 @@ public class MainActivity extends AppCompatActivity {
             case "status": return getString(R.string.value_status);
             case "supported": return getString(R.string.value_supported);
             case "low_energy_supported": return getString(R.string.value_bluetooth_le);
+            case "wifi_direct_supported": return getString(R.string.value_wifi_direct);
+            case "development_settings_enabled": return getString(R.string.value_developer_options);
+            case "checks_completed": return getString(R.string.value_checks_completed);
+            case "check_failures": return getString(R.string.value_check_failures);
+            case "phone_type": return getString(R.string.value_phone_type);
+            case "sim_state": return getString(R.string.value_sim_state);
+            case "signing_cert_sha256": return getString(R.string.value_signing_cert);
+            case "native": return getString(R.string.value_native_source);
             case "tcp_port": return getString(R.string.value_tcp_port);
             case "signals": return getString(R.string.value_signals);
             case "count": return getString(R.string.value_count);
+            case "width":
             case "width_px": return getString(R.string.value_width);
+            case "height":
             case "height_px": return getString(R.string.value_height);
+            case "density":
             case "density_dpi": return getString(R.string.value_density);
+            case "xdpi": return getString(R.string.value_xdpi);
+            case "ydpi": return getString(R.string.value_ydpi);
             case "native_data": return getString(R.string.value_data_capacity);
             case "native_storage": return getString(R.string.value_storage_capacity);
             case "settings_api": return getString(R.string.value_settings_api);
@@ -1112,12 +1324,50 @@ public class MainActivity extends AppCompatActivity {
                 return String.format(Locale.getDefault(), "%.1f GB", gib);
             } catch (NumberFormatException ignored) {}
         }
+        if ("phone_type".equals(key)) return phoneTypeLabel(value);
+        if ("sim_state".equals(key)) return simStateLabel(value);
+        if ("mount_overlay".equals(value)) {
+            return getString(R.string.value_mount_overlay);
+        }
+        if ("summary".equals(key)) {
+            if ("present".equalsIgnoreCase(value)) return getString(R.string.value_present);
+            if ("none".equalsIgnoreCase(value)) return getString(R.string.value_none);
+            if ("enabled_wifi".equals(value)) return getString(R.string.value_adb_wifi_on);
+            if ("enabled".equals(value)) return getString(R.string.value_adb_on);
+        }
         if ("true".equalsIgnoreCase(value)) return getString(R.string.yes);
         if ("false".equalsIgnoreCase(value)) return getString(R.string.no);
         if (summary && (field.endsWith("_id") || key.contains("hash")) && value.length() > 16) {
             return value.substring(0, 8) + "…" + value.substring(value.length() - 4);
         }
         return summary ? shortenValue(value) : value;
+    }
+
+    private String phoneTypeLabel(String value) {
+        switch (value) {
+            case "0": return getString(R.string.phone_type_none);
+            case "1": return getString(R.string.phone_type_gsm);
+            case "2": return getString(R.string.phone_type_cdma);
+            case "3": return getString(R.string.phone_type_sip);
+            default: return value;
+        }
+    }
+
+    private String simStateLabel(String value) {
+        switch (value) {
+            case "0": return getString(R.string.sim_state_unknown);
+            case "1": return getString(R.string.sim_state_absent);
+            case "2": return getString(R.string.sim_state_pin);
+            case "3": return getString(R.string.sim_state_puk);
+            case "4": return getString(R.string.sim_state_network_locked);
+            case "5": return getString(R.string.sim_state_ready);
+            case "6": return getString(R.string.sim_state_not_ready);
+            case "7": return getString(R.string.sim_state_perm_disabled);
+            case "8": return getString(R.string.sim_state_card_io_error);
+            case "9": return getString(R.string.sim_state_card_restricted);
+            case "10": return getString(R.string.sim_state_loaded);
+            default: return value;
+        }
     }
 
     private String collectorStatusLabel(CollectorResult.Status status) {

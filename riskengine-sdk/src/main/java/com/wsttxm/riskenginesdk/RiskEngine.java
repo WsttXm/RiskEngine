@@ -101,10 +101,14 @@ public final class RiskEngine {
     }
 
     public static void collect(RiskEngineCallback callback) {
-        getInstance().doCollect(callback);
+        getInstance().doCollect(null, callback);
     }
 
-    private void doCollect(RiskEngineCallback callback) {
+    public static void collect(CollectScene scene, RiskEngineCallback callback) {
+        getInstance().doCollect(scene, callback);
+    }
+
+    private void doCollect(CollectScene scene, RiskEngineCallback callback) {
         TaskScheduler scheduler;
         long requestGeneration;
         synchronized (lifecycleLock) {
@@ -121,7 +125,7 @@ public final class RiskEngine {
             scheduler.submit(() -> {
                 RiskReport report;
                 try {
-                    report = doCollectSync(requestStartNanos, requestGeneration);
+                    report = doCollectSync(requestStartNanos, requestGeneration, scene);
                 } catch (Exception | LinkageError e) {
                     CLog.e("Collection failed", e);
                     notifyError(callback, e);
@@ -143,14 +147,15 @@ public final class RiskEngine {
     }
 
     public static RiskReport collectSync() {
-        return getInstance().doCollectSync();
+        return getInstance().doCollectSync(System.nanoTime(), -1, null);
     }
 
-    private RiskReport doCollectSync() {
-        return doCollectSync(System.nanoTime(), -1);
+    public static RiskReport collectSync(CollectScene scene) {
+        return getInstance().doCollectSync(System.nanoTime(), -1, scene);
     }
 
-    private RiskReport doCollectSync(long startNanos, long expectedGeneration) {
+    private RiskReport doCollectSync(long startNanos, long expectedGeneration,
+                                     CollectScene sceneOverride) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             throw new IllegalStateException(
                     "Synchronous collection must not run on the Android main thread");
@@ -183,7 +188,10 @@ public final class RiskEngine {
             ensureCollectionActive(snapshot);
             addMissingDetectionResults(detectors, detectionResults);
 
-            RiskReport report = snapshot.dataAggregator.aggregate(collectorResults, detectionResults);
+            CollectScene scene = sceneOverride != null
+                    ? sceneOverride : snapshot.config.getCollectScene();
+            RiskReport report = snapshot.dataAggregator.aggregate(
+                    collectorResults, detectionResults, scene);
             long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
             CLog.i("Collection completed in " + elapsedMs + "ms, risk level: "
                     + report.getOverallRiskLevel());
@@ -226,7 +234,9 @@ public final class RiskEngine {
         List<DetectionResult> detectionResults = new ArrayList<>();
         addMissingDetectionResults(detectors, detectionResults);
 
-        RiskReport report = snapshot.dataAggregator.aggregate(collectorResults, detectionResults);
+        CollectScene scene = snapshot.config.getCollectScene();
+        RiskReport report = snapshot.dataAggregator.aggregate(
+                collectorResults, detectionResults, scene);
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
         CLog.w("Collection timed out while waiting for the previous collection after "
                 + elapsedMs + "ms");
@@ -257,7 +267,7 @@ public final class RiskEngine {
 
     /** Collects a fresh report and serializes it. */
     public static String collectReportJson() {
-        return RiskReportJsonSerializer.serialize(getInstance().doCollectSync());
+        return RiskReportJsonSerializer.serialize(collectSync());
     }
 
     /**

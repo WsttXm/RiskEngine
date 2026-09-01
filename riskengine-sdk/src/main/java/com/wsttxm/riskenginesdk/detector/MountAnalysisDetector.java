@@ -59,8 +59,7 @@ public class MountAnalysisDetector extends BaseDetector {
             for (String line : mounts.getValue().split("\\n")) {
                 String lower = line.toLowerCase(Locale.ROOT);
                 // Magisk overlay
-                if (lower.contains("magisk") || lower.contains("tmpfs /system") ||
-                        lower.contains("tmpfs /vendor")) {
+                if (lower.contains("magisk") || lower.contains("debug_ramdisk")) {
                     addUnique(evidence, "magisk_mount");
                 }
                 // Docker/container markers

@@ -157,7 +157,7 @@ public class HookFrameworkDetector extends BaseDetector {
             if (!ports.isSuccess() || ports.getValue() == null) {
                 coverage.failure("frida_ports:" + ports.getFailureReason());
             } else if (ports.getValue().contains(DEFAULT_FRIDA_PORT)) {
-                addMedium(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
+                addWeak(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
             }
             if (ports.isSuccess()) coverage.success();
         } catch (Exception e) {
@@ -238,19 +238,20 @@ public class HookFrameworkDetector extends BaseDetector {
                     if (token.isEmpty()) {
                         continue;
                     }
-                    if (token.startsWith("maps:frida")
-                            || token.startsWith("maps:gadget")) {
-                        addStrong(details, score, token);
-                    } else if (token.startsWith("thread:")
-                            || token.startsWith("maps:xposed")
-                            || token.startsWith("maps:substrate")) {
-                        addMedium(details, score, token);
-                    } else if (token.startsWith("anon_exec:")) {
-                        // ART and OEM runtimes can legitimately create anonymous
-                        // executable regions. Keep it as correlating context only.
-                        addWeak(details, score, token);
-                    } else {
-                        addWeak(details, score, token);
+                    switch (com.wsttxm.riskenginesdk.core.HookEvidenceClassifier.rank(token)) {
+                        case STRONG:
+                            addStrong(details, score, token);
+                            break;
+                        case MEDIUM:
+                            addMedium(details, score, token);
+                            break;
+                        case IGNORE:
+                            details.add(token);
+                            break;
+                        case WEAK:
+                        default:
+                            addWeak(details, score, token);
+                            break;
                     }
                 }
             }

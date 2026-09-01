@@ -41,8 +41,8 @@ android {
 
     buildTypes {
         release {
-            // An SDK AAR is consumed and optimized again by the host application.
-            // Minifying here can remove public nested types before consumers compile.
+            // Host apps minify the AAR. Minifying here breaks release unit tests
+            // and can strip nested public types before consumers compile.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

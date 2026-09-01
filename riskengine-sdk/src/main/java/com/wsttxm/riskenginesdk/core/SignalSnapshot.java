@@ -1,6 +1,8 @@
 package com.wsttxm.riskenginesdk.core;
 
 import android.content.Context;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.util.AdbInspector;
@@ -33,6 +35,14 @@ public final class SignalSnapshot {
     private volatile SignalResult<List<String>> selfMaps;
     private volatile SignalResult<List<ProcfsUtils.ProcessInfo>> processes;
     private volatile SignalResult<List<String>> containerSignals;
+    private volatile SignalResult<Integer> selinuxEnforce;
+    private volatile SignalResult<String> buildPropFingerprint;
+    private volatile SignalResult<String> cpuInfo;
+    private volatile SignalResult<Long> diskSizeData;
+    private volatile SignalResult<String> kernelInfo;
+    private volatile SignalResult<String> nativeProcessTokens;
+    private volatile SignalResult<String> soIntegrity;
+    private volatile SignalResult<ScreenMetrics> screenMetrics;
 
     public SignalSnapshot(Context context) {
         Context application = context == null ? null : context.getApplicationContext();
@@ -49,6 +59,30 @@ public final class SignalSnapshot {
         selfMaps = null;
         processes = null;
         containerSignals = null;
+        selinuxEnforce = null;
+        buildPropFingerprint = null;
+        cpuInfo = null;
+        diskSizeData = null;
+        kernelInfo = null;
+        nativeProcessTokens = null;
+        soIntegrity = null;
+        screenMetrics = null;
+    }
+
+    public static final class ScreenMetrics {
+        public final int width;
+        public final int height;
+        public final float xdpi;
+        public final float ydpi;
+        public final int densityDpi;
+
+        public ScreenMetrics(int width, int height, float xdpi, float ydpi, int densityDpi) {
+            this.width = width;
+            this.height = height;
+            this.xdpi = xdpi;
+            this.ydpi = ydpi;
+            this.densityDpi = densityDpi;
+        }
     }
 
     public SignalResult<AdbInspector.Snapshot> getAdbState() {
@@ -207,6 +241,99 @@ public final class SignalSnapshot {
             }
         }
         return cached;
+    }
+
+    public SignalResult<Integer> getSelinuxEnforce() {
+        return cachedNative(selinuxEnforce, v -> selinuxEnforce = v,
+                NativeCollectorBridge::getSelinuxEnforceResult);
+    }
+
+    public SignalResult<String> getBuildPropFingerprint() {
+        return cachedNative(buildPropFingerprint, v -> buildPropFingerprint = v,
+                NativeCollectorBridge::getBuildPropFingerprintResult);
+    }
+
+    public SignalResult<String> getCpuInfo() {
+        return cachedNative(cpuInfo, v -> cpuInfo = v, NativeCollectorBridge::getCpuInfoResult);
+    }
+
+    public SignalResult<Long> getDiskSizeData() {
+        return cachedNative(diskSizeData, v -> diskSizeData = v,
+                () -> NativeCollectorBridge.getDiskSizeResult("/data"));
+    }
+
+    public SignalResult<String> getKernelInfo() {
+        return cachedNative(kernelInfo, v -> kernelInfo = v,
+                NativeCollectorBridge::getKernelInfoResult);
+    }
+
+    public SignalResult<String> getNativeProcessTokens() {
+        return cachedNative(nativeProcessTokens, v -> nativeProcessTokens = v,
+                NativeCollectorBridge::scanProcessTokensResult);
+    }
+
+    public SignalResult<String> getSoIntegrity() {
+        return cachedNative(soIntegrity, v -> soIntegrity = v,
+                NativeCollectorBridge::getSoIntegrityResult);
+    }
+
+    public SignalResult<ScreenMetrics> getScreenMetrics() {
+        SignalResult<ScreenMetrics> cached = screenMetrics;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = screenMetrics;
+            if (cached == null) {
+                try {
+                    if (context == null) {
+                        cached = SignalResult.unavailable("context_unavailable");
+                    } else {
+                        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                        DisplayMetrics dm = context.getResources().getDisplayMetrics();
+                        int width = dm.widthPixels;
+                        int height = dm.heightPixels;
+                        if (wm != null) {
+                            android.graphics.Rect bounds = wm.getMaximumWindowMetrics().getBounds();
+                            width = bounds.width();
+                            height = bounds.height();
+                        }
+                        cached = SignalResult.success(new ScreenMetrics(
+                                width, height, dm.xdpi, dm.ydpi, dm.densityDpi));
+                    }
+                } catch (Exception e) {
+                    cached = SignalResult.error(e.getClass().getSimpleName());
+                }
+                screenMetrics = cached;
+            }
+        }
+        return cached;
+    }
+
+    private interface NativeFetch<T> {
+        SignalResult<T> get();
+    }
+
+    private interface NativeCache<T> {
+        void set(SignalResult<T> value);
+    }
+
+    private <T> SignalResult<T> cachedNative(SignalResult<T> cached, NativeCache<T> store,
+                                             NativeFetch<T> fetch) {
+        if (cached != null) return cached;
+        synchronized (this) {
+            // Re-read via fetch only once; store holds the field write.
+            SignalResult<T> value;
+            try {
+                if (!NativeCollectorBridge.isNativeAvailable()) {
+                    value = SignalResult.unavailable("native_library_unavailable");
+                } else {
+                    value = fetch.get();
+                }
+            } catch (Exception | LinkageError e) {
+                value = SignalResult.error(e.getClass().getSimpleName());
+            }
+            store.set(value);
+            return value;
+        }
     }
 
     private SignalResult<String> readSystemProperty(String name) {

@@ -15,6 +15,7 @@ public final class RiskEngineConfig {
     private final boolean debugLog;
     private final long collectTimeoutMs;
     private final PrivacyProfile privacyProfile;
+    private final CollectScene collectScene;
     private final boolean collectAndroidId;
     private final boolean collectBootId;
     private final boolean collectDrmId;
@@ -31,6 +32,7 @@ public final class RiskEngineConfig {
         this.debugLog = builder.debugLog;
         this.collectTimeoutMs = builder.collectTimeoutMs;
         this.privacyProfile = builder.privacyProfile;
+        this.collectScene = builder.collectScene;
         this.collectAndroidId = builder.collectAndroidId != null
                 ? builder.collectAndroidId
                 : builder.privacyProfile != PrivacyProfile.MINIMAL;
@@ -54,6 +56,7 @@ public final class RiskEngineConfig {
         private boolean debugLog;
         private long collectTimeoutMs = 10_000;
         private PrivacyProfile privacyProfile = PrivacyProfile.BALANCED;
+        private CollectScene collectScene = CollectScene.STANDARD;
         private Boolean collectAndroidId;
         private Boolean collectBootId;
         private Boolean collectDrmId;
@@ -70,6 +73,11 @@ public final class RiskEngineConfig {
         public Builder privacyProfile(PrivacyProfile value) {
             if (value == null) throw new IllegalArgumentException("privacyProfile must not be null");
             privacyProfile = value;
+            return this;
+        }
+        public Builder collectScene(CollectScene value) {
+            if (value == null) throw new IllegalArgumentException("collectScene must not be null");
+            collectScene = value;
             return this;
         }
         public Builder collectAndroidId(boolean value) { collectAndroidId = value; return this; }
@@ -102,6 +110,7 @@ public final class RiskEngineConfig {
     public boolean isDebugLog() { return debugLog; }
     public long getCollectTimeoutMs() { return collectTimeoutMs; }
     public PrivacyProfile getPrivacyProfile() { return privacyProfile; }
+    public CollectScene getCollectScene() { return collectScene; }
     public boolean isCollectAndroidId() { return collectAndroidId; }
     public boolean isCollectBootId() { return collectBootId; }
     public boolean isCollectDrmId() { return collectDrmId; }

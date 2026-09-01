@@ -2,18 +2,41 @@
 
 [中文](./README_zh.md)
 
-An Android SDK for local device fingerprinting and runtime risk detection. Built on a Java + C++17 dual-layer architecture, RiskEngine collects device signals, runs environment detectors, and returns a structured `RiskReport` to the host app.
+An Android SDK for local device fingerprinting and runtime risk detection. Built as a Java + C++17 JNI stack, it collects device signals, runs environment detectors, and returns a structured `RiskReport` / JSON to the host app.
 
-## What Changed
+RiskEngine has **no server, no reporting channel, and no Play Integrity or SafetyNet dependency**. Results stay on the device. It produces explainable local risk signals for the host to act on; it is not a hosted risk-control product.
 
-This revision focuses on reliable failure semantics, privacy-safe collection, and a redesigned Demo:
+The current development version is `1.1.0-SNAPSHOT`.
 
-- Collector outcomes are explicit: `SUCCESS`, `EMPTY`, `ERROR`, or `UNSUPPORTED`.
-- Detectors report risk presentation separately from `DetectionExecutionStatus`; failures, timeouts, unavailable checks, and partial execution are never treated as safe.
-- Reports expose the fixed severe threshold (18), next threshold, complete/partial coverage, and status counts, and become immutable after aggregation.
-- Collection uses one bounded deadline, serializes concurrent requests, rejects main-thread synchronous calls, and cancels cleanly across `shutdown()`.
-- The default `BALANCED` privacy profile keeps only an app-scoped pseudonymous Android ID hash. Boot ID and Widevine hashes require `DIAGNOSTIC` or explicit opt-in.
-- The Demo uses localized semantic states, evidence-based summaries, consistent coverage, redacted report copy, expandable raw evidence, dark mode, accessible interaction, and reduced-motion behavior.
+## What it does and does not do
+
+| Does | Does not |
+| --- | --- |
+| Collect non-sensitive device attributes and app-scoped identifier hashes | Collect raw IMEI / IMSI / MAC / SSID / BSSID |
+| Detect root, hooks, emulators, debugging, sandboxes, cloud phones, custom ROMs | Replace server-side risk analysis, hardware attestation, or Play Integrity |
+| Represent failure, timeout, and unavailability as explicit execution states | Silently treat a failed check as safe |
+| Change whether a signal is scored, per collection scene | Disable detectors per scene |
+| Show and copy a redacted report in the Demo | Upload results or back them up to the cloud |
+
+A capable adversary can tamper with userspace signals. Kernel mount-namespace hiding (a complete DenyList) cannot be proven from userspace without attestation. Host apps should treat this SDK as one input among several.
+
+## Capabilities
+
+| Area | Detectors | Primary signals |
+| --- | --- | --- |
+| Root | `root`, `mount_analysis` | `su` / Magisk / KernelSU / APatch paths, `syscall_mismatch`, Magisk/module mounts, SELinux |
+| Hook | `hook_framework`, `process_scan` | Xposed/LSPosed, Frida maps/ports/threads, GOT/inline hooks, JNI table, process comm |
+| Native integrity | `native_tamper` | RX vs file CRC of `libriskengine.so`; anonymous mappings are actionable |
+| Emulator | `emulator` | QEMU/ranchu artifacts, emulator files and packages, runtime arch, hypervisor; hardware noise is down-ranked |
+| Debug | `debug` | TracerPid, debugger connection, executable maps paths, debuggable (informational by default) |
+| Sandbox / cloud phone / ROM | `sandbox`, `cloud_phone`, `custom_rom` | Parallel-space packages, cloud-phone packages, community ROM props, fingerprint vs `build.prop` mismatch |
+| Debug bridge | `adb` | USB/Wi-Fi ADB; informational by default, scored in the payment scene |
+| Correlation | `signal_correlation` | Hidden-root, inline hook + Frida, weak emulator + hypervisor, and similar upgrades |
+| Device fingerprint | A dozen collectors | Build, screen, signing cert, telephony/Wi-Fi/BT capability, ADB, containers, CPU/disk/kernel |
+
+Artifact paths are sourced from `riskengine-sdk/src/main/resources/lists/artifact_paths.ini`. Java `DetectionLists` and native `detection_lists.h` are generated from that file.
+
+The SDK declares no Android permissions. Its manifest contains `<queries>` package-visibility entries only for known emulator, cloud-phone, and parallel-space packages.
 
 ## Requirements
 
@@ -21,20 +44,21 @@ This revision focuses on reliable failure semantics, privacy-safe collection, an
 - Android Gradle Plugin 8.13.1
 - Compile SDK 36 / Min SDK 30
 - CMake 3.22.1+, C++17
+- Native ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
 
-## Quick Start
+## Quick start
 
-Build the SDK and demo:
+### Build
 
 ```bash
-./build.sh sdk      # build SDK only
-./build.sh demo     # build demo app
-./build.sh install  # explicitly install demo on a connected device
-./build.sh all      # build both
+./build.sh sdk      # SDK AAR only
+./build.sh demo     # Demo Debug APK
+./build.sh install  # build and install the Demo on a connected device
+./build.sh all      # SDK + Demo
 ./build.sh clean    # clean
 ```
 
-Or use Gradle directly:
+Or Gradle directly:
 
 ```bash
 ./gradlew :riskengine-sdk:test :riskengine-sdk:lint
@@ -42,25 +66,22 @@ Or use Gradle directly:
 ./gradlew :demo:lintDebug :demo:assembleDebug :demo:assembleRelease
 ```
 
-Build artifacts:
-
 | Artifact | Path | Notes |
 | --- | --- | --- |
-| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | Ready for host-app integration |
+| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | Host-app integration |
 | SDK sources | `riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar` | Source archive for distribution |
-| Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | Temporarily debug-signed for sideload testing only |
-| Demo Release APK | `demo/build/outputs/apk/release/demo-release-unsigned.apk` | Minified; sign with your release key before distribution |
+| Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | Temporarily debug-signed; sideload only |
+| Demo Release APK | `demo/build/outputs/apk/release/demo-release-unsigned.apk` | Minified; sign with a release key before distribution |
 
-The SDK packages native libraries for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`.
+Tag releases attach the AAR, sources JAR, POM, temporary Debug APK, and `SHA256SUMS`. The temporary APK is not for production or stores. Later tags may use a different temporary key; uninstall the older Demo if Android reports a signature mismatch.
 
-Tag releases attach the AAR, sources JAR, POM, temporary Debug APK, and `SHA256SUMS`. The temporary APK is not for production or stores. A later release can use a different temporary key; uninstall the older Demo first if Android reports a signature mismatch.
-
-Initialize and collect:
+### Initialize and collect
 
 ```java
 RiskEngineConfig config = new RiskEngineConfig.Builder()
         .privacyProfile(PrivacyProfile.BALANCED)
         .collectTimeout(15000)
+        .collectScene(CollectScene.STANDARD)
         .build();
 
 RiskEngine.initIfNeeded(context, config);
@@ -69,7 +90,9 @@ RiskEngine.collect(new RiskEngineCallback() {
     @Override
     public void onSuccess(RiskReport report) {
         Log.d("RiskEngine", "Risk: " + report.getOverallRiskLevel());
-        Log.d("RiskEngine", "Score: " + report.getRiskScore());
+        Log.d("RiskEngine", "Score: " + report.getRiskScore()
+                + " / " + report.getDisplayThresholdMaximum());
+        Log.d("RiskEngine", "Coverage: " + report.getCoveragePercent() + "%");
     }
 
     @Override
@@ -79,9 +102,15 @@ RiskEngine.collect(new RiskEngineCallback() {
 });
 ```
 
-Callbacks run on an SDK background thread; switch to the main thread before updating UI. `collectTimeout` is one deadline shared by the complete request, including serialized queue wait, collectors, and detectors.
+Callbacks run on an SDK background thread; switch to the main thread before updating UI. `collectTimeout` is one deadline shared by the complete request, including serialized queue wait, collectors, and detectors. The default is 10 seconds; the legal range is 1–120,000 ms.
 
-Synchronous collection:
+Collect for a scene (scoring weights only; every enabled detector still runs):
+
+```java
+RiskEngine.collect(CollectScene.PAYMENT, callback);
+```
+
+Synchronous APIs reject the Android main thread:
 
 ```java
 RiskReport report = RiskEngine.collectSync();
@@ -89,26 +118,26 @@ String json = RiskEngine.reportToJson(report);       // no second collection
 String freshJson = RiskEngine.collectReportJson();  // collect then serialize
 ```
 
-Synchronous APIs reject calls from the Android main thread to prevent ANRs.
+`init` rejects duplicate initialization; multi-entry applications should use atomic `initIfNeeded`. Call `RiskEngine.shutdown()` when the SDK is no longer needed: it advances the lifecycle generation, cancels work, and clears registries. Results from older generations are not delivered.
 
-Call `RiskEngine.shutdown()` when the SDK is no longer needed. `init` rejects duplicate initialization; multi-entry applications can use atomic `initIfNeeded`.
+The SDK AAR itself is not minified. Host R8 uses the bundled `consumer-rules.pro`; no extra keep rules are required for the public API.
 
-## Core Detections
+## Collection scenes
 
-| Area | Examples |
+`CollectScene` only changes the informational / actionable split. Every enabled detector still runs.
+
+| Scene | Behavior |
 | --- | --- |
-| Root | `su`/Magisk artifacts, SELinux and build-context signals |
-| Hook | Xposed/LSPosed, Frida, suspicious maps and processes |
-| Emulator | Build props, QEMU artifacts, native emulator markers |
-| Debugging | Debug flags, tracer pid, gdb/lldb/IDA artifacts |
-| Sandbox / container | Container files, cgroup markers, virtualized paths |
-| Device fingerprint | App-scoped Android ID hash, build props, non-sensitive telephony/Wi-Fi/Bluetooth capabilities, screen, APK signature |
+| `STANDARD` | Default split. ADB, weak emulator, community ROM, and debuggable-only stay informational |
+| `LOGIN` | Emulator, cloud-phone, and sandbox hits become actionable |
+| `PAYMENT` | LOGIN, plus ADB becomes actionable |
+| `DIAGNOSTIC` | Every non-coverage signal is actionable except a debuggable-only debug result |
 
-The SDK declares no Android permissions. Its manifest contains package-visibility queries only for three known emulator packages.
+Set the default with `RiskEngineConfig.Builder.collectScene(...)`. A single call can override it via `collect(scene, callback)` / `collectSync(scene)`.
 
-## Result Semantics
+## Result semantics
 
-Individual collector or detector failures do not silently become safe results. The SDK keeps the completed data and represents missing coverage explicitly:
+Individual collector or detector failures never become silent safe results. The SDK keeps completed data and represents missing coverage explicitly.
 
 | State | Meaning |
 | --- | --- |
@@ -119,65 +148,99 @@ Individual collector or detector failures do not silently become safe results. T
 | `DetectionStatus` | Risk presentation: `NORMAL` / `WARNING` / `DANGER` / `UNKNOWN` |
 | `DetectionExecutionStatus` | Execution: `SAFE` / `RISK` / `PARTIAL` / `UNAVAILABLE` / `DISABLED` / `TIMEOUT` / `ERROR` |
 
-`UNKNOWN` means insufficient coverage, not “no risk.” `PARTIAL` lowers report coverage even when completed subchecks found no issue. When no warning or danger exists but one or more checks are unknown, report risk is `UNKNOWN`. Multi-source inconsistency raises an otherwise lower result to at least `MEDIUM`.
+`UNKNOWN` means insufficient coverage, not “no risk.” When no warning or danger exists but one or more checks are unknown, report risk is `UNKNOWN`. `PARTIAL` lowers coverage even when completed subchecks found no issue.
 
-Only actionable results contribute to `riskScore`. Informational results (the deprecated compatibility name is `warnOnly`) contribute no score but can raise an otherwise safe presentation to `LOW`. Thresholds are `MEDIUM >= 4`, `HIGH >= 10`, and `DEADLY >= 18`; hard triggers can enter `DEADLY` directly. `maxRiskScore` is diagnostic capacity, not the Demo progress denominator.
+Only actionable (non-informational) results contribute to `riskScore`. Informational results add no score but can raise an otherwise safe presentation to `LOW`.
+
+| Level | Rule |
+| --- | --- |
+| `SAFE` | Score 0, no informational/risk result, complete coverage |
+| `LOW` | Score 1–3, or informational signals only |
+| `MEDIUM` | Score ≥ 4, or at least two actionable warnings |
+| `HIGH` | Score ≥ 10, or at least one actionable danger |
+| `DEADLY` | Score ≥ 18, at least three actionable dangers, or a hard trigger |
+| `UNKNOWN` | No known risk, but key coverage is unavailable |
+
+Hard triggers include GOT/inline hooks, high-confidence Frida PID/port or maps Frida/Gadget, and correlation rule `C3` (inline hook + Frida). Multi-source field inconsistency raises an otherwise lower known result to at least `MEDIUM`.
+
+`maxRiskScore` is technical capacity, not a UI percentage denominator. Demo progress uses the severe threshold `displayThresholdMaximum` (fixed at 18).
 
 ## Output
 
-`RiskReport` includes:
+`RiskReport` is frozen after aggregation. Principal fields:
 
 | Field | Description |
 | --- | --- |
-| `fingerprint` | Aggregated device fingerprint values |
-| `detections` | Detector results and evidence |
-| `overallRiskLevel` | Final risk level; `UNKNOWN` when coverage is incomplete and no warning or danger is present |
-| `riskScore` / `maxRiskScore` | Actionable score and the maximum score represented by the report |
-| `warningCount` / `dangerCount` | Number of warning and danger detection results |
-| `unknownCount` | Number of unavailable, timed-out, or unsupported checks |
+| `fingerprint` | Aggregated device fingerprint (collector results) |
+| `detections` | Detector results and evidence tokens |
+| `overallRiskLevel` | Final risk level |
+| `riskScore` / `maxRiskScore` | Actionable score / technical capacity |
+| `displayThresholdMaximum` | Severe threshold, fixed at 18 |
+| `warningCount` / `dangerCount` / `unknownCount` | Status counts (including informational) |
 | `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
-| `checkCount` / `completedCheckCount` / `coveragePercent` | Unified detector + raw-collector coverage without double-counting synthesized SDK fields |
-| `timestampMs` | Collection timestamp |
-| `sdkVersion` | SDK version string |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + raw-collector coverage; excludes `collector:*` duplicates and synthesized SDK fields |
+| `collectScene` | Scene actually used for this report |
+| `timestampMs` / `sdkVersion` | Collection time and SDK version |
 
-## Demo UI
+JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency. Fields match the Java model, including `informational`, `executionStatus`, `details`, and `failureReasons`.
 
-The Demo is designed as a local diagnostic console rather than an automatic collector:
+## Privacy
 
-- It starts in a localized ready state and collects only after an explicit tap; results are never uploaded automatically.
-- The top card uses localized semantic status and risk color. Progress uses the severe threshold of 18; collection errors use gray and 0%.
-- Risk items are sorted first. Rows explain the actual reason before showing raw evidence, score, and subcheck coverage. Collector fields use localized labels and units, with synthesized SDK fields in a separate section.
-- `UNKNOWN` is displayed as insufficient coverage and is never styled or described as safe.
-- In-flight and completed UI state survives Activity recreation. Haptics fire only when a new result arrives, not after rotation or foreground return.
-- A redacted summary can be copied without identifier hashes, raw system properties, paths, or PIDs.
-- Semantic light/dark palettes, readable type sizes, accessibility click behavior, and meaningful completion/error haptics are included.
+| Profile | Default identifier collection |
+| --- | --- |
+| `MINIMAL` | No Android ID, boot ID, or Widevine |
+| `BALANCED` | App-scoped Android ID SHA-256 hash only (default) |
+| `DIAGNOSTIC` | Adds app-scoped boot ID and Widevine hashes |
+
+`collectAndroidId` / `collectBootId` / `collectDrmId` override a profile. Hashes include the host package name, so they are deterministic app-scoped pseudonyms — **not** encryption, anonymization, or an absolute non-reversibility guarantee. Reports never expose raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID.
+
+## Demo
+
+The `demo` module is a local diagnostic console, not an automatic collector:
+
+- It starts ready and collects only after an explicit tap; results are never uploaded.
+- The status card shows a localized conclusion, primary reason, score against 18, coverage, and elapsed time. Copy-report lives in that card.
+- Environment detections sort risk first. Collapsed rows show a localized title and summary only; `snake_case` detector ids and raw tokens appear in expanded details, without duplicating the Chinese/English summary.
+- “Needs attention” counts actionable warning/danger only, not informational items.
+- `UNKNOWN` is shown as insufficient coverage and is never styled as safe.
+- Copied text is a redacted summary without identifier hashes, raw properties, paths, or PIDs.
+- In-flight and completed UI state survives Activity recreation. Haptics fire only when a new result arrives.
+- Cloud backup and device-transfer extraction are disabled. On a debug-signed build, “app is debuggable” is an expected informational hint and does not add to the score.
 
 ## Public API
 
 | API | Description |
 | --- | --- |
-| `RiskEngine.init(Context, RiskEngineConfig)` | Initialize the SDK |
-| `RiskEngine.initIfNeeded(Context, RiskEngineConfig)` | Atomically initialize when needed and report whether this call did it |
-| `RiskEngine.collect(RiskEngineCallback)` | Run collection asynchronously |
-| `RiskEngine.collectSync()` | Run collection synchronously |
-| `RiskEngine.collectReportJson()` | Collect a fresh report and return JSON |
+| `RiskEngine.init(Context, RiskEngineConfig)` | Initialize; duplicate calls throw |
+| `RiskEngine.initIfNeeded(Context, RiskEngineConfig)` | Atomically initialize when needed; returns whether this call did it |
+| `RiskEngine.collect(RiskEngineCallback)` | Asynchronous collection |
+| `RiskEngine.collect(CollectScene, RiskEngineCallback)` | Asynchronous collection for one scene |
+| `RiskEngine.collectSync()` / `collectSync(CollectScene)` | Synchronous collection; forbidden on the main thread |
+| `RiskEngine.collectReportJson()` | Collect then serialize JSON |
 | `RiskEngine.reportToJson(RiskReport)` | Serialize an existing report without collecting again |
-| `RiskEngine.getReportJson()` | Deprecated compatibility alias for `collectReportJson()` |
-| `RiskEngine.shutdown()` | Release SDK resources |
-| `RiskEngineConfig.Builder.debugLog(boolean)` | Toggle SDK logs |
-| `RiskEngineConfig.Builder.collectTimeout(long)` | Set collection timeout (1-120,000 ms) |
-| `RiskEngineConfig.Builder.privacyProfile(PrivacyProfile)` | Select `MINIMAL`, `BALANCED`, or `DIAGNOSTIC` |
-| `collectAndroidId/collectBootId/collectDrmId(boolean)` | Override individual identifier collection |
-| `RiskEngineConfig.Builder.enableRoot/enableHookDetection/...` | Enable or disable individual detector groups |
+| `RiskEngine.getReportJson()` | Deprecated alias for `collectReportJson()` |
+| `RiskEngine.shutdown()` | Cancel work and release resources |
+| `RiskEngineConfig.Builder.debugLog(boolean)` | SDK logs |
+| `RiskEngineConfig.Builder.collectTimeout(long)` | Shared deadline (1–120,000 ms) |
+| `RiskEngineConfig.Builder.privacyProfile(PrivacyProfile)` | `MINIMAL` / `BALANCED` / `DIAGNOSTIC` |
+| `RiskEngineConfig.Builder.collectScene(CollectScene)` | Default scene |
+| `collectAndroidId` / `collectBootId` / `collectDrmId` | Override individual identifier collection |
+| `enableRoot` / `enableHookDetection` / `enableEmulatorDetection` / … | Enable or disable detector groups; `native_tamper` always runs |
 
-The SDK ships with `consumer-rules.pro`; host apps need no extra ProGuard rules for the public API.
+## Limits
 
-The report never exposes raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID. Deterministic package-scoped SHA-256 values are pseudonyms, not encryption, anonymization, or an absolute non-reversibility guarantee. The Demo also disables cloud backup and device-transfer extraction.
+- Native I/O uses per-ABI inline syscalls (not libc `syscall()`); directory walks use `getdents64`. This reduces libc-hook blind spots; it does not defeat kernel-level hiding.
+- `native_tamper` treats `text_mismatch` and anonymous mappings as actionable. `missing_map` / unreadable file / bad ELF become `UNAVAILABLE`, so a Magisk-hide missing map is not reported as safe.
+- x86/i386 has no ARM trampoline heuristics; the in-memory vs file CRC still runs.
+- An x86_64 emulator matrix does not replace ARM64 OEM hardware. Expected evidence families are in [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md).
 
 ## Documentation
 
-See [doc/Implementation_Details.md](./doc/Implementation_Details.md) for implementation details and [doc/Pending_Items.md](./doc/Pending_Items.md) for validation work that requires external devices or deployment infrastructure.
+| Document | Contents |
+| --- | --- |
+| [doc/Implementation_Details.md](./doc/Implementation_Details.md) | Source-level contract: flow, detector scoring, native layer, correlation, JSON |
+| [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) | Expected evidence families on typical fixtures (not a bypass guide) |
 
 ## License
 
-See [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).
