@@ -49,6 +49,7 @@ public class HookFrameworkDetector extends BaseDetector {
         checkXposed(details, score, coverage);
         checkFrida(details, score, coverage);
         checkNativeHooks(details, score, coverage);
+        checkMonitorFindings(details, score, coverage);
 
         if (!details.isEmpty()) {
             List<String> detailList = new ArrayList<>(details);
@@ -259,6 +260,51 @@ public class HookFrameworkDetector extends BaseDetector {
         } catch (Exception | LinkageError e) {
             CLog.e("Native hook check failed", e);
             coverage.failure("native_hook:" + e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Consumes what the native background monitor latched since library load.
+     *
+     * This is the only path that reports tampering installed after the initial
+     * snapshot. The pass count is recorded but never scored: it distinguishes
+     * "monitored and clean" from "never ran", which the coverage model needs.
+     */
+    private void checkMonitorFindings(Set<String> details, SignalScore score,
+                                      CheckCoverage coverage) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            coverage.failure("monitor:unavailable");
+            return;
+        }
+        try {
+            SignalResult<String> findings = NativeCollectorBridge.getMonitorFindingsResult();
+            if (!findings.isSuccess() || findings.getValue() == null) {
+                coverage.failure("monitor:" + findings.getFailureReason());
+                return;
+            }
+            coverage.success();
+            for (String token : findings.getValue().split(",")) {
+                String item = token.trim();
+                if (item.isEmpty()) continue;
+                switch (com.wsttxm.riskenginesdk.core.HookEvidenceClassifier.rank(item)) {
+                    case STRONG:
+                        addStrong(details, score, item);
+                        break;
+                    case MEDIUM:
+                        addMedium(details, score, item);
+                        break;
+                    case IGNORE:
+                        details.add(item);
+                        break;
+                    case WEAK:
+                    default:
+                        addWeak(details, score, item);
+                        break;
+                }
+            }
+        } catch (Exception | LinkageError e) {
+            CLog.e("Monitor findings check failed", e);
+            coverage.failure("monitor:" + e.getClass().getSimpleName());
         }
     }
 

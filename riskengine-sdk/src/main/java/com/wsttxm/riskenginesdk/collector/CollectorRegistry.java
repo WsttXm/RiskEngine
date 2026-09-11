@@ -37,6 +37,14 @@ public class CollectorRegistry {
         collectors.add(new AdbStateCollector(context, signals));
         collectors.add(new ContainerSignalCollector(context, signals));
 
+        // Hardware-bound fingerprint dimensions. These carry most of the
+        // entropy and are the layers that survive reinstall and factory reset.
+        collectors.add(new GpuInfoCollector(context));
+        collectors.add(new SensorFingerprintCollector(context));
+        collectors.add(new CpuTopologyCollector(context));
+        collectors.add(new HardwareProfileCollector(context));
+        collectors.add(new PartitionFingerprintCollector(context, signals));
+
         // Native layer collectors (via JNI bridge)
         NativeCollectorBridge nativeBridge = new NativeCollectorBridge(context, signals);
         if (config.isCollectDrmId()) {

@@ -1,4 +1,6 @@
 #include "native_root_detector.h"
+#include "kernel_su_probe.h"
+#include "mount_namespace_diff.h"
 #include "../generated/detection_lists.h"
 #include "../util/obf_str.h"
 #include "../util/raw_dir.h"
@@ -125,6 +127,39 @@ int read_selinux_enforce() {
     return -1;
 }
 
+std::string parent_dir_of(const std::string &path) {
+    auto pos = path.rfind('/');
+    if (pos == std::string::npos || pos == 0) return std::string("/");
+    return path.substr(0, pos);
+}
+
+std::string base_name_of(const std::string &path) {
+    auto pos = path.rfind('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+/**
+ * Cross-checks direct stat against a getdents64 listing of the parent.
+ *
+ * Userspace hiding usually filters one path but not the other: a file that
+ * stats successfully yet is absent from its parent's directory listing (or the
+ * reverse) is a contradiction no honest filesystem produces.
+ */
+void cross_check_listing(const std::vector<std::string> &paths,
+                         std::vector<std::string> &tokens) {
+    for (const auto &path : paths) {
+        bool stat_visible = my_faccessat(AT_FDCWD, path.c_str(), F_OK, 0) == 0;
+        RawDirResult dir = raw_list_dir(parent_dir_of(path).c_str());
+        if (!dir.ok()) continue;
+        const std::string name = base_name_of(path);
+        bool listed = std::find(dir.names.begin(), dir.names.end(), name)
+                      != dir.names.end();
+        if (stat_visible != listed) {
+            add_token(tokens, OBF("listing_mismatch:") + path);
+        }
+    }
+}
+
 }  // namespace
 
 int native_get_selinux_enforce() {
@@ -160,8 +195,38 @@ std::string native_get_root_evidence() {
     probe_group(list_kernelsu_paths(), OBF("ksu:"), tokens);
     probe_group(list_apatch_paths(), OBF("apatch:"), tokens);
     probe_group(list_module_paths(), OBF("modules:"), tokens);
+    probe_group(list_tamper_tool_paths(), OBF("tamper_tool:"), tokens);
     scan_path_env(tokens);
     scan_mountinfo(tokens);
+
+    // Hidden-root detection that path probes cannot reach.
+    cross_check_listing(list_su_paths(), tokens);
+    cross_check_listing(list_magisk_paths(), tokens);
+
+    const std::string kernel_evidence = native_get_kernel_root_evidence();
+    if (!kernel_evidence.empty()) {
+        size_t start = 0;
+        while (start <= kernel_evidence.size()) {
+            size_t comma = kernel_evidence.find(',', start);
+            if (comma == std::string::npos) comma = kernel_evidence.size();
+            add_token(tokens, kernel_evidence.substr(start, comma - start));
+            if (comma == kernel_evidence.size()) break;
+            start = comma + 1;
+        }
+    }
+
+    const std::string ns_evidence = native_get_mount_namespace_evidence();
+    if (!ns_evidence.empty()) {
+        size_t start = 0;
+        while (start <= ns_evidence.size()) {
+            size_t comma = ns_evidence.find(',', start);
+            if (comma == std::string::npos) comma = ns_evidence.size();
+            add_token(tokens, ns_evidence.substr(start, comma - start));
+            if (comma == ns_evidence.size()) break;
+            start = comma + 1;
+        }
+    }
+
     if (read_selinux_enforce() == 0) {
         add_token(tokens, OBF("selinux_permissive"));
     }

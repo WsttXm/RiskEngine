@@ -77,6 +77,13 @@ public class NativeCollectorBridge {
     private static native String nGetBuildPropFingerprintRaw();
     private static native String nScanProcessTokensRaw();
     private static native String nGetSoIntegrityRaw();
+    private static native String nGetMountNsEvidenceRaw();
+    private static native String nGetKernelRootEvidenceRaw();
+    private static native String nGetSealedVerdictRaw();
+    private static native int nVerifySealedVerdictRaw(String blob);
+    private static native String nGetJniSelfIntegrityRaw();
+    private static native String nGetMonitorFindingsRaw();
+    private static native void nStopMonitorRaw();
 
     public static boolean checkRoot() {
         return valueOr(checkRootResult(), false);
@@ -148,6 +155,57 @@ public class NativeCollectorBridge {
 
     public static SignalResult<String> getSoIntegrityResult() {
         return callNativeResult(NativeCollectorBridge::nGetSoIntegrityRaw);
+    }
+
+    public static SignalResult<String> getMountNamespaceEvidenceResult() {
+        return callNativeResult(NativeCollectorBridge::nGetMountNsEvidenceRaw);
+    }
+
+    public static SignalResult<String> getKernelRootEvidenceResult() {
+        return callNativeResult(NativeCollectorBridge::nGetKernelRootEvidenceRaw);
+    }
+
+    public static SignalResult<String> getJniSelfIntegrityResult() {
+        return callNativeResult(NativeCollectorBridge::nGetJniSelfIntegrityRaw);
+    }
+
+    /**
+     * Findings latched by the native background monitor since library load.
+     * Covers tampering that arrived after the initial snapshot, which a
+     * single-shot collection cannot see.
+     */
+    public static SignalResult<String> getMonitorFindingsResult() {
+        return callNativeResult(NativeCollectorBridge::nGetMonitorFindingsRaw);
+    }
+
+    /** Stops the background monitor. Called from RiskEngine.shutdown. */
+    public static void stopMonitor() {
+        if (!NATIVE_AVAILABLE) return;
+        try {
+            nStopMonitorRaw();
+        } catch (Exception | LinkageError e) {
+            CLog.e("Monitor stop failed", e);
+        }
+    }
+
+    /**
+     * Returns the native-sealed verdict blob. The blob is opaque here on
+     * purpose: ranking and scoring happen in native so a Java-level hook
+     * cannot fabricate a clean result by replacing one method's return value.
+     */
+    public static SignalResult<String> getSealedVerdictResult() {
+        return callNativeResult(NativeCollectorBridge::nGetSealedVerdictRaw);
+    }
+
+    /**
+     * Asks native to verify a blob it issued. Returns the native score, or -1
+     * when the MAC or nonce does not check out, which is itself tampering.
+     */
+    public static SignalResult<Integer> verifySealedVerdictResult(String blob) {
+        if (blob == null || blob.isEmpty()) {
+            return SignalResult.unavailable("sealed_verdict_absent");
+        }
+        return callNativeResult(() -> nVerifySealedVerdictRaw(blob));
     }
 
     public static SignalResult<String> getCpuInfoResult() {

@@ -25,11 +25,24 @@ long my_statfs(const char *path, struct statfs *buf);
 long my_uname(struct utsname *buf);
 long my_mmap(void *addr, size_t length, int prot, int flags, int fd, long offset);
 long my_munmap(void *addr, size_t length);
+long my_prctl(int option, unsigned long a2, unsigned long a3,
+              unsigned long a4, unsigned long a5);
+long my_getppid(void);
+long my_gettid(void);
 
 int read_file_content(const char *path, char *buf, size_t bufsize);
 
 #ifdef __cplusplus
-}
-#endif
+}  // extern "C"
 
-#endif
+#include <string>
+
+/**
+ * Reads a whole procfs/sysfs file that reports no size via stat, growing the
+ * buffer as needed. Returns an empty string on failure. Capped by max_bytes.
+ */
+std::string read_file_string(const char *path, size_t max_bytes = 1024 * 1024);
+
+#endif  // __cplusplus
+
+#endif  // RISKENGINE_SYSCALL_WRAPPER_H

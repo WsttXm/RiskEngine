@@ -12,6 +12,10 @@
 #include "detector/native_debug_detector.h"
 #include "detector/native_integrity.h"
 #include "detector/runtime_arch_checker.h"
+#include "detector/mount_namespace_diff.h"
+#include "detector/kernel_su_probe.h"
+#include "detector/sealed_verdict.h"
+#include "detector/periodic_monitor.h"
 #include "generated/detection_lists.h"
 
 #include <algorithm>
@@ -210,6 +214,41 @@ static jint jni_getTracerPid(JNIEnv *, jclass) {
     return (jint) get_tracer_pid();
 }
 
+static jstring jni_getMountNamespaceEvidence(JNIEnv *env, jclass) {
+    return toJString(env, native_get_mount_namespace_evidence());
+}
+
+static jstring jni_getKernelRootEvidence(JNIEnv *env, jclass) {
+    return toJString(env, native_get_kernel_root_evidence());
+}
+
+static jstring jni_getSealedVerdict(JNIEnv *env, jclass) {
+    return toJString(env, native_build_sealed_verdict(env));
+}
+
+static jint jni_verifySealedVerdict(JNIEnv *env, jclass, jstring jblob) {
+    if (jblob == nullptr) return -1;
+    const char *chars = env->GetStringUTFChars(jblob, nullptr);
+    if (chars == nullptr) {
+        clearPendingException(env);
+        return -1;
+    }
+    std::string blob(chars);
+    env->ReleaseStringUTFChars(jblob, chars);
+    return static_cast<jint>(native_verify_sealed_verdict(blob));
+}
+
+static jstring jni_getMonitorFindings(JNIEnv *env, jclass) {
+    return toJString(env, native_monitor_findings());
+}
+
+static void jni_stopMonitor(JNIEnv *, jclass) {
+    native_monitor_stop();
+}
+
+// Forward declaration; the table it inspects is defined below.
+static jstring jni_getJniSelfIntegrity(JNIEnv *env, jclass);
+
 // ==================== Registration ====================
 
 static const char *BRIDGE_CLASS =
@@ -236,7 +275,26 @@ static JNINativeMethod methods[] = {
         {"nGetBuildPropFingerprintRaw", "()Ljava/lang/String;",                  (void *) jni_getBuildPropFingerprint},
         {"nScanProcessTokensRaw",       "()Ljava/lang/String;",                  (void *) jni_scanProcessTokens},
         {"nGetSoIntegrityRaw",          "()Ljava/lang/String;",                  (void *) jni_getSoIntegrity},
+        {"nGetMountNsEvidenceRaw",      "()Ljava/lang/String;",                  (void *) jni_getMountNamespaceEvidence},
+        {"nGetKernelRootEvidenceRaw",   "()Ljava/lang/String;",                  (void *) jni_getKernelRootEvidence},
+        {"nGetSealedVerdictRaw",        "()Ljava/lang/String;",                  (void *) jni_getSealedVerdict},
+        {"nVerifySealedVerdictRaw",     "(Ljava/lang/String;)I",                 (void *) jni_verifySealedVerdict},
+        {"nGetJniSelfIntegrityRaw",     "()Ljava/lang/String;",                  (void *) jni_getJniSelfIntegrity},
+        {"nGetMonitorFindingsRaw",      "()Ljava/lang/String;",                  (void *) jni_getMonitorFindings},
+        {"nStopMonitorRaw",             "()V",                                   (void *) jni_stopMonitor},
 };
+
+static jstring jni_getJniSelfIntegrity(JNIEnv *env, jclass) {
+    // Verify that every pointer this library registered still resolves inside
+    // this library. Checks the bridge that all other results travel through.
+    constexpr size_t kCount = sizeof(methods) / sizeof(methods[0]);
+    const void *pointers[kCount];
+    for (size_t i = 0; i < kCount; ++i) {
+        pointers[i] = methods[i].fnPtr;
+    }
+    return toJString(env,
+                     native_get_jni_self_table_evidence(env, pointers, kCount));
+}
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
     JNIEnv *env;
@@ -248,6 +306,11 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
     if (!custom_register_natives(env, BRIDGE_CLASS, methods, numMethods)) {
         return JNI_ERR;
     }
+
+    // Continuous re-verification. Started here rather than on first collect so
+    // that a hook installed between library load and the first report is still
+    // caught by a later pass.
+    native_monitor_start(vm);
 
     return JNI_VERSION_1_6;
 }

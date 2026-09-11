@@ -27,13 +27,20 @@ public class RiskReport {
     private final int checkCount;
     private final int completedCheckCount;
     private final CollectScene collectScene;
+    private final FingerprintId fingerprintId;
 
     public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections) {
-        this(fingerprint, detections, CollectScene.STANDARD);
+        this(fingerprint, detections, CollectScene.STANDARD, null);
     }
 
     public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections,
                       CollectScene collectScene) {
+        this(fingerprint, detections, collectScene, null);
+    }
+
+    public RiskReport(DeviceFingerprint fingerprint, List<DetectionResult> detections,
+                      CollectScene collectScene, FingerprintId fingerprintId) {
+        this.fingerprintId = fingerprintId;
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
         this.collectScene = collectScene == null ? CollectScene.STANDARD : collectScene;
         Objects.requireNonNull(detections, "detections must not be null");
@@ -95,6 +102,9 @@ public class RiskReport {
     public int getWarningCount() { return warningCount; }
     public int getDangerCount() { return dangerCount; }
     public int getUnknownCount() { return unknownCount; }
+    /** The layered device fingerprint ID, or null when composition failed. */
+    public FingerprintId getFingerprintId() { return fingerprintId; }
+
     public RiskLevel getOverallRiskLevel() { return overallRiskLevel; }
     public ReportStatus getReportStatus() { return reportStatus; }
     public int getAvailableDetectionCount() { return availableDetectionCount; }

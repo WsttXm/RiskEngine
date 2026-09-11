@@ -18,6 +18,11 @@ add_library(riskengine SHARED
     detector/native_debug_detector.cpp
     detector/native_integrity.cpp
     detector/runtime_arch_checker.cpp
+    detector/mount_namespace_diff.cpp
+    detector/kernel_su_probe.cpp
+    detector/sealed_verdict.cpp
+    detector/art_hook_detector.cpp
+    detector/periodic_monitor.cpp
     util/custom_jni_register.cpp
 )
 
@@ -32,6 +37,14 @@ target_compile_options(riskengine PRIVATE
     -Wformat-security
     -fstack-protector-strong
     "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-D_FORTIFY_SOURCE=2>"
+    # Release hardening: drop the frame pointer and unwind tables an analyst
+    # would otherwise use to reconstruct call graphs, and enable LTO so the
+    # detector call graph is inlined across translation units.
+    "$<$<CONFIG:Release>:-flto=thin>"
+    "$<$<CONFIG:Release>:-fno-unwind-tables>"
+    "$<$<CONFIG:Release>:-fno-asynchronous-unwind-tables>"
+    "$<$<CONFIG:Release>:-fomit-frame-pointer>"
+    "$<$<CONFIG:Release>:-fmerge-all-constants>"
 )
 
 find_library(android_log_lib log)
@@ -42,4 +55,10 @@ target_link_options(riskengine PRIVATE
     "-Wl,-z,relro,-z,now"
     "-Wl,-z,noexecstack"
     "-Wl,--exclude-libs,ALL"
+    # Only JNI_OnLoad needs to be externally visible. Everything else is
+    # resolved through RegisterNatives, so the symbol table can go.
+    "$<$<CONFIG:Release>:-flto=thin>"
+    "$<$<CONFIG:Release>:-Wl,--gc-sections>"
+    "$<$<CONFIG:Release>:-Wl,--strip-all>"
+    "$<$<CONFIG:Release>:-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map>"
 )

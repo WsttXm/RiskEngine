@@ -41,6 +41,10 @@ public class SandboxDetector extends BaseDetector {
         else coverage.failure("classloader_unavailable");
         if (checkPackages(strong)) coverage.success();
         else coverage.failure("packages_unavailable");
+        if (checkDexElements(strong, weak)) coverage.success();
+        else coverage.failure("dex_elements_unavailable");
+        if (checkUidConsistency(strong)) coverage.success();
+        else coverage.failure("uid_check_unavailable");
 
         List<String> evidence = new ArrayList<>(strong);
         evidence.addAll(weak);
@@ -127,6 +131,74 @@ public class SandboxDetector extends BaseDetector {
             }
             return true;
         } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Counts dexElements in the app's BaseDexClassLoader path list.
+     *
+     * A normally installed app has a small, predictable set. Cloning containers
+     * and plugin frameworks must inject host or module dex files into the same
+     * loader, inflating the count. This finds them without needing their package
+     * name, so it also catches containers that are on no list.
+     */
+    private boolean checkDexElements(List<String> strong, List<String> weak) {
+        try {
+            ClassLoader loader = context.getClassLoader();
+            if (loader == null) return false;
+            Class<?> baseDex = Class.forName("dalvik.system.BaseDexClassLoader");
+            if (!baseDex.isInstance(loader)) {
+                strong.add("unexpected_loader_type:"
+                        + loader.getClass().getName().toLowerCase(Locale.ROOT));
+                return true;
+            }
+            java.lang.reflect.Field pathListField = baseDex.getDeclaredField("pathList");
+            pathListField.setAccessible(true);
+            Object pathList = pathListField.get(loader);
+            if (pathList == null) return false;
+            java.lang.reflect.Field elementsField =
+                    pathList.getClass().getDeclaredField("dexElements");
+            elementsField.setAccessible(true);
+            Object elements = elementsField.get(pathList);
+            if (!(elements instanceof Object[])) return false;
+            int count = ((Object[]) elements).length;
+            if (count > 12) {
+                strong.add("dex_elements_high:" + count);
+            } else if (count > 6) {
+                weak.add("dex_elements_elevated:" + count);
+            }
+            return true;
+        } catch (Exception | LinkageError e) {
+            CLog.e("Dex element check failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Compares the process UID against the one ApplicationInfo reports.
+     *
+     * A container runs the guest under its own UID while the guest still
+     * believes it owns its package identity. The two readings then disagree,
+     * which does not happen for a normally installed app.
+     */
+    private boolean checkUidConsistency(List<String> evidence) {
+        try {
+            int uid = Process.myUid();
+            ApplicationInfo info = context.getApplicationInfo();
+            if (info.uid != uid) {
+                evidence.add("uid_appinfo_mismatch:process=" + uid + ",info=" + info.uid);
+            }
+            int userId = uid / 100000;
+            String dataDir = info.dataDir == null ? "" : info.dataDir;
+            if (!dataDir.isEmpty() && userId > 0
+                    && !dataDir.contains("/user/" + userId + "/")
+                    && !dataDir.startsWith("/data/data/")) {
+                evidence.add("uid_datadir_user_mismatch:uid_user=" + userId);
+            }
+            return true;
+        } catch (Exception e) {
+            CLog.e("UID consistency check failed", e);
             return false;
         }
     }

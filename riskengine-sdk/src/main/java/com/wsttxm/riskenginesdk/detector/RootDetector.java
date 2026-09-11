@@ -63,7 +63,21 @@ public class RootDetector extends BaseDetector {
                 for (String token : nativeDetails.getValue().split(",")) {
                     String item = token.trim();
                     if (item.isEmpty()) continue;
-                    if (item.startsWith("syscall_mismatch")) {
+                    if (item.startsWith("ns_unreadable")) {
+                        // Expected for an unprivileged app on a stock device.
+                        // Recorded as a coverage gap, never as evidence, so a
+                        // normal device is not penalised for it.
+                        coverage.failure("mount_ns:" + item);
+                    } else if (item.startsWith("ksu_prctl")
+                            || item.startsWith("mount_hidden:")
+                            || item.startsWith("listing_mismatch")
+                            || item.startsWith("selinux_context:")) {
+                        // Kernel-resident root and per-process mount hiding are
+                        // the hardest signals to forge, so they rank strong.
+                        strongEvidence.add("native:" + item);
+                    } else if (item.startsWith("syscall_mismatch")
+                            || item.startsWith("ns_differs")
+                            || item.startsWith("mount_hidden_count")) {
                         mediumEvidence.add("native:" + item);
                     } else if (item.equals("selinux_permissive")) {
                         if (!weakEvidence.contains(item)) weakEvidence.add(item);

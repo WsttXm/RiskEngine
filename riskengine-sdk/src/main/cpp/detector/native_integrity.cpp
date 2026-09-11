@@ -218,10 +218,7 @@ void inspect_libc_hooks(const std::vector<MapEntry> &maps, std::vector<std::stri
     uintptr_t rx_start = 0, rx_end = 0;
     rx_range_for(maps, OBF("libc.so"), rx_start, rx_end);
 
-    const std::vector<std::string> wanted = {
-            OBF("openat"), OBF("faccessat"), OBF("read"), OBF("connect"),
-            OBF("ptrace"), OBF("fopen")
-    };
+    const std::vector<std::string> wanted = list_monitored_libc_symbols();
 
     auto check_symbol = [&](const char *name, uintptr_t file_addr, uintptr_t got_addr) {
         if (name == nullptr) return;
@@ -314,16 +311,18 @@ void inspect_jni_table(JNIEnv *env, const std::vector<MapEntry> &maps,
     if (outside(get_version)) add_token(tokens, OBF("jni_table_hook:GetVersion"));
 }
 
-uint32_t crc32(const uint8_t *data, size_t len) {
-    uint32_t crc = 0xFFFFFFFFu;
+/**
+ * 64-bit FNV-1a. Replaces the previous CRC32: CRC is linear, so an attacker
+ * who patches code can compensate with a few bytes elsewhere in the same
+ * window. FNV-1a has no such trivial algebraic fixup.
+ */
+uint64_t hash_bytes(const uint8_t *data, size_t len, uint64_t seed) {
+    uint64_t hash = 0xCBF29CE484222325ull ^ seed;
     for (size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int b = 0; b < 8; ++b) {
-            uint32_t mask = -(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
+        hash ^= data[i];
+        hash *= 0x100000001B3ull;
     }
-    return ~crc;
+    return hash;
 }
 
 bool numeric_name(const std::string &name) {
@@ -402,24 +401,81 @@ std::string native_get_so_integrity_evidence() {
     }
     auto *ehdr = reinterpret_cast<const Ehdr *>(view.base);
     auto *phdrs = reinterpret_cast<const Phdr *>(view.base + ehdr->e_phoff);
+
+    // Walk every executable PT_LOAD in full. The previous implementation
+    // hashed only the first 4096 bytes of the first such segment, so any hook
+    // placed past that offset was invisible.
+    bool compared_any = false;
+    size_t segments_checked = 0;
     for (int i = 0; i < ehdr->e_phnum; ++i) {
         if (phdrs[i].p_type != PT_LOAD) continue;
         if ((phdrs[i].p_flags & PF_X) == 0) continue;
         size_t file_off = static_cast<size_t>(phdrs[i].p_offset);
         size_t file_sz = static_cast<size_t>(phdrs[i].p_filesz);
-        if (file_off + file_sz > static_cast<size_t>(st.st_size)) break;
-        uintptr_t mem_addr = view.load_bias + static_cast<uintptr_t>(phdrs[i].p_vaddr);
-        size_t cmp = std::min(file_sz, static_cast<size_t>(4096));
-        const uint8_t *mem = safe_read(maps, mem_addr, cmp);
-        if (mem == nullptr) break;
-        uint32_t file_crc = crc32(view.base + file_off, cmp);
-        uint32_t mem_crc = crc32(mem, cmp);
-        if (file_crc != mem_crc) {
-            add_token(tokens, OBF("text_mismatch"));
+        if (file_sz == 0 || file_off + file_sz > static_cast<size_t>(st.st_size)) {
+            continue;
         }
-        break;
+        uintptr_t mem_addr = view.load_bias + static_cast<uintptr_t>(phdrs[i].p_vaddr);
+
+        // Compare in windows so one unreadable page does not void the segment.
+        constexpr size_t kWindow = 64 * 1024;
+        size_t offset = 0;
+        bool segment_mismatch = false;
+        while (offset < file_sz) {
+            size_t chunk = std::min(kWindow, file_sz - offset);
+            const uint8_t *mem = safe_read(maps, mem_addr + offset, chunk);
+            if (mem == nullptr) {
+                offset += chunk;
+                continue;
+            }
+            compared_any = true;
+            const uint64_t seed = static_cast<uint64_t>(phdrs[i].p_vaddr) + offset;
+            if (hash_bytes(view.base + file_off + offset, chunk, seed)
+                != hash_bytes(mem, chunk, seed)) {
+                segment_mismatch = true;
+                break;
+            }
+            offset += chunk;
+        }
+        ++segments_checked;
+        if (segment_mismatch) {
+            add_token(tokens, OBF("text_mismatch"));
+            add_token(tokens, OBF("text_mismatch_seg:") + std::to_string(i));
+            break;
+        }
+    }
+    if (!compared_any && segments_checked > 0) {
+        add_token(tokens, OBF("text_mismatch:unreadable_segments"));
     }
     my_munmap(mapped, static_cast<size_t>(st.st_size));
+    return join_tokens(tokens);
+}
+
+std::string native_get_jni_self_table_evidence(JNIEnv *env,
+                                               const void *const *registered,
+                                               size_t count) {
+    std::vector<std::string> tokens;
+    (void) env;
+    if (registered == nullptr || count == 0) {
+        return join_tokens(tokens);
+    }
+    auto maps = read_self_maps();
+    uintptr_t self_start = 0, self_end = 0;
+    rx_range_for(maps, OBF("libriskengine.so"), self_start, self_end);
+    if (self_start == 0) {
+        add_token(tokens, OBF("jni_self:no_range"));
+        return join_tokens(tokens);
+    }
+    // Every JNI entry point this library registered must still live inside this
+    // library's executable range. A Java-level or PLT-level redirect of our own
+    // bridge moves the pointer out of range.
+    for (size_t i = 0; i < count; ++i) {
+        auto addr = reinterpret_cast<uintptr_t>(registered[i]);
+        if (addr == 0) continue;
+        if (addr < self_start || addr >= self_end) {
+            add_token(tokens, OBF("jni_self_hook:") + std::to_string(i));
+        }
+    }
     return join_tokens(tokens);
 }
 

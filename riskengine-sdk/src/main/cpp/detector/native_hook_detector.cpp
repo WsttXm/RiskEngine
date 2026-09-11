@@ -1,4 +1,5 @@
 #include "native_hook_detector.h"
+#include "art_hook_detector.h"
 #include "native_integrity.h"
 #include "../util/maps_parser.h"
 #include "../util/obf_str.h"
@@ -45,6 +46,45 @@ bool is_suspicious_executable_region(const MapEntry &entry) {
         return false;
     }
     return entry.path.empty();
+}
+
+/**
+ * Frida's agent binds abstract AF_UNIX sockets whose names contain a known
+ * prefix. Reading /proc/net/unix observes them passively; unlike a port
+ * connect it never touches the agent, so it cannot be detected or refused.
+ */
+void scan_unix_sockets(std::vector<std::string> &evidence) {
+    std::string content = read_file_string(OBF("/proc/net/unix").c_str(), 512 * 1024);
+    if (content.empty()) return;
+    std::string lower = to_lower(content);
+    if (lower.find(OBF("re.frida")) != std::string::npos
+        || lower.find(OBF("frida:")) != std::string::npos
+        || lower.find(OBF("linjector")) != std::string::npos) {
+        add_evidence(evidence, OBF("unix_socket:frida"));
+    }
+    if (lower.find(OBF("gum-js")) != std::string::npos) {
+        add_evidence(evidence, OBF("unix_socket:gum"));
+    }
+}
+
+/**
+ * A writable+executable mapping belonging to this library indicates a patched
+ * text segment. Stock loaders never leave our own code W+X.
+ */
+void scan_self_wx_segments(std::vector<std::string> &evidence) {
+    for (const auto &entry : read_self_maps()) {
+        if (entry.perms.size() < 3) continue;
+        const bool writable = entry.perms[1] == 'w';
+        const bool executable = entry.perms[2] == 'x';
+        if (!writable || !executable) continue;
+        std::string lower = to_lower(entry.path);
+        if (lower.find(OBF("libriskengine.so")) != std::string::npos) {
+            add_evidence(evidence, OBF("wx_segment:self"));
+        } else if (lower.find(OBF("libart.so")) != std::string::npos
+                   || lower.find(OBF("libc.so")) != std::string::npos) {
+            add_evidence(evidence, OBF("wx_segment:") + lower);
+        }
+    }
 }
 
 void collect_hook_evidence(JNIEnv *env, std::vector<std::string> &evidence) {
@@ -103,6 +143,23 @@ void collect_hook_evidence(JNIEnv *env, std::vector<std::string> &evidence) {
     }
     if (saw_gmain && has_frida_family) {
         add_evidence(evidence, OBF("thread:gmain"));
+    }
+
+    scan_unix_sockets(evidence);
+    scan_self_wx_segments(evidence);
+
+    // ART-level checks catch renamed Xposed-family frameworks by mechanism
+    // rather than by any matchable name.
+    std::string art = native_get_art_hook_evidence(env);
+    if (!art.empty()) {
+        size_t start = 0;
+        while (start <= art.size()) {
+            size_t comma = art.find(',', start);
+            if (comma == std::string::npos) comma = art.size();
+            add_evidence(evidence, art.substr(start, comma - start));
+            if (comma == art.size()) break;
+            start = comma + 1;
+        }
     }
 
     std::string integrity = native_get_integrity_evidence(env);

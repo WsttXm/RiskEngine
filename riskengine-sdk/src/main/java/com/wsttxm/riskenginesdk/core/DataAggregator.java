@@ -5,6 +5,7 @@ import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
 import com.wsttxm.riskenginesdk.model.DeviceFingerprint;
+import com.wsttxm.riskenginesdk.model.FingerprintId;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.model.RiskReport;
 import com.wsttxm.riskenginesdk.util.CLog;
@@ -19,6 +20,21 @@ public class DataAggregator {
     public RiskReport aggregate(List<CollectorResult> collectorResults,
                                 List<DetectionResult> detectionResults) {
         return aggregate(collectorResults, detectionResults, CollectScene.STANDARD);
+    }
+
+    private final FingerprintStore fingerprintStore;
+
+    public DataAggregator() {
+        this(null);
+    }
+
+    /**
+     * @param fingerprintStore local salt and continuity store. When null the
+     *                         fingerprint ID is still computed but with a
+     *                         non-persistent salt and no continuity reporting.
+     */
+    public DataAggregator(FingerprintStore fingerprintStore) {
+        this.fingerprintStore = fingerprintStore;
     }
 
     public RiskReport aggregate(List<CollectorResult> collectorResults,
@@ -57,7 +73,69 @@ public class DataAggregator {
         }
 
         addSyntheticFingerprintSignals(fingerprint, allDetections);
-        return new RiskReport(fingerprint, allDetections, scene);
+        FingerprintId fingerprintId = buildFingerprintId(fingerprint, allDetections);
+        return new RiskReport(fingerprint, allDetections, scene, fingerprintId);
+    }
+
+    /**
+     * Composes the layered fingerprint ID and records continuity.
+     *
+     * A hardware layer that changed between runs is surfaced as a detection,
+     * because on a device whose hardware genuinely cannot change it indicates
+     * spoofed values. A degraded collection is reported as coverage loss rather
+     * than a mismatch, so a missing GPU read is never mistaken for tampering.
+     */
+    private FingerprintId buildFingerprintId(DeviceFingerprint fingerprint,
+                                             List<DetectionResult> detections) {
+        try {
+            String salt = fingerprintStore == null
+                    ? "riskengine" : fingerprintStore.getOrCreateSalt();
+            FingerprintId id = FingerprintIdBuilder.build(fingerprint, salt);
+
+            CollectorResult idResult = new CollectorResult("fingerprint_id");
+            if (!id.getCompositeId().isEmpty()) {
+                idResult.addValue("composite", id.getCompositeId());
+            }
+            if (!id.getHardwareId().isEmpty()) {
+                idResult.addValue("hardware", id.getHardwareId());
+            }
+            if (!id.getSystemId().isEmpty()) {
+                idResult.addValue("system", id.getSystemId());
+            }
+            if (!id.getVolatileId().isEmpty()) {
+                idResult.addValue("volatile", id.getVolatileId());
+            }
+            idResult.addValue("hardware_coverage",
+                    id.getHardwareFieldsPresent() + "/" + id.getHardwareFieldsTotal());
+            idResult.addValue("system_coverage",
+                    id.getSystemFieldsPresent() + "/" + id.getSystemFieldsTotal());
+            idResult.addValue("hardware_layer_reliable",
+                    String.valueOf(id.isHardwareLayerReliable()));
+
+            if (fingerprintStore != null) {
+                FingerprintStore.Continuity continuity =
+                        fingerprintStore.recordAndCompare(id);
+                idResult.addValue("continuity", continuity.getState().name());
+                idResult.addValue("observation_count",
+                        String.valueOf(continuity.getObservationCount()));
+                if (continuity.getState() == FingerprintStore.State.HARDWARE_CHANGED) {
+                    List<String> details =
+                            List.of("hardware_layer_changed_between_observations");
+                    detections.add(new DetectionResult(
+                            "fingerprint_continuity",
+                            RiskLevel.MEDIUM,
+                            DetectionStatus.WARNING,
+                            4, 10, false,
+                            details, details.get(0)));
+                    CLog.w("Fingerprint hardware layer changed between observations");
+                }
+            }
+            fingerprint.addResult(idResult);
+            return id;
+        } catch (Exception e) {
+            CLog.e("Fingerprint ID composition failed", e);
+            return null;
+        }
     }
 
     private void addCollectionCoverageSignal(List<CollectorResult> collectorResults,

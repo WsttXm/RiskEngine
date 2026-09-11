@@ -4,7 +4,9 @@ import android.content.Context;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 
+import com.wsttxm.riskenginesdk.collector.java_layer.GpuInfoCollector;
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
+import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.AdbInspector;
 import com.wsttxm.riskenginesdk.util.ShellExecutor;
 import com.wsttxm.riskenginesdk.util.ProcfsUtils;
@@ -43,6 +45,12 @@ public final class SignalSnapshot {
     private volatile SignalResult<String> nativeProcessTokens;
     private volatile SignalResult<String> soIntegrity;
     private volatile SignalResult<ScreenMetrics> screenMetrics;
+    private volatile SignalResult<GpuIdentity> gpuIdentity;
+    private volatile SignalResult<List<String>> networkInterfaceNames;
+    private volatile SignalResult<String> mountNamespaceEvidence;
+    private volatile SignalResult<String> kernelRootEvidence;
+    private volatile SignalResult<String> jniSelfIntegrity;
+    private volatile SignalResult<String> sealedVerdict;
 
     public SignalSnapshot(Context context) {
         Context application = context == null ? null : context.getApplicationContext();
@@ -67,6 +75,23 @@ public final class SignalSnapshot {
         nativeProcessTokens = null;
         soIntegrity = null;
         screenMetrics = null;
+        gpuIdentity = null;
+        networkInterfaceNames = null;
+        mountNamespaceEvidence = null;
+        kernelRootEvidence = null;
+        jniSelfIntegrity = null;
+        sealedVerdict = null;
+    }
+
+    /** GPU identity strings, shared by the fingerprint and cloud detectors. */
+    public static final class GpuIdentity {
+        public final String vendor;
+        public final String renderer;
+
+        public GpuIdentity(String vendor, String renderer) {
+            this.vendor = vendor == null ? "" : vendor;
+            this.renderer = renderer == null ? "" : renderer;
+        }
     }
 
     public static final class ScreenMetrics {
@@ -336,22 +361,117 @@ public final class SignalSnapshot {
         }
     }
 
-    private SignalResult<String> readSystemProperty(String name) {
-        if (NativeCollectorBridge.isNativeAvailable()) {
-            try {
-                String value = NativeCollectorBridge.getSystemProperty(name);
-                if (value != null && !value.isBlank()) {
-                    return SignalResult.success(value.trim());
+    public SignalResult<String> getMountNamespaceEvidence() {
+        return cachedNative(mountNamespaceEvidence, v -> mountNamespaceEvidence = v,
+                NativeCollectorBridge::getMountNamespaceEvidenceResult);
+    }
+
+    public SignalResult<String> getKernelRootEvidence() {
+        return cachedNative(kernelRootEvidence, v -> kernelRootEvidence = v,
+                NativeCollectorBridge::getKernelRootEvidenceResult);
+    }
+
+    public SignalResult<String> getJniSelfIntegrity() {
+        return cachedNative(jniSelfIntegrity, v -> jniSelfIntegrity = v,
+                NativeCollectorBridge::getJniSelfIntegrityResult);
+    }
+
+    /** The native-sealed verdict for this collection. Issued once per report. */
+    public SignalResult<String> getSealedVerdict() {
+        return cachedNative(sealedVerdict, v -> sealedVerdict = v,
+                NativeCollectorBridge::getSealedVerdictResult);
+    }
+
+    /**
+     * Reads GPU vendor and renderer once per report through an offscreen EGL
+     * context. Cached because creating a context is comparatively expensive and
+     * both the fingerprint collector and the cloud detector need the values.
+     */
+    public SignalResult<GpuIdentity> getGpuIdentity() {
+        SignalResult<GpuIdentity> cached = gpuIdentity;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = gpuIdentity;
+            if (cached == null) {
+                try {
+                    CollectorResult probe = new CollectorResult("gpu_probe");
+                    GpuInfoCollector.probeInto(probe);
+                    String vendor = probe.getValues().get("vendor");
+                    String renderer = probe.getValues().get("renderer");
+                    if (vendor == null && renderer == null) {
+                        cached = SignalResult.unavailable(
+                                probe.getError() == null ? "egl_unavailable" : probe.getError());
+                    } else {
+                        cached = SignalResult.success(new GpuIdentity(vendor, renderer));
+                    }
+                } catch (Exception | LinkageError e) {
+                    cached = SignalResult.error(e.getClass().getSimpleName());
                 }
-            } catch (Exception | LinkageError ignored) {
-                // Use the status-aware shell fallback below.
+                gpuIdentity = cached;
             }
         }
-        ShellExecutor.Result shell = ShellExecutor.executeResult("getprop " + name);
-        if (!shell.isSuccess()) {
-            return SignalResult.unavailable("getprop:" + shell.getStatus());
+        return cached;
+    }
+
+    /**
+     * Interface names from sysfs, falling back to the Java enumeration. Both
+     * paths are used because a hook on one is common and they should agree.
+     */
+    public SignalResult<List<String>> getNetworkInterfaceNames() {
+        SignalResult<List<String>> cached = networkInterfaceNames;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = networkInterfaceNames;
+            if (cached == null) {
+                List<String> names = new ArrayList<>();
+                try {
+                    File[] entries = new File("/sys/class/net").listFiles();
+                    if (entries != null) {
+                        for (File entry : entries) {
+                            names.add(entry.getName());
+                        }
+                    }
+                    if (names.isEmpty()) {
+                        java.util.Enumeration<java.net.NetworkInterface> list =
+                                java.net.NetworkInterface.getNetworkInterfaces();
+                        while (list != null && list.hasMoreElements()) {
+                            names.add(list.nextElement().getName());
+                        }
+                    }
+                    cached = names.isEmpty()
+                            ? SignalResult.unavailable("no_interfaces")
+                            : SignalResult.success(Collections.unmodifiableList(names));
+                } catch (Exception e) {
+                    cached = SignalResult.error(e.getClass().getSimpleName());
+                }
+                networkInterfaceNames = cached;
+            }
         }
-        String value = shell.getStdout().trim();
-        return value.isEmpty() ? SignalResult.empty("") : SignalResult.success(value);
+        return cached;
+    }
+
+    /**
+     * Reads a system property through the native accessor only.
+     *
+     * The previous implementation forked /system/bin/sh to run getprop when the
+     * native read came back empty. That was removed: fork/exec is noisy, is
+     * itself hookable, can be blocked by policy, and an empty property is a
+     * legitimate answer rather than a failure needing a second opinion.
+     */
+    private SignalResult<String> readSystemProperty(String name) {
+        if (!NativeCollectorBridge.isNativeAvailable()) {
+            return SignalResult.unavailable("native_library_unavailable");
+        }
+        try {
+            String value = NativeCollectorBridge.getSystemProperty(name);
+            if (value == null) {
+                return SignalResult.unavailable("property_read_failed");
+            }
+            String trimmed = value.trim();
+            return trimmed.isEmpty()
+                    ? SignalResult.empty("") : SignalResult.success(trimmed);
+        } catch (Exception | LinkageError e) {
+            return SignalResult.error(e.getClass().getSimpleName());
+        }
     }
 }

@@ -58,6 +58,8 @@ public class EmulatorDetector extends BaseDetector {
         checkEmulatorIp(evidence, coverage);
         checkEmulatorPackages(evidence, coverage);
         checkContainerSignals(evidence, coverage);
+        checkVirtualGpu(evidence, coverage);
+        checkBuildCharacteristics(evidence, coverage);
 
         int strongSignals = 0;
         int weakSignals = 0;
@@ -386,6 +388,44 @@ public class EmulatorDetector extends BaseDetector {
         } catch (Exception e) {
             CLog.e("Container signal check failed", e);
             coverage.failure("container_signals:" + e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * A virtualized GPU renderer is a strong emulator signal and, unlike the
+     * Build fields, cannot be changed by a property override.
+     */
+    private void checkVirtualGpu(List<String> evidence, CheckCoverage coverage) {
+        SignalResult<SignalSnapshot.GpuIdentity> gpu = signals.getGpuIdentity();
+        if (!gpu.isSuccess() || gpu.getValue() == null) {
+            coverage.failure("gpu_identity:" + gpu.getFailureReason());
+            return;
+        }
+        coverage.success();
+        SignalSnapshot.GpuIdentity identity = gpu.getValue();
+        String haystack = (identity.renderer + " " + identity.vendor)
+                .toLowerCase(Locale.ROOT);
+        if (haystack.isBlank()) return;
+        for (String marker : DetectionLists.VIRTUAL_GPU_MARKERS) {
+            if (haystack.contains(marker)) {
+                evidence.add("virtual_gpu:" + marker);
+                return;
+            }
+        }
+    }
+
+    /** AOSP emulator images declare themselves in ro.build.characteristics. */
+    private void checkBuildCharacteristics(List<String> evidence, CheckCoverage coverage) {
+        SignalResult<String> value = signals.getSystemProperty("ro.build.characteristics");
+        if (!value.isSuccess()) {
+            coverage.failure("build_characteristics:" + value.getFailureReason());
+            return;
+        }
+        coverage.success();
+        String raw = value.getValue();
+        if (raw == null || raw.isBlank()) return;
+        if (raw.toLowerCase(Locale.ROOT).contains("emulator")) {
+            evidence.add("qemu_prop:ro.build.characteristics=" + raw.trim());
         }
     }
 

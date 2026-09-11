@@ -14,6 +14,7 @@ public final class EmulatorEvidenceClassifier {
                 || value.startsWith("emu_pkg:")
                 || value.startsWith("qemu_prop")
                 || value.startsWith("qemu_pipe")
+                || value.startsWith("virtual_gpu:")
                 || value.startsWith("cpu:hypervisor")
                 || value.startsWith("fingerprint:")
                 || value.startsWith("model:")

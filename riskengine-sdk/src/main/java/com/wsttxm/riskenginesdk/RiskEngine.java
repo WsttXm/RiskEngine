@@ -92,7 +92,8 @@ public final class RiskEngine {
             signalSnapshot = new SignalSnapshot(appContext);
             collectorRegistry = new CollectorRegistry(appContext, config, signalSnapshot);
             detectorRegistry = new DetectorRegistry(appContext, config, signalSnapshot);
-            dataAggregator = new DataAggregator();
+            dataAggregator = new DataAggregator(
+                    new com.wsttxm.riskenginesdk.core.FingerprintStore(appContext));
             collectionLock = new ReentrantLock(true);
             lifecycleGeneration++;
             initialized = true;
@@ -262,6 +263,9 @@ public final class RiskEngine {
         if (scheduler != null) {
             scheduler.shutdown();
         }
+        // Stop the native re-verification thread so it does not outlive the
+        // engine and keep running after the host app tears the SDK down.
+        com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge.stopMonitor();
         CLog.i("RiskEngine shutdown");
     }
 

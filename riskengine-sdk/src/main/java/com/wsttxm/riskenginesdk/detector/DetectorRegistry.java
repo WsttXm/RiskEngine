@@ -38,12 +38,16 @@ public class DetectorRegistry {
             detectors.add(new DebugDetector(context, signals));
         }
         if (config.isEnableCloudPhoneDetection()) {
-            detectors.add(new CloudPhoneDetector(context));
+            detectors.add(new CloudPhoneDetector(context, signals));
         }
         if (config.isEnableCustomRomDetection()) {
             detectors.add(new CustomRomDetector(context, signals));
         }
-        detectors.add(new NativeTamperDetector(context, signals));
+        detectors.add(new NativeTamperDetector(context, signals, config.getCollectScene()));
+        // Signature-free checks: these find contradictions rather than known
+        // artifacts, so they do not go stale as tools are renamed.
+        detectors.add(new ConsistencyDetector(context, signals));
+        detectors.add(new SealedVerdictDetector(context, signals));
     }
 
     public List<BaseDetector> getDetectors() {

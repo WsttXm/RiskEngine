@@ -1,6 +1,7 @@
 #include "syscall_wrapper.h"
 #include "raw_syscall.h"
 
+#include <algorithm>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -31,10 +32,11 @@ constexpr long kFstatatNr = __NR_fstatat64;
 constexpr long kFstatatNr = __NR_fstatat;
 #endif
 
+// armeabi routes through __NR_statfs64 below and never reads this constant.
 #if defined(__NR_statfs)
-constexpr long kStatfsNr = __NR_statfs;
+[[maybe_unused]] constexpr long kStatfsNr = __NR_statfs;
 #elif defined(__NR_statfs64)
-constexpr long kStatfsNr = __NR_statfs64;
+[[maybe_unused]] constexpr long kStatfsNr = __NR_statfs64;
 #else
 #error "statfs syscall number missing"
 #endif
@@ -172,6 +174,41 @@ long my_mmap(void *addr, size_t length, int prot, int flags, int fd, long offset
 long my_munmap(void *addr, size_t length) {
     return normalize(raw_syscall2(__NR_munmap, reinterpret_cast<long>(addr),
                                   static_cast<long>(length)));
+}
+
+long my_prctl(int option, unsigned long a2, unsigned long a3,
+              unsigned long a4, unsigned long a5) {
+    return normalize(raw_syscall5(__NR_prctl, option, static_cast<long>(a2),
+                                  static_cast<long>(a3), static_cast<long>(a4),
+                                  static_cast<long>(a5)));
+}
+
+long my_getppid(void) {
+    return normalize(raw_syscall0(__NR_getppid));
+}
+
+long my_gettid(void) {
+    return normalize(raw_syscall0(__NR_gettid));
+}
+
+std::string read_file_string(const char *path, size_t max_bytes) {
+    if (path == nullptr || max_bytes == 0) return std::string();
+    int fd = static_cast<int>(my_openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC, 0));
+    if (fd < 0) return std::string();
+    std::string out;
+    char buffer[8192];
+    while (out.size() < max_bytes) {
+        size_t want = std::min(sizeof(buffer), max_bytes - out.size());
+        long n = my_read(fd, buffer, want);
+        if (n < 0) {
+            if (raw_last_error() == EINTR) continue;
+            break;
+        }
+        if (n == 0) break;
+        out.append(buffer, static_cast<size_t>(n));
+    }
+    my_close(fd);
+    return out;
 }
 
 int read_file_content(const char *path, char *buf, size_t bufsize) {
