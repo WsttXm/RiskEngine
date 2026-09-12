@@ -6,7 +6,7 @@ An Android SDK for local device fingerprinting and runtime risk detection. Built
 
 RiskEngine has **no server, no reporting channel, and no Play Integrity or SafetyNet dependency**. Results stay on the device. It produces explainable local risk signals for the host to act on; it is not a hosted risk-control product.
 
-The current development version is `1.1.0-SNAPSHOT`.
+The current development version is `1.1.0-SNAPSHOT`. This document includes the fingerprint and detection architecture changes in commit `15c55ef`.
 
 ## What it does and does not do
 
@@ -24,15 +24,15 @@ A capable adversary can tamper with userspace signals. Kernel mount-namespace hi
 
 | Area | Detectors | Primary signals |
 | --- | --- | --- |
-| Root | `root`, `mount_analysis` | `su` / Magisk / KernelSU / APatch paths, `syscall_mismatch`, Magisk/module mounts, SELinux |
-| Hook | `hook_framework`, `process_scan` | Xposed/LSPosed, Frida maps/ports/threads, GOT/inline hooks, JNI table, process comm |
-| Native integrity | `native_tamper` | RX vs file CRC of `libriskengine.so`; anonymous mappings are actionable |
-| Emulator | `emulator` | QEMU/ranchu artifacts, emulator files and packages, runtime arch, hypervisor; hardware noise is down-ranked |
+| Root | `root`, `mount_analysis` | Root paths, KernelSU prctl, SELinux context, directory-listing cross-checks, mount-namespace comparison with PID 1 |
+| Hook | `hook_framework`, `process_scan` | Xposed/Frida, GOT/inline checks for 18 libc symbols, ART reflection/JNI slots, Unix sockets, W+X mappings, periodic re-verification |
+| Native integrity | `native_tamper`, `sealed_verdict` | Windowed FNV-1a comparison of executable segments, JNI registration-pointer ranges, native sealed-score verification |
+| Emulator | `emulator` | QEMU/ranchu, files/packages, runtime arch, hypervisor, virtual GPUs, `ro.build.characteristics` |
 | Debug | `debug` | TracerPid, debugger connection, executable maps paths, debuggable (informational by default) |
-| Sandbox / cloud phone / ROM | `sandbox`, `cloud_phone`, `custom_rom` | Parallel-space packages, cloud-phone packages, community ROM props, fingerprint vs `build.prop` mismatch |
+| Sandbox / cloud phone / ROM | `sandbox`, `cloud_phone`, `custom_rom` | dexElements/UID consistency, parallel-space packages, cloud properties, virtual GPUs, wired interfaces, community ROM props |
 | Debug bridge | `adb` | USB/Wi-Fi ADB; informational by default, scored in the payment scene |
-| Correlation | `signal_correlation` | Hidden-root, inline hook + Frida, weak emulator + hypervisor, and similar upgrades |
-| Device fingerprint | A dozen collectors | Build, screen, signing cert, telephony/Wi-Fi/BT capability, ADB, containers, CPU/disk/kernel |
+| Consistency and correlation | `consistency`, `signal_correlation` | Partition/Build properties, core counts, ABI, OS version, verified boot state, and multi-signal upgrades |
+| Device fingerprint | 19 default collectors | New GPU, sensor-set, CPU topology, camera/display/memory/battery profiles, partition fingerprints; layered IDs and continuity across observations |
 
 Artifact paths are sourced from `riskengine-sdk/src/main/resources/lists/artifact_paths.ini`. Java `DetectionLists` and native `detection_lists.h` are generated from that file.
 
@@ -118,13 +118,13 @@ String json = RiskEngine.reportToJson(report);       // no second collection
 String freshJson = RiskEngine.collectReportJson();  // collect then serialize
 ```
 
-`init` rejects duplicate initialization; multi-entry applications should use atomic `initIfNeeded`. Call `RiskEngine.shutdown()` when the SDK is no longer needed: it advances the lifecycle generation, cancels work, and clears registries. Results from older generations are not delivered.
+`init` rejects duplicate initialization; multi-entry applications should use atomic `initIfNeeded`. Call `RiskEngine.shutdown()` when the SDK is no longer needed: it advances the lifecycle generation, cancels work, clears registries, and requests that the native periodic monitor stop. Results from older generations are not delivered.
 
 The SDK AAR itself is not minified. Host R8 uses the bundled `consumer-rules.pro`; no extra keep rules are required for the public API.
 
 ## Collection scenes
 
-`CollectScene` only changes the informational / actionable split. Every enabled detector still runs.
+Scenes adjust the informational / actionable split. Every enabled detector still runs. `native_tamper` also has a scene policy: with an initialization scene of `LOGIN` / `PAYMENT`, missing maps, unreadable files, or wholly unreadable executable segments become `MEDIUM`/4; `STANDARD` / `DIAGNOSTIC` retain `UNAVAILABLE`. This policy is bound at initialization and is not updated by a per-call `collect(scene, ...)` / `collectSync(scene)` override.
 
 | Scene | Behavior |
 | --- | --- |
@@ -171,18 +171,27 @@ Hard triggers include GOT/inline hooks, high-confidence Frida PID/port or maps F
 
 | Field | Description |
 | --- | --- |
-| `fingerprint` | Aggregated device fingerprint (collector results) |
+| `fingerprint` | Aggregated device fingerprint (collector results, including `fingerprint_id`) |
+| `fingerprintId` (Java getter) | Hardware/system/volatile IDs, composite ID, and field coverage; `null` if composition fails |
 | `detections` | Detector results and evidence tokens |
 | `overallRiskLevel` | Final risk level |
 | `riskScore` / `maxRiskScore` | Actionable score / technical capacity |
 | `displayThresholdMaximum` | Severe threshold, fixed at 18 |
 | `warningCount` / `dangerCount` / `unknownCount` | Status counts (including informational) |
 | `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
-| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + raw-collector coverage; excludes `collector:*` duplicates and synthesized SDK fields |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + collector coverage; excludes `collector:*` duplicates and the two older synthetic fields, but currently includes `fingerprint_id` |
 | `collectScene` | Scene actually used for this report |
 | `timestampMs` / `sdkVersion` | Collection time and SDK version |
 
-JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency. Fields match the Java model, including `informational`, `executionStatus`, `details`, and `failureReasons`.
+JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency, including `informational`, `executionStatus`, `details`, and `failureReasons`. There is currently no top-level `fingerprintId`; layered IDs and continuity are under `fingerprint.fingerprint_id.values`.
+
+## Layered fingerprints and local storage
+
+`report.getFingerprintId()` returns a `FingerprintId`. The hardware layer uses GPU, sensor, camera, CPU, and related inputs; the system layer uses firmware, partition, and kernel information; the volatile layer uses enabled Android ID / Boot ID hashes. The composite ID combines only hardware and system layers, excluding the volatile layer.
+
+Each layer uses SHA-256 with a random 32-byte installation salt stored in the app's private `riskengine_fp` SharedPreferences. Storage also keeps the last reliable hardware/system digests, first-observation time, and observation count. Normal app-data clearing or uninstall removes these records; cross-reinstall linkage is not implemented, and host backup/restore policy affects whether records are retained.
+
+`isHardwareLayerReliable()` requires at least 9 of the 17 candidate hardware inputs. Continuity states are `FIRST_OBSERVATION`, `STABLE`, `SYSTEM_CHANGED`, `HARDWARE_CHANGED`, `INCONCLUSIVE`, and `UNKNOWN`. `HARDWARE_CHANGED` appends `fingerprint_continuity` (`MEDIUM`/4). The hardware layer is a measurement digest: drivers, configuration, or available fields can change it, so it does not guarantee unique physical-device identification.
 
 ## Privacy
 
@@ -193,6 +202,8 @@ JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency.
 | `DIAGNOSTIC` | Adds app-scoped boot ID and Widevine hashes |
 
 `collectAndroidId` / `collectBootId` / `collectDrmId` override a profile. Hashes include the host package name, so they are deterministic app-scoped pseudonyms — **not** encryption, anonymization, or an absolute non-reversibility guarantee. Reports never expose raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID.
+
+The five new hardware collectors and layered-ID composition run in every privacy profile. `MINIMAL` disables only the three identifiers above, not hardware fingerprinting or local continuity storage. If storage is unavailable, the implementation can fall back to the fixed salt `riskengine`, so installation isolation is not guaranteed in that case.
 
 ## Demo
 
@@ -225,14 +236,17 @@ The `demo` module is a local diagnostic console, not an automatic collector:
 | `RiskEngineConfig.Builder.privacyProfile(PrivacyProfile)` | `MINIMAL` / `BALANCED` / `DIAGNOSTIC` |
 | `RiskEngineConfig.Builder.collectScene(CollectScene)` | Default scene |
 | `collectAndroidId` / `collectBootId` / `collectDrmId` | Override individual identifier collection |
-| `enableRoot` / `enableHookDetection` / `enableEmulatorDetection` / … | Enable or disable detector groups; `native_tamper` always runs |
+| `enableRoot` / `enableHookDetection` / `enableEmulatorDetection` / … | Enable or disable detector groups; `native_tamper`, `consistency`, and `sealed_verdict` are always registered |
 
 ## Limits
 
 - Native I/O uses per-ABI inline syscalls (not libc `syscall()`); directory walks use `getdents64`. This reduces libc-hook blind spots; it does not defeat kernel-level hiding.
-- `native_tamper` treats `text_mismatch` and anonymous mappings as actionable. `missing_map` / unreadable file / bad ELF become `UNAVAILABLE`, so a Magisk-hide missing map is not reported as safe.
-- x86/i386 has no ARM trampoline heuristics; the in-memory vs file CRC still runs.
-- An x86_64 emulator matrix does not replace ARM64 OEM hardware. Expected evidence families are in [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md).
+- `sealed_verdict` independently scans and scores signals, with Java still aggregating the final report. It is not gated by Root/Hook group switches; disabling those groups does not stop equivalent probes inside the sealed verdict.
+- Sealing uses an in-process key, a keyed FNV-1a tag, and comparison with the latest nonce. It is neither hardware attestation nor a standard cryptographic MAC, and does not guarantee protection against altered Java verification paths or native attackers in the process.
+- The native monitor starts when the SO loads, rechecking self code, TracerPid, W+X, and framework mappings every 20–26 seconds. Findings are latched for later `hook_framework` collections; no callback is pushed automatically. `shutdown()` requests a stop; reinitializing in the same process currently does not restart it.
+- `root` records unreadable namespaces as coverage gaps, but `sealed_verdict` currently adds 1 native point for them; every `text_mismatch*` suffix, including unavailability, also enters its risk score. See the implementation details for these boundaries.
+- x86/i386 has no ARM trampoline heuristic; GOT checks and FNV-1a file/memory comparisons still run. Virtual GPUs, wired interfaces, and partition differences need OEM hardware regression and are not independently proof of tampering.
+- [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) describes expected evidence; the repository currently has no automated device-matrix workflow. Historical build results and open issues are in [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md).
 
 ## Documentation
 

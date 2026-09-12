@@ -6,7 +6,7 @@ Android 本地设备指纹采集与运行环境风险检测 SDK。采用 Java + 
 
 RiskEngine **没有服务端、没有上报通道、不依赖 Play Integrity 或 SafetyNet**。结果只在本机产出。它提供的是可解释的本地风险信号，供宿主自行决策，而不是一套托管风控产品。
 
-当前开发版本为 `1.1.0-SNAPSHOT`。
+当前开发版本为 `1.1.0-SNAPSHOT`。本文已同步提交 `15c55ef` 的指纹与检测架构改动。
 
 ## 它做什么，不做什么
 
@@ -24,15 +24,15 @@ RiskEngine **没有服务端、没有上报通道、不依赖 Play Integrity 或
 
 | 方向 | 检测器 | 主要信号 |
 | --- | --- | --- |
-| Root | `root`、`mount_analysis` | `su` / Magisk / KernelSU / APatch 路径、`syscall_mismatch`、Magisk/模块挂载、SELinux |
-| Hook | `hook_framework`、`process_scan` | Xposed/LSPosed、Frida maps/端口/线程、GOT/inline hook、JNI 表、进程 comm |
-| Native 完整性 | `native_tamper` | `libriskengine.so` 内存 RX 与文件 CRC；匿名映射视为可处置风险 |
-| 模拟器 | `emulator` | QEMU/ranchu 特征、模拟器文件与包名、运行时架构、hypervisor；硬件噪声单独降权 |
+| Root | `root`、`mount_analysis` | Root 路径、KernelSU prctl、SELinux 上下文、目录枚举交叉检查、与 PID 1 的挂载命名空间差异 |
+| Hook | `hook_framework`、`process_scan` | Xposed/Frida、18 个 libc 符号的 GOT/inline 检查、ART 反射/JNI 槽位、Unix socket、W+X 映射、周期复检 |
+| Native 完整性 | `native_tamper`、`sealed_verdict` | 自身可执行段分窗 FNV-1a 比对、JNI 注册指针范围检查、Native 密封分数验证 |
+| 模拟器 | `emulator` | QEMU/ranchu、文件/包名、运行时架构、hypervisor、虚拟 GPU、`ro.build.characteristics` |
 | 调试 | `debug` | TracerPid、调试器连接、maps 可执行路径、debuggable（默认仅提示） |
-| 沙箱 / 云真机 / ROM | `sandbox`、`cloud_phone`、`custom_rom` | 双开包、云真机包、社区 ROM 属性、fingerprint 与 `build.prop` 不一致 |
+| 沙箱 / 云真机 / ROM | `sandbox`、`cloud_phone`、`custom_rom` | dexElements/UID 一致性、双开包、云厂商属性、虚拟 GPU、有线网卡、社区 ROM 属性 |
 | 调试桥 | `adb` | USB/Wi-Fi ADB；默认提示性，支付场景可计入分数 |
-| 交叉规则 | `signal_correlation` | 隐藏 Root、inline hook + Frida、弱模拟器 + hypervisor 等组合升级 |
-| 设备指纹 | 十余个 Collector | Build、屏幕、签名、Telephony/Wi-Fi/BT 能力、ADB、容器、CPU/磁盘/内核 |
+| 一致性与交叉规则 | `consistency`、`signal_correlation` | 分区/Build 属性、CPU 核数、ABI、系统版本、验证启动状态，以及多信号组合升级 |
+| 设备指纹 | 19 个默认 Collector | 新增 GPU、传感器集合、CPU 拓扑、摄像头/显示/内存/电池规格、分区指纹；生成分层 ID 与跨次连续性状态 |
 
 清单路径以 `riskengine-sdk/src/main/resources/lists/artifact_paths.ini` 为单源，Java `DetectionLists` 与 Native `detection_lists.h` 由其生成。
 
@@ -118,13 +118,13 @@ String json = RiskEngine.reportToJson(report);       // 不重复采集
 String freshJson = RiskEngine.collectReportJson();  // 重新采集并序列化
 ```
 
-`init` 拒绝重复初始化；多入口应用使用原子的 `initIfNeeded`。不再使用时调用 `RiskEngine.shutdown()`：会推进生命周期代次、取消任务并清空注册表，旧代次结果不会交付。
+`init` 拒绝重复初始化；多入口应用使用原子的 `initIfNeeded`。不再使用时调用 `RiskEngine.shutdown()`：会推进生命周期代次、取消任务、清空注册表，并请求停止 Native 周期复检；旧代次结果不会交付。
 
 SDK AAR 自身不 minify；宿主 R8 使用附带的 `consumer-rules.pro`，无需为公开 API 再写 keep 规则。
 
 ## 采集场景
 
-`CollectScene` 只改变 informational / actionable 划分，每次采集仍运行全部已启用的 Detector。
+场景调整 informational / actionable 划分，每次采集仍运行全部已启用的 Detector。另有 `native_tamper` 的场景策略：初始化配置为 `LOGIN` / `PAYMENT` 时，映射缺失、文件不可读或可执行段全不可读会记为 `MEDIUM`/4；`STANDARD` / `DIAGNOSTIC` 下仍为 `UNAVAILABLE`。该策略在初始化时绑定，单次 `collect(scene, ...)` / `collectSync(scene)` 覆盖不会更新它。
 
 | 场景 | 行为 |
 | --- | --- |
@@ -171,18 +171,27 @@ SDK AAR 自身不 minify；宿主 R8 使用附带的 `consumer-rules.pro`，无�
 
 | 字段 | 说明 |
 | --- | --- |
-| `fingerprint` | 聚合后的设备指纹（各 Collector 结果） |
+| `fingerprint` | 聚合后的设备指纹（各 Collector 结果，含 `fingerprint_id`） |
+| `fingerprintId`（Java getter） | 硬件/系统/易变层 ID、复合 ID 与字段覆盖；构建失败时为 `null` |
 | `detections` | 检测结果与证据 token |
 | `overallRiskLevel` | 综合风险等级 |
 | `riskScore` / `maxRiskScore` | 可处置分数 / 技术容量 |
 | `displayThresholdMaximum` | 严重阈值，固定 18 |
 | `warningCount` / `dangerCount` / `unknownCount` | 各状态计数（含提示性） |
 | `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
-| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + 原始 Collector 覆盖；不含 `collector:*` 重复项与 SDK 合成字段 |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + Collector 覆盖；排除 `collector:*` 重复项及原有两项合成字段，但当前仍计入 `fingerprint_id` |
 | `collectScene` | 本次实际使用的场景 |
 | `timestampMs` / `sdkVersion` | 采集时间与 SDK 版本 |
 
-JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖。字段与 Java 模型一一对应，包含 `informational`、`executionStatus`、`details`、`failureReasons`。
+JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，包含 `informational`、`executionStatus`、`details`、`failureReasons`。当前没有顶层 `fingerprintId`；分层 ID 与连续性位于 `fingerprint.fingerprint_id.values`。
+
+## 分层指纹与本地存储
+
+`report.getFingerprintId()` 返回 `FingerprintId`。硬件层使用 GPU、传感器、摄像头、CPU 等输入；系统层使用固件、分区与内核信息；易变层使用已启用的 Android ID / Boot ID 哈希。复合 ID 只组合硬件层和系统层，不包含易变层。
+
+各层使用 SHA-256，并混入保存在应用私有 `riskengine_fp` SharedPreferences 中的 32 字节随机安装盐。存储还保留上次可靠的硬件/系统摘要、首次观察时间与观察次数。正常清除应用数据或卸载会清除这些记录；未实现跨重装关联，宿主的备份/恢复策略会影响记录是否保留。
+
+硬件层至少采到 17 项候选输入中的 9 项，`isHardwareLayerReliable()` 才返回 `true`。连续性状态包括 `FIRST_OBSERVATION`、`STABLE`、`SYSTEM_CHANGED`、`HARDWARE_CHANGED`、`INCONCLUSIVE`、`UNKNOWN`。`HARDWARE_CHANGED` 追加 `fingerprint_continuity`（`MEDIUM`/4）。硬件层是测量摘要，驱动、配置或可用字段变化也会改变它，不保证唯一识别物理设备。
 
 ## 隐私
 
@@ -193,6 +202,8 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖。�
 | `DIAGNOSTIC` | 另加 Boot ID、Widevine 的应用范围哈希 |
 
 `collectAndroidId` / `collectBootId` / `collectDrmId` 可覆盖档位。哈希输入包含宿主包名，因此是确定性的应用范围假名，**不是**加密、匿名化或不可逆性保证。报告从不输出原始 Android ID、DRM ID、Boot ID、IMEI、IMSI、Wi-Fi/Bluetooth MAC、SSID 或 BSSID。
+
+五个新增硬件 Collector 和分层 ID 构建在所有隐私档位下运行；`MINIMAL` 仅关闭上述三类标识，不关闭硬件指纹或本地连续性存储。存储不可用时，当前实现可能回退到固定盐 `riskengine`，此时不能保证安装间隔离。
 
 ## Demo
 
@@ -225,14 +236,17 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖。�
 | `RiskEngineConfig.Builder.privacyProfile(PrivacyProfile)` | `MINIMAL` / `BALANCED` / `DIAGNOSTIC` |
 | `RiskEngineConfig.Builder.collectScene(CollectScene)` | 默认场景 |
 | `collectAndroidId` / `collectBootId` / `collectDrmId` | 覆盖档位中的单项标识开关 |
-| `enableRoot` / `enableHookDetection` / `enableEmulatorDetection` / … | 分项启用检测器组；`native_tamper` 始终运行 |
+| `enableRoot` / `enableHookDetection` / `enableEmulatorDetection` / … | 分项启用检测器组；`native_tamper`、`consistency`、`sealed_verdict` 始终注册 |
 
 ## 能力边界
 
 - Native I/O 走各 ABI 内联 syscall（不经过 libc `syscall()`），目录遍历使用 `getdents64`。这降低 libc hook 盲区，但不能对抗内核级隐藏。
-- `native_tamper` 将 `text_mismatch` 与匿名映射视为可处置风险；`missing_map` / 文件不可读 / ELF 损坏记为 `UNAVAILABLE`，避免把 Magisk Hide 造成的映射缺失误判为“安全”。
-- x86/i386 上没有 ARM trampoline 特征检测；内存与文件 CRC 仍会执行。
-- x86_64 模拟器矩阵不能替代 ARM64 OEM 真机回归。对抗矩阵见 [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md)。
+- `sealed_verdict` 独立扫描并计分，仍由 Java 聚合为最终报告；它不受 Root/Hook 等检测器组开关控制，关闭这些组不会停止其内部同类探测。
+- 密封校验使用进程内密钥、带密钥的 FNV-1a 标签和最新 nonce 对照，不是硬件证明或标准密码学 MAC；也不能保证防止 Java 验证路径被改写或进程内 Native 攻击。
+- Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、TracerPid、W+X 与框架映射；命中保留到后续 `hook_framework` 采集读取，不自动回调。`shutdown()` 请求停止；同一进程再次初始化目前不会自动重启。
+- `root` 将命名空间不可读记为覆盖缺口，但 `sealed_verdict` 当前会为此加 1 分；所有 `text_mismatch*`（含不可用后缀）也会进入其风险计分。详见实现说明中的边界。
+- x86/i386 没有 ARM trampoline 启发式；GOT 与 FNV-1a 文件/内存比对仍执行。虚拟 GPU、有线网卡、分区差异等需要 OEM 真机回归，不能单独视为环境篡改的证明。
+- [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) 是预期证据说明，当前仓库没有自动设备矩阵工作流。历史构建与待修问题见 [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md)。
 
 ## 文档
 
