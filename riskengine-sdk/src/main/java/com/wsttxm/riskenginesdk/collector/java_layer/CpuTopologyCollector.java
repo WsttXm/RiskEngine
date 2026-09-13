@@ -69,11 +69,16 @@ public class CpuTopologyCollector extends BaseCollector {
             if (osArch != null && !osArch.isBlank()) {
                 result.addValue("os_arch", osArch);
             }
-            if (Build.SOC_MODEL != null && !Build.SOC_MODEL.isBlank()) {
-                result.addValue("soc_model", Build.SOC_MODEL);
-            }
-            if (Build.SOC_MANUFACTURER != null && !Build.SOC_MANUFACTURER.isBlank()) {
-                result.addValue("soc_manufacturer", Build.SOC_MANUFACTURER);
+            // SOC_MODEL/SOC_MANUFACTURER were added in API 31. On API 30 the two
+            // dimensions are simply absent, which the fingerprint builder counts
+            // as reduced coverage rather than a failure.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (Build.SOC_MODEL != null && !Build.SOC_MODEL.isBlank()) {
+                    result.addValue("soc_model", Build.SOC_MODEL);
+                }
+                if (Build.SOC_MANUFACTURER != null && !Build.SOC_MANUFACTURER.isBlank()) {
+                    result.addValue("soc_manufacturer", Build.SOC_MANUFACTURER);
+                }
             }
         } catch (Exception e) {
             CLog.e("CPU topology collection failed", e);
