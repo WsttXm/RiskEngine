@@ -92,8 +92,10 @@ public class RiskEngineConfigTest {
                 .enableCustomRomDetection(false)
                 .build();
 
-        assertEquals(1, new DetectorRegistry(null, config).getDetectors().size());
-        assertEquals("native_tamper",
-                new DetectorRegistry(null, config).getDetectors().get(0).getName());
+        DetectorRegistry registry = new DetectorRegistry(null, config);
+        assertEquals(3, registry.getDetectors().size());
+        assertEquals("native_tamper", registry.getDetectors().get(0).getName());
+        assertEquals("consistency", registry.getDetectors().get(1).getName());
+        assertEquals("sealed_verdict", registry.getDetectors().get(2).getName());
     }
 }

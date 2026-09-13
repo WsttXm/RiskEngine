@@ -108,10 +108,22 @@ void scan_mountinfo(std::vector<std::string> &tokens) {
     for (char &c : lower) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     }
-    if (lower.find(OBF("magisk")) != std::string::npos
-        || lower.find(OBF("core/mirror")) != std::string::npos
-        || lower.find(OBF("debug_ramdisk")) != std::string::npos) {
+    const bool has_ksu = lower.find(OBF("kernelsu")) != std::string::npos
+                         || lower.find(OBF("/data/adb/ksu")) != std::string::npos
+                         || lower.find(OBF(" ksu ")) != std::string::npos;
+    const bool has_magisk = lower.find(OBF("magisk")) != std::string::npos
+                            || lower.find(OBF("core/mirror")) != std::string::npos;
+    if (has_ksu) {
+        add_token(tokens, OBF("mount:ksu"));
+    }
+    if (has_magisk) {
         add_token(tokens, OBF("mount:magisk"));
+    }
+    // debug_ramdisk is shared by several root implementations. Do not label it
+    // Magisk unless the mount table also contains a Magisk-specific marker.
+    if (!has_ksu && !has_magisk
+        && lower.find(OBF("debug_ramdisk")) != std::string::npos) {
+        add_token(tokens, OBF("mount:debug_ramdisk"));
     }
     if (lower.find(OBF("/data/adb/modules")) != std::string::npos) {
         add_token(tokens, OBF("mount:module"));

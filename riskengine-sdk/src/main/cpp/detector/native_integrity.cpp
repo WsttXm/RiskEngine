@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <jni.h>
@@ -363,6 +364,15 @@ std::string native_get_so_integrity_evidence() {
     auto maps = read_self_maps();
     const MapEntry *self = lowest_named_map(maps, OBF("libriskengine.so"));
     if (self == nullptr) {
+        const MapEntry *anchor = find_map_containing(
+                maps, reinterpret_cast<uintptr_t>(&native_get_so_integrity_evidence));
+        if (anchor != nullptr && anchor->path.find(OBF(".apk")) != std::string::npos) {
+            // With extractNativeLibs=false Android maps the library directly
+            // from an APK and /proc/self/maps exposes only base.apk. Comparing
+            // that container as if it were an ELF would be a false mismatch.
+            add_token(tokens, OBF("text_mismatch:apk_embedded"));
+            return join_tokens(tokens);
+        }
         add_token(tokens, OBF("text_mismatch:missing_map"));
         return join_tokens(tokens);
     }
@@ -459,20 +469,21 @@ std::string native_get_jni_self_table_evidence(JNIEnv *env,
     if (registered == nullptr || count == 0) {
         return join_tokens(tokens);
     }
-    auto maps = read_self_maps();
-    uintptr_t self_start = 0, self_end = 0;
-    rx_range_for(maps, OBF("libriskengine.so"), self_start, self_end);
-    if (self_start == 0) {
+    Dl_info owner {};
+    if (dladdr(reinterpret_cast<const void *>(&native_get_jni_self_table_evidence),
+               &owner) == 0 || owner.dli_fbase == nullptr) {
         add_token(tokens, OBF("jni_self:no_range"));
         return join_tokens(tokens);
     }
-    // Every JNI entry point this library registered must still live inside this
-    // library's executable range. A Java-level or PLT-level redirect of our own
-    // bridge moves the pointer out of range.
+    // Compare dynamic-loader module identities instead of /proc path names.
+    // This remains precise when Android maps several unextracted libraries as
+    // ranges whose visible path is only base.apk.
     for (size_t i = 0; i < count; ++i) {
         auto addr = reinterpret_cast<uintptr_t>(registered[i]);
         if (addr == 0) continue;
-        if (addr < self_start || addr >= self_end) {
+        Dl_info target {};
+        if (dladdr(registered[i], &target) == 0
+                || target.dli_fbase != owner.dli_fbase) {
             add_token(tokens, OBF("jni_self_hook:") + std::to_string(i));
         }
     }

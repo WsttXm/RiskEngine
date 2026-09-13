@@ -241,10 +241,10 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，�
 ## 能力边界
 
 - Native I/O 走各 ABI 内联 syscall（不经过 libc `syscall()`），目录遍历使用 `getdents64`。这降低 libc hook 盲区，但不能对抗内核级隐藏。
-- `sealed_verdict` 独立扫描并计分，仍由 Java 聚合为最终报告；它不受 Root/Hook 等检测器组开关控制，关闭这些组不会停止其内部同类探测。
+- `sealed_verdict` 独立扫描并计分，仍由 Java 聚合为最终报告；它不受 Root/Hook 等检测器组开关控制，关闭这些组不会停止其内部同类探测。当其他检测器已报告同一证据族时，密封结果仅作为可见的重复佐证，不再计为第二个高危项。
 - 密封校验使用进程内密钥、带密钥的 FNV-1a 标签和最新 nonce 对照，不是硬件证明或标准密码学 MAC；也不能保证防止 Java 验证路径被改写或进程内 Native 攻击。
 - Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、TracerPid、W+X 与框架映射；命中保留到后续 `hook_framework` 采集读取，不自动回调。`shutdown()` 请求停止；同一进程再次初始化目前不会自动重启。
-- `root` 将命名空间不可读记为覆盖缺口，但 `sealed_verdict` 当前会为此加 1 分；所有 `text_mismatch*`（含不可用后缀）也会进入其风险计分。详见实现说明中的边界。
+- 命名空间不可读、自身完整性无法比对（包括 Native 库直接从 APK 加载）均属于覆盖缺口，不是风险命中。只有精确的 `text_mismatch` 标识参与 Native 篡改计分；`text_mismatch:missing_map`、`text_mismatch:apk_embedded` 等诊断后缀不计风险分。
 - x86/i386 没有 ARM trampoline 启发式；GOT 与 FNV-1a 文件/内存比对仍执行。虚拟 GPU、有线网卡、分区差异等需要 OEM 真机回归，不能单独视为环境篡改的证明。
 - [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) 是预期证据说明，当前仓库没有自动设备矩阵工作流。历史构建与待修问题见 [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md)。
 

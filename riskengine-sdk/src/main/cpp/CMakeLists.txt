@@ -48,7 +48,8 @@ target_compile_options(riskengine PRIVATE
 )
 
 find_library(android_log_lib log)
-target_link_libraries(riskengine PRIVATE ${android_log_lib})
+find_library(android_dl_lib dl)
+target_link_libraries(riskengine PRIVATE ${android_log_lib} ${android_dl_lib})
 
 target_link_options(riskengine PRIVATE
     "-Wl,-z,max-page-size=16384"

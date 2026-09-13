@@ -53,6 +53,12 @@ public class HookFrameworkDetector extends BaseDetector {
 
         if (!details.isEmpty()) {
             List<String> detailList = new ArrayList<>(details);
+            if (score.strong == 0 && score.medium == 0 && score.weak == 0) {
+                // Keep loader depth and monitor pass count available for
+                // diagnostics, but do not turn context-only data into a hit.
+                return result(RiskLevel.SAFE, DetectionStatus.NORMAL, 0, 10, false,
+                        detailList, String.join("; ", detailList), coverage);
+            }
             if (score.strong >= 2 || (score.strong >= 1 && score.medium >= 2)) {
                 return result(RiskLevel.DEADLY, DetectionStatus.DANGER, 10, 10, false,
                         detailList, String.join("; ", detailList), coverage);

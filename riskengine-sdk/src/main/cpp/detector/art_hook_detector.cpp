@@ -236,7 +236,8 @@ std::string native_get_art_hook_evidence(JNIEnv *env) {
     inspect_class_loader_chain(env, tokens);
 
     // Methods that must not be native on a clean device. Checked by mechanism,
-    // so a renamed framework is still caught.
+    // so a renamed framework is still caught. Do not include
+    // java.lang.reflect.Method.invoke: Android's own libcore declares it native.
     struct Probe {
         const char *cls;
         const char *method;
@@ -244,8 +245,6 @@ std::string native_get_art_hook_evidence(JNIEnv *env) {
         bool is_static;
     };
     const Probe probes[] = {
-            {"java/lang/reflect/Method", "invoke",
-             "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false},
             {"java/lang/Runtime", "exec",
              "(Ljava/lang/String;)Ljava/lang/Process;", false},
             {"java/io/File", "exists", "()Z", false},

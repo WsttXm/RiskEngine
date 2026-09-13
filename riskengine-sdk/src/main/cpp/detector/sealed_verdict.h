@@ -48,4 +48,7 @@ std::string native_build_sealed_verdict(JNIEnv *env);
  */
 int native_verify_sealed_verdict(const std::string &blob);
 
+/** Verifies the same blob and returns its native flag bitset, or -1. */
+int native_verify_sealed_verdict_flags(const std::string &blob);
+
 #endif

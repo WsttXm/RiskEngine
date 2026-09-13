@@ -28,6 +28,17 @@ import java.util.List;
  * one-line Java hook to native memory access, it does not eliminate the attack.
  */
 public class SealedVerdictDetector extends BaseDetector {
+    private static final int FLAG_ROOT_STRONG = 1 << 0;
+    private static final int FLAG_ROOT_HIDDEN = 1 << 1;
+    private static final int FLAG_HOOK_INLINE = 1 << 2;
+    private static final int FLAG_HOOK_FRAMEWORK = 1 << 3;
+    private static final int FLAG_TEXT_MISMATCH = 1 << 4;
+    private static final int FLAG_EMULATOR = 1 << 5;
+    private static final int FLAG_DEBUGGER = 1 << 6;
+    private static final int FLAG_KERNEL_ROOT = 1 << 7;
+    private static final int FLAG_JNI_SELF_HOOK = 1 << 8;
+    private static final int FLAG_COVERAGE_LOSS = 1 << 9;
+
     private final SignalSnapshot signals;
 
     public SealedVerdictDetector(Context context, SignalSnapshot signals) {
@@ -92,13 +103,19 @@ public class SealedVerdictDetector extends BaseDetector {
             coverage.failure("jni_self:" + self.getFailureReason());
             return;
         }
-        coverage.success();
         String value = self.getValue() == null ? "" : self.getValue().trim();
-        if (value.isEmpty()) return;
+        boolean rangeUnavailable = false;
         for (String token : value.split(",")) {
             String item = token.trim();
-            if (!item.isEmpty()) evidence.add(item);
+            if (item.isEmpty()) continue;
+            if (item.equals("jni_self:no_range")) {
+                rangeUnavailable = true;
+            } else {
+                evidence.add(item);
+            }
         }
+        if (rangeUnavailable) coverage.failure("jni_self:no_range");
+        else coverage.success();
     }
 
     /**
@@ -115,19 +132,41 @@ public class SealedVerdictDetector extends BaseDetector {
         }
         SignalResult<Integer> verified =
                 NativeCollectorBridge.verifySealedVerdictResult(sealed.getValue());
-        if (!verified.isSuccess() || verified.getValue() == null) {
-            coverage.failure("verify:" + verified.getFailureReason());
+        SignalResult<Integer> verifiedFlags =
+                NativeCollectorBridge.verifySealedVerdictFlagsResult(sealed.getValue());
+        if (!verified.isSuccess() || verified.getValue() == null
+                || !verifiedFlags.isSuccess() || verifiedFlags.getValue() == null) {
+            String reason = !verified.isSuccess() || verified.getValue() == null
+                    ? verified.getFailureReason() : verifiedFlags.getFailureReason();
+            coverage.failure("verify:" + reason);
             return -1;
         }
         coverage.success();
         int score = verified.getValue();
-        if (score < 0) {
+        int flags = verifiedFlags.getValue();
+        if (score < 0 || flags < 0) {
             evidence.add("verdict_unverifiable:mac_or_nonce_rejected");
             return -1;
         }
+        appendFlagEvidence(evidence, flags);
         if (score > 0) {
             evidence.add("native_score:" + score);
         }
         return score;
+    }
+
+    private void appendFlagEvidence(List<String> evidence, int flags) {
+        if ((flags & FLAG_ROOT_STRONG) != 0) evidence.add("sealed:root_strong");
+        if ((flags & FLAG_ROOT_HIDDEN) != 0) evidence.add("sealed:root_hidden");
+        if ((flags & FLAG_HOOK_INLINE) != 0) evidence.add("sealed:hook_inline");
+        if ((flags & FLAG_HOOK_FRAMEWORK) != 0) evidence.add("sealed:hook_framework");
+        if ((flags & FLAG_TEXT_MISMATCH) != 0) evidence.add("sealed:text_mismatch");
+        if ((flags & FLAG_EMULATOR) != 0) evidence.add("sealed:emulator");
+        if ((flags & FLAG_DEBUGGER) != 0) evidence.add("sealed:debugger");
+        if ((flags & FLAG_KERNEL_ROOT) != 0) evidence.add("sealed:kernel_root");
+        if ((flags & FLAG_JNI_SELF_HOOK) != 0) evidence.add("sealed:jni_self_hook");
+        // Coverage is represented by the owning detector and never scores.
+        // Keeping this token makes the sealed diagnostic explainable.
+        if ((flags & FLAG_COVERAGE_LOSS) != 0) evidence.add("sealed:coverage_loss");
     }
 }

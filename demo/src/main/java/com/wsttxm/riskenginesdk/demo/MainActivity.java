@@ -37,6 +37,7 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -450,7 +451,6 @@ public class MainActivity extends AppCompatActivity {
         details.addView(detailLabel);
         TextView evidence = createText(detectionTechnicalDetails(detection),
                 11, R.color.text_secondary, Typeface.NORMAL);
-        evidence.setTypeface(Typeface.MONOSPACE);
         evidence.setTextIsSelectable(true);
         evidence.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams evidenceParams = new LinearLayout.LayoutParams(
@@ -458,6 +458,30 @@ public class MainActivity extends AppCompatActivity {
         evidenceParams.topMargin = dp(5);
         evidence.setLayoutParams(evidenceParams);
         details.addView(evidence);
+
+        String rawDetails = detectionRawDetails(detection);
+        if (!rawDetails.isBlank()) {
+            TextView rawLabel = createText(getString(R.string.technical_raw_evidence),
+                    11, R.color.text_tertiary, Typeface.BOLD);
+            LinearLayout.LayoutParams rawLabelParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rawLabelParams.topMargin = dp(10);
+            rawLabel.setLayoutParams(rawLabelParams);
+            details.addView(rawLabel);
+
+            TextView rawEvidence = createText(rawDetails,
+                    10, R.color.text_tertiary, Typeface.NORMAL);
+            rawEvidence.setTypeface(Typeface.MONOSPACE);
+            rawEvidence.setTextIsSelectable(true);
+            rawEvidence.setLineSpacing(dp(2), 1f);
+            LinearLayout.LayoutParams rawParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rawParams.topMargin = dp(5);
+            rawEvidence.setLayoutParams(rawParams);
+            details.addView(rawEvidence);
+        }
         row.addView(details);
 
         row.setContentDescription(getString(R.string.row_content_description,
@@ -574,7 +598,7 @@ public class MainActivity extends AppCompatActivity {
                     detectorTitle(detection.getDetectorName()), detectionStatusLabel(detection)));
             if (!detection.getDetails().isEmpty()) {
                 summary.append(getString(R.string.redacted_report_reason,
-                        humanizeEvidence(detection.getDetails().get(0))));
+                        primaryReadableEvidence(detection)));
             }
         }
         summary.append(getString(R.string.redacted_report_footer));
@@ -825,10 +849,11 @@ public class MainActivity extends AppCompatActivity {
                             detection.getChecksSucceeded(), detection.getChecksAttempted())
                     : getString(R.string.detection_normal_summary);
         }
-        String reason = detection.getDetails().isEmpty()
-                ? getString(R.string.no_specific_evidence)
-                : humanizeEvidence(detection.getDetails().get(0));
+        String reason = primaryReadableEvidence(detection);
         if (detection.isInformational()) {
+            if (detection.getDetails().contains("deduped:corroborating_evidence")) {
+                return getString(R.string.detection_duplicate_summary, reason);
+            }
             return getString(R.string.detection_informational_summary, reason);
         }
         if (detection.getStatus() == DetectionStatus.DANGER) {
@@ -863,14 +888,40 @@ public class MainActivity extends AppCompatActivity {
                     continue;
                 }
                 text.append("\n• ").append(human);
-                if (!isInternalExecutionToken(detail)
-                        && !human.equals(detail)
-                        && !human.equals(detail.replace('_', ' '))) {
-                    text.append("\n  ").append(detail);
-                }
             }
         }
         return text.toString();
+    }
+
+    private String detectionRawDetails(DetectionResult detection) {
+        Set<String> raw = new LinkedHashSet<>();
+        for (String reason : detection.getFailureReasons()) {
+            if (reason != null && !reason.isBlank()) raw.add("failure:" + reason);
+        }
+        for (String detail : detection.getDetails()) {
+            if (detail != null && !detail.isBlank()) raw.add(detail);
+        }
+        return TextUtils.join("\n", raw);
+    }
+
+    private String primaryReadableEvidence(DetectionResult detection) {
+        for (String detail : detection.getDetails()) {
+            if (!isContextOnlyEvidence(detail)) return humanizeEvidence(detail);
+        }
+        if (!detection.getDetails().isEmpty()) {
+            return humanizeEvidence(detection.getDetails().get(0));
+        }
+        return getString(R.string.no_specific_evidence);
+    }
+
+    private boolean isContextOnlyEvidence(String detail) {
+        if (detail == null) return true;
+        return detail.startsWith("loader_depth:")
+                || detail.startsWith("passes:")
+                || detail.startsWith("native_score:")
+                || detail.equals("art_native_flag:invoke")
+                || detail.equals("sealed:coverage_loss")
+                || detail.equals("deduped:corroborating_evidence");
     }
 
     private String firstReadableFailure(DetectionResult detection) {
@@ -896,7 +947,7 @@ public class MainActivity extends AppCompatActivity {
         if (primary != null) {
             return base + "\n" + getString(R.string.primary_reason,
                     detectorTitle(primary.getDetectorName()),
-                    humanizeEvidence(primary.getDetails().get(0)));
+                    primaryReadableEvidence(primary));
         }
         return base;
     }
@@ -1020,6 +1071,10 @@ public class MainActivity extends AppCompatActivity {
         if (detail.startsWith("ksu_found:") || detail.startsWith("native:ksu:")) {
             return getString(R.string.evidence_kernelsu);
         }
+        if (detail.contains("mount:ksu") || detail.contains("mountinfo:ksu")
+                || detail.contains("kernelsu_mount")) {
+            return getString(R.string.evidence_kernelsu_mount);
+        }
         if (detail.startsWith("apatch_found:") || detail.startsWith("native:apatch:")) {
             return getString(R.string.evidence_apatch);
         }
@@ -1034,6 +1089,9 @@ public class MainActivity extends AppCompatActivity {
                 || detail.startsWith("modules_found:")) {
             return getString(R.string.evidence_module_mount);
         }
+        if (detail.contains("debug_ramdisk_mount") || detail.contains("mount:debug_ramdisk")) {
+            return getString(R.string.evidence_debug_ramdisk_mount);
+        }
         if (detail.startsWith("magisk_found:") || detail.contains("magisk:")
                 || detail.startsWith("native:magisk")) {
             return getString(R.string.evidence_magisk);
@@ -1043,6 +1101,45 @@ public class MainActivity extends AppCompatActivity {
         if (detail.startsWith("inline_hook:")) return getString(R.string.evidence_inline_hook);
         if (detail.startsWith("got_hook:")) return getString(R.string.evidence_got_hook);
         if (detail.startsWith("jni_table_hook:")) return getString(R.string.evidence_jni_hook);
+        if (detail.startsWith("jni_slot_hook:")) return getString(R.string.evidence_jni_slot_hook,
+                detail.substring("jni_slot_hook:".length()));
+        if (detail.startsWith("jni_self_hook:")) return getString(R.string.evidence_jni_self_hook);
+        if (detail.equals("jni_self:no_range")) return getString(R.string.failure_jni_self_range);
+        if (detail.equals("art_native_flag:invoke")) return getString(
+                R.string.evidence_art_native_invoke_platform);
+        if (detail.startsWith("art_native_flag:")) return getString(
+                R.string.evidence_art_native_flag,
+                detail.substring("art_native_flag:".length()));
+        if (detail.startsWith("loader_depth:")) return getString(
+                R.string.evidence_loader_depth,
+                detail.substring("loader_depth:".length()));
+        if (detail.startsWith("loader_chain_deep:")) return getString(
+                R.string.evidence_loader_chain_deep,
+                detail.substring("loader_chain_deep:".length()));
+        if (detail.startsWith("loader_unexpected:")) return getString(
+                R.string.evidence_loader_unexpected,
+                detail.substring("loader_unexpected:".length()));
+        if (detail.startsWith("passes:")) return getString(R.string.evidence_monitor_passes,
+                detail.substring("passes:".length()));
+        if (detail.equals("late_text_mismatch")) return getString(
+                R.string.evidence_late_text_mismatch);
+        if (detail.equals("late_tracer_attached")) return getString(
+                R.string.evidence_late_tracer);
+        if (detail.startsWith("late_wx_")) return getString(R.string.evidence_late_wx);
+        if (detail.startsWith("native_score:")) return getString(R.string.evidence_native_score,
+                detail.substring("native_score:".length()));
+        if (detail.equals("sealed:root_strong")) return getString(R.string.evidence_sealed_root);
+        if (detail.equals("sealed:root_hidden")) return getString(R.string.evidence_sealed_hidden_root);
+        if (detail.equals("sealed:kernel_root")) return getString(R.string.evidence_sealed_kernel_root);
+        if (detail.equals("sealed:hook_inline")) return getString(R.string.evidence_sealed_inline_hook);
+        if (detail.equals("sealed:hook_framework")) return getString(R.string.evidence_sealed_hook_framework);
+        if (detail.equals("sealed:text_mismatch")) return getString(R.string.evidence_sealed_tamper);
+        if (detail.equals("sealed:emulator")) return getString(R.string.evidence_sealed_emulator);
+        if (detail.equals("sealed:debugger")) return getString(R.string.evidence_sealed_debugger);
+        if (detail.equals("sealed:jni_self_hook")) return getString(R.string.evidence_jni_self_hook);
+        if (detail.equals("sealed:coverage_loss")) return getString(R.string.evidence_sealed_coverage);
+        if (detail.equals("deduped:corroborating_evidence")) return getString(
+                R.string.evidence_duplicate_corroboration);
         if (detail.startsWith("maps:gadget") || detail.contains("libgadget")) {
             return getString(R.string.evidence_gadget);
         }
@@ -1086,6 +1183,9 @@ public class MainActivity extends AppCompatActivity {
         if (detail.contains("missing_map") || detail.contains("missing map")) {
             return getString(R.string.failure_so_missing_map);
         }
+        if (detail.contains("apk_embedded")) {
+            return getString(R.string.failure_so_apk_embedded);
+        }
         if (detail.contains("anonymous_map") || detail.contains("anonymous map")) {
             return getString(R.string.failure_so_anonymous_map);
         }
@@ -1096,6 +1196,10 @@ public class MainActivity extends AppCompatActivity {
             return getString(R.string.failure_so_bad_elf);
         }
         if (detail.startsWith("text_mismatch")) return getString(R.string.evidence_native_tamper);
+        if (detail.startsWith("verified_boot_state:")) return getString(
+                R.string.evidence_verified_boot_state,
+                detail.substring("verified_boot_state:".length()));
+        if (detail.equals("bootloader_unlocked")) return getString(R.string.evidence_bootloader_unlocked);
         if (detail.startsWith("process_source_mismatch")) {
             return getString(R.string.evidence_process_mismatch);
         }
@@ -1108,7 +1212,13 @@ public class MainActivity extends AppCompatActivity {
             return getString(R.string.evidence_emulator_build);
         }
         if (detail.startsWith("inconsistent_fields:")) return getString(R.string.evidence_inconsistent);
-        return detail.replace('_', ' ');
+        int separator = detail.indexOf(':');
+        if (separator > 0 && separator < detail.length() - 1) {
+            return getString(R.string.evidence_generic_key_value,
+                    detail.substring(0, separator).replace('_', ' '),
+                    detail.substring(separator + 1).replace('_', ' '));
+        }
+        return getString(R.string.evidence_generic_signal, detail.replace('_', ' '));
     }
 
     private boolean isInternalExecutionToken(String detail) {
@@ -1133,6 +1243,9 @@ public class MainActivity extends AppCompatActivity {
         }
         if (lower.contains("missing_map") || lower.contains("missing map")) {
             return getString(R.string.failure_so_missing_map);
+        }
+        if (lower.contains("apk_embedded")) {
+            return getString(R.string.failure_so_apk_embedded);
         }
         if (lower.contains("anonymous_map") || lower.contains("anonymous map")) {
             return getString(R.string.failure_so_anonymous_map);
@@ -1166,6 +1279,8 @@ public class MainActivity extends AppCompatActivity {
             case "multi_source_validation": return getString(R.string.detector_multi_source);
             case "signal_correlation": return getString(R.string.detector_correlation);
             case "native_tamper": return getString(R.string.detector_native_tamper);
+            case "consistency": return getString(R.string.detector_consistency);
+            case "sealed_verdict": return getString(R.string.detector_sealed_verdict);
             default:
                 if (name.startsWith("collector:")) {
                     return getString(R.string.detector_collector_coverage,

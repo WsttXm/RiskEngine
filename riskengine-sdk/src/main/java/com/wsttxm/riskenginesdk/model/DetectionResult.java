@@ -152,6 +152,20 @@ public class DetectionResult {
                 failureReasons, details, evidence, timestampMs);
     }
 
+    /**
+     * Keeps duplicate evidence visible without presenting or counting it as a
+     * second independent danger. The original technical score is retained for
+     * diagnostics but is excluded from the report total by informational=true.
+     */
+    public DetectionResult asInformationalDuplicate() {
+        List<String> duplicateDetails = new ArrayList<>(details);
+        duplicateDetails.add("deduped:corroborating_evidence");
+        return new DetectionResult(
+                detectorName, RiskLevel.LOW, DetectionStatus.WARNING, score, maxScore, true,
+                executionStatus, checksAttempted, checksSucceeded, checksFailed,
+                failureReasons, duplicateDetails, evidence, timestampMs);
+    }
+
     public static DetectionResult unavailable(String detectorName, String reason) {
         return executionFailure(detectorName, DetectionExecutionStatus.UNAVAILABLE, reason);
     }

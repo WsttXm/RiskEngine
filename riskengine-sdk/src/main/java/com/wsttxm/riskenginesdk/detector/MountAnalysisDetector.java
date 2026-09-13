@@ -36,6 +36,18 @@ public class MountAnalysisDetector extends BaseDetector {
 
         boolean mountsAvailable = checkMounts(evidence);
         boolean mountInfoAvailable = checkMountInfo(evidence);
+        // /proc/mounts may expose only the shared debug_ramdisk marker while
+        // mountinfo still names the owning framework. Prefer that specific
+        // attribution and avoid presenting both as separate findings.
+        if (evidence.contains("mountinfo:ksu")) {
+            evidence.remove("debug_ramdisk_mount");
+            evidence.remove("mountinfo:ksu");
+            evidence.add(0, "mountinfo:ksu");
+        } else if (evidence.contains("mountinfo:magisk")) {
+            evidence.remove("debug_ramdisk_mount");
+            evidence.remove("mountinfo:magisk");
+            evidence.add(0, "mountinfo:magisk");
+        }
         CheckCoverage coverage = new CheckCoverage();
         if (mountsAvailable) coverage.success();
         else coverage.failure("proc_mounts_unavailable");
@@ -56,12 +68,19 @@ public class MountAnalysisDetector extends BaseDetector {
         try {
             SignalResult<String> mounts = signals.getTextFile("/proc/mounts");
             if (!mounts.isSuccess() || mounts.getValue() == null) return false;
+            String allMounts = mounts.getValue().toLowerCase(Locale.ROOT);
+            boolean hasKernelSu = allMounts.contains("kernelsu")
+                    || allMounts.contains("/data/adb/ksu")
+                    || allMounts.contains(" ksu ");
+            boolean hasMagisk = allMounts.contains("magisk")
+                    || allMounts.contains("core/mirror");
+            if (hasKernelSu) addUnique(evidence, "kernelsu_mount");
+            if (hasMagisk) addUnique(evidence, "magisk_mount");
+            if (!hasKernelSu && !hasMagisk && allMounts.contains("debug_ramdisk")) {
+                addUnique(evidence, "debug_ramdisk_mount");
+            }
             for (String line : mounts.getValue().split("\\n")) {
                 String lower = line.toLowerCase(Locale.ROOT);
-                // Magisk overlay
-                if (lower.contains("magisk") || lower.contains("debug_ramdisk")) {
-                    addUnique(evidence, "magisk_mount");
-                }
                 // Docker/container markers
                 if (lower.contains("docker") || lower.contains("overlay") && lower.contains("lowerdir")) {
                     if (lower.contains("/docker/")) {
@@ -84,11 +103,13 @@ public class MountAnalysisDetector extends BaseDetector {
         try {
             SignalResult<String> mountInfo = signals.getTextFile("/proc/self/mountinfo");
             if (!mountInfo.isSuccess() || mountInfo.getValue() == null) return false;
-            for (String line : mountInfo.getValue().split("\\n")) {
-                if (line.contains("magisk") || line.contains("core/mirror")) {
-                    addUnique(evidence, "mountinfo:magisk");
-                    break;
-                }
+            String lower = mountInfo.getValue().toLowerCase(Locale.ROOT);
+            if (lower.contains("kernelsu") || lower.contains("/data/adb/ksu")
+                    || lower.contains(" ksu ")) {
+                addUnique(evidence, "mountinfo:ksu");
+            }
+            if (lower.contains("magisk") || lower.contains("core/mirror")) {
+                addUnique(evidence, "mountinfo:magisk");
             }
             return true;
         } catch (Exception e) {

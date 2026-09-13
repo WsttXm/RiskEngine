@@ -10,6 +10,9 @@ public final class HookEvidenceClassifier {
     public static Rank rank(String token) {
         if (token == null || token.isBlank()) return Rank.IGNORE;
         String value = token.toLowerCase(Locale.ROOT);
+        // Android libcore implements Method.invoke natively. Keep this guard so
+        // a stale/native-monitor token from an older SDK cannot become a risk.
+        if (value.equals("art_native_flag:invoke")) return Rank.IGNORE;
         if (value.startsWith("inline_hook:")
                 || value.startsWith("got_hook:")
                 || value.startsWith("jni_table_hook:")

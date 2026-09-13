@@ -81,6 +81,7 @@ public class NativeCollectorBridge {
     private static native String nGetKernelRootEvidenceRaw();
     private static native String nGetSealedVerdictRaw();
     private static native int nVerifySealedVerdictRaw(String blob);
+    private static native int nVerifySealedVerdictFlagsRaw(String blob);
     private static native String nGetJniSelfIntegrityRaw();
     private static native String nGetMonitorFindingsRaw();
     private static native void nStopMonitorRaw();
@@ -206,6 +207,14 @@ public class NativeCollectorBridge {
             return SignalResult.unavailable("sealed_verdict_absent");
         }
         return callNativeResult(() -> nVerifySealedVerdictRaw(blob));
+    }
+
+    /** Returns the authenticated native verdict flag bitset, or -1 on failure. */
+    public static SignalResult<Integer> verifySealedVerdictFlagsResult(String blob) {
+        if (blob == null || blob.isEmpty()) {
+            return SignalResult.unavailable("sealed_verdict_absent");
+        }
+        return callNativeResult(() -> nVerifySealedVerdictFlagsRaw(blob));
     }
 
     public static SignalResult<String> getCpuInfoResult() {

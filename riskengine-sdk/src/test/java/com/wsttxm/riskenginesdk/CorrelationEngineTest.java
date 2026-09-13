@@ -118,5 +118,41 @@ public class CorrelationEngineTest {
         List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(hook, process));
         assertFalse(out.get(0).isInformational());
         assertTrue(out.get(1).isInformational());
+        assertEquals(RiskLevel.LOW, out.get(1).getRiskLevel());
+        assertEquals(DetectionStatus.WARNING, out.get(1).getStatus());
+        assertTrue(out.get(1).getDetails().contains("deduped:corroborating_evidence"));
+    }
+
+    @Test
+    public void sealedRootEvidenceIsVisibleButNotASecondDanger() {
+        DetectionResult root = new DetectionResult(
+                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("native:mount:ksu"), "native:mount:ksu");
+        DetectionResult sealed = new DetectionResult(
+                "sealed_verdict", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("sealed:root_strong", "native_score:7"),
+                "sealed:root_strong; native_score:7");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, sealed));
+
+        assertFalse(out.get(0).isInformational());
+        assertTrue(out.get(1).isInformational());
+        assertEquals(RiskLevel.LOW, out.get(1).getRiskLevel());
+        assertEquals(DetectionStatus.WARNING, out.get(1).getStatus());
+        assertTrue(out.get(1).getDetails().contains("deduped:corroborating_evidence"));
+    }
+
+    @Test
+    public void sealedEvidenceRemainsActionableWhenItIsTheOnlySource() {
+        DetectionResult sealed = new DetectionResult(
+                "sealed_verdict", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("sealed:root_strong", "native_score:7"),
+                "sealed:root_strong; native_score:7");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(sealed));
+
+        assertFalse(out.get(0).isInformational());
+        assertEquals(RiskLevel.HIGH, out.get(0).getRiskLevel());
+        assertEquals(DetectionStatus.DANGER, out.get(0).getStatus());
     }
 }

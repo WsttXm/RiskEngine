@@ -238,6 +238,18 @@ static jint jni_verifySealedVerdict(JNIEnv *env, jclass, jstring jblob) {
     return static_cast<jint>(native_verify_sealed_verdict(blob));
 }
 
+static jint jni_verifySealedVerdictFlags(JNIEnv *env, jclass, jstring jblob) {
+    if (jblob == nullptr) return -1;
+    const char *chars = env->GetStringUTFChars(jblob, nullptr);
+    if (chars == nullptr) {
+        clearPendingException(env);
+        return -1;
+    }
+    std::string blob(chars);
+    env->ReleaseStringUTFChars(jblob, chars);
+    return static_cast<jint>(native_verify_sealed_verdict_flags(blob));
+}
+
 static jstring jni_getMonitorFindings(JNIEnv *env, jclass) {
     return toJString(env, native_monitor_findings());
 }
@@ -279,6 +291,7 @@ static JNINativeMethod methods[] = {
         {"nGetKernelRootEvidenceRaw",   "()Ljava/lang/String;",                  (void *) jni_getKernelRootEvidence},
         {"nGetSealedVerdictRaw",        "()Ljava/lang/String;",                  (void *) jni_getSealedVerdict},
         {"nVerifySealedVerdictRaw",     "(Ljava/lang/String;)I",                 (void *) jni_verifySealedVerdict},
+        {"nVerifySealedVerdictFlagsRaw","(Ljava/lang/String;)I",                 (void *) jni_verifySealedVerdictFlags},
         {"nGetJniSelfIntegrityRaw",     "()Ljava/lang/String;",                  (void *) jni_getJniSelfIntegrity},
         {"nGetMonitorFindingsRaw",      "()Ljava/lang/String;",                  (void *) jni_getMonitorFindings},
         {"nStopMonitorRaw",             "()V",                                   (void *) jni_stopMonitor},

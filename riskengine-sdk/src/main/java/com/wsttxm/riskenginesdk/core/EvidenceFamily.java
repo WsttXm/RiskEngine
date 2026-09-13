@@ -31,10 +31,25 @@ public final class EvidenceFamily {
         if (value.contains("xposed") || value.contains("lsposed") || value.contains("lspd")) {
             return "xposed";
         }
+        if (value.startsWith("inline_hook:") || value.startsWith("got_hook:")
+                || value.startsWith("jni_table_hook:") || value.startsWith("jni_slot_hook:")
+                || value.startsWith("jni_self_hook:")
+                || value.startsWith("sealed:hook_inline")
+                || value.startsWith("sealed:jni_self_hook")) {
+            return "hook_integrity";
+        }
+        if (value.startsWith("text_mismatch") || value.startsWith("late_text_mismatch")
+                || value.startsWith("sealed:text_mismatch")) {
+            return "native_integrity";
+        }
         if (value.contains("magisk") || value.contains("ksu") || value.contains("apatch")
-                || value.startsWith("su:")) {
+                || value.startsWith("su:") || value.startsWith("sealed:root")) {
             return "root_fw";
         }
+        if (value.startsWith("sealed:hook_framework")) return "hook_framework";
+        if (value.startsWith("sealed:emulator")) return "emulator";
+        if (value.startsWith("sealed:debugger") || value.startsWith("tracer_pid:")
+                || value.startsWith("debugger_connected")) return "debugger";
         if (value.contains("qemu") || value.contains("goldfish") || value.contains("ranchu")) {
             return "qemu";
         }

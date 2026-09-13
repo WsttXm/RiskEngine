@@ -116,6 +116,18 @@ bool contains(const std::string &haystack, const std::string &needle) {
     return !needle.empty() && haystack.find(needle) != std::string::npos;
 }
 
+bool has_csv_token(const std::string &value, const std::string &wanted) {
+    size_t start = 0;
+    while (start <= value.size()) {
+        size_t comma = value.find(',', start);
+        if (comma == std::string::npos) comma = value.size();
+        if (value.compare(start, comma - start, wanted) == 0) return true;
+        if (comma == value.size()) break;
+        start = comma + 1;
+    }
+    return false;
+}
+
 std::string to_hex(const uint8_t *data, size_t len) {
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out;
@@ -151,7 +163,10 @@ uint32_t compute_flags(JNIEnv *env, int &score_out) {
     const std::string root = native_get_root_evidence();
     if (!root.empty()) {
         if (contains(root, OBF("su:")) || contains(root, OBF("magisk:"))
-            || contains(root, OBF("ksu:")) || contains(root, OBF("apatch:"))) {
+            || contains(root, OBF("ksu:")) || contains(root, OBF("apatch:"))
+            || contains(root, OBF("mount:magisk"))
+            || contains(root, OBF("mount:ksu"))
+            || contains(root, OBF("mount:debug_ramdisk"))) {
             flags |= VerdictBits::kRootStrong;
         }
         if (contains(root, OBF("mount_hidden")) || contains(root, OBF("ns_differs"))
@@ -182,7 +197,7 @@ uint32_t compute_flags(JNIEnv *env, int &score_out) {
     }
 
     const std::string self_integrity = native_get_so_integrity_evidence();
-    if (contains(self_integrity, OBF("text_mismatch"))) {
+    if (has_csv_token(self_integrity, OBF("text_mismatch"))) {
         flags |= VerdictBits::kTextMismatch;
     }
 
@@ -205,7 +220,8 @@ uint32_t compute_flags(JNIEnv *env, int &score_out) {
     if (flags & VerdictBits::kHookFramework) score += 6;
     if (flags & VerdictBits::kDebugger) score += 6;
     if (flags & VerdictBits::kEmulator) score += 4;
-    if (flags & VerdictBits::kCoverageLoss) score += 1;
+    // Coverage loss must affect completeness, not risk. Treating an expected
+    // permission failure as a positive signal made stock devices score risk.
     score_out = score > 100 ? 100 : score;
 
     return flags;
@@ -242,24 +258,42 @@ std::string native_build_sealed_verdict(JNIEnv *env) {
     return blob;
 }
 
-int native_verify_sealed_verdict(const std::string &blob) {
+namespace {
+
+bool verify_sealed_verdict(const std::string &blob, uint32_t &flags, uint32_t &score) {
     ensure_key();
-    if (!g_state.initialized || blob.empty()) return -1;
+    if (!g_state.initialized || blob.empty()) return false;
 
     std::vector<uint8_t> raw;
-    if (!from_hex(blob, raw)) return -1;
+    if (!from_hex(blob, raw)) return false;
     constexpr size_t kPayload = kNonceBytes + 4 + 4 + 8;
-    if (raw.size() != kPayload + sizeof(uint64_t)) return -1;
+    if (raw.size() != kPayload + sizeof(uint64_t)) return false;
 
     uint64_t tag = 0;
     memcpy(&tag, raw.data() + kPayload, sizeof(tag));
-    if (mac(g_state.key, raw.data(), kPayload) != tag) return -1;
+    if (mac(g_state.key, raw.data(), kPayload) != tag) return false;
 
     uint64_t nonce = 0;
     memcpy(&nonce, raw.data(), kNonceBytes);
-    if (nonce != g_state.last_nonce) return -1;
+    if (nonce != g_state.last_nonce) return false;
 
-    uint32_t score = 0;
+    memcpy(&flags, raw.data() + kNonceBytes, sizeof(flags));
     memcpy(&score, raw.data() + kNonceBytes + 4, sizeof(score));
+    return true;
+}
+
+}  // namespace
+
+int native_verify_sealed_verdict(const std::string &blob) {
+    uint32_t flags = 0;
+    uint32_t score = 0;
+    if (!verify_sealed_verdict(blob, flags, score)) return -1;
     return static_cast<int>(score);
+}
+
+int native_verify_sealed_verdict_flags(const std::string &blob) {
+    uint32_t flags = 0;
+    uint32_t score = 0;
+    if (!verify_sealed_verdict(blob, flags, score)) return -1;
+    return static_cast<int>(flags);
 }

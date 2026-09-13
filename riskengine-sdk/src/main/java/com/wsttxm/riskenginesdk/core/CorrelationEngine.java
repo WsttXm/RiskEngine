@@ -57,7 +57,7 @@ public final class CorrelationEngine {
                 }
             }
             if (conflict && !detection.isInformational() && detection.getScore() > 0) {
-                out.add(detection.withInformational(true));
+                out.add(detection.asInformationalDuplicate());
             } else {
                 out.add(detection);
                 claimed.addAll(families);
