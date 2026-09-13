@@ -1,6 +1,7 @@
 #ifndef RISKENGINE_SEALED_VERDICT_H
 #define RISKENGINE_SEALED_VERDICT_H
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -39,11 +40,13 @@ struct VerdictBits {
  * Computes the native verdict and returns it as a hex-encoded sealed blob:
  * nonce | flags | score | timestamp | MAC. Empty string on failure.
  */
-std::string native_build_sealed_verdict(JNIEnv *env);
+std::string native_build_sealed_verdict(JNIEnv *env,
+                                        const void *const *registered_methods,
+                                        size_t registered_method_count);
 
 /**
  * Verifies a blob produced by this process and returns its score, or -1 when
- * the MAC fails, the nonce is unknown, or the blob is malformed. A failed
+ * the MAC fails, the blob is stale, or the blob is malformed. A failed
  * verification is itself a tamper signal.
  */
 int native_verify_sealed_verdict(const std::string &blob);

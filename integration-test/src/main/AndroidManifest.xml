@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@android:drawable/sym_def_app_icon"
         android:label="RiskEngine AAR Smoke Test"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

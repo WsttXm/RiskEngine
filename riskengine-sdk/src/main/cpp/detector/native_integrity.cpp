@@ -12,6 +12,7 @@
 #include <elf.h>
 #include <fcntl.h>
 #include <jni.h>
+#include <limits>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -100,9 +101,33 @@ bool looks_like_arm32_trampoline(const uint8_t *p) {
 
 const uint8_t *safe_read(const std::vector<MapEntry> &maps, uintptr_t addr, size_t n) {
     const MapEntry *entry = find_map_containing(maps, addr);
-    if (entry == nullptr || addr + n > entry->end) return nullptr;
+    if (entry == nullptr || addr >= entry->end
+            || n > static_cast<size_t>(entry->end - addr)) return nullptr;
     if (entry->perms.empty() || entry->perms[0] != 'r') return nullptr;
     return reinterpret_cast<const uint8_t *>(addr);
+}
+
+bool range_within(size_t offset, size_t length, size_t total) {
+    return offset <= total && length <= total - offset;
+}
+
+bool add_address(uintptr_t base, uintptr_t offset, uintptr_t &out) {
+    if (offset > std::numeric_limits<uintptr_t>::max() - base) return false;
+    out = base + offset;
+    return true;
+}
+
+bool safe_cstring(const std::vector<MapEntry> &maps, uintptr_t addr,
+                  size_t max_length, std::string &out) {
+    const MapEntry *entry = find_map_containing(maps, addr);
+    if (entry == nullptr || entry->perms.empty() || entry->perms[0] != 'r') return false;
+    const size_t available = static_cast<size_t>(entry->end - addr);
+    const size_t limit = std::min(available, max_length);
+    const char *begin = reinterpret_cast<const char *>(addr);
+    const void *terminator = std::memchr(begin, '\0', limit);
+    if (terminator == nullptr) return false;
+    out.assign(begin, static_cast<const char *>(terminator) - begin);
+    return true;
 }
 
 #if defined(__LP64__)
@@ -132,17 +157,25 @@ struct ElfView {
 bool parse_elf(const uint8_t *base, size_t size, uintptr_t map_start, ElfView &view) {
     if (base == nullptr || size < sizeof(Ehdr)) return false;
     auto *ehdr = reinterpret_cast<const Ehdr *>(base);
-    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || ehdr->e_ident[EI_MAG1] != ELFMAG1) {
+    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || ehdr->e_ident[EI_MAG1] != ELFMAG1
+            || ehdr->e_ident[EI_MAG2] != ELFMAG2 || ehdr->e_ident[EI_MAG3] != ELFMAG3
+            || ehdr->e_ident[EI_DATA] != ELFDATA2LSB
+            || ehdr->e_ident[EI_VERSION] != EV_CURRENT
+            || ehdr->e_ident[EI_CLASS] != (kElf64 ? ELFCLASS64 : ELFCLASS32)) {
         return false;
     }
     if (ehdr->e_phoff == 0 || ehdr->e_phentsize != sizeof(Phdr)) return false;
-    if (ehdr->e_phoff + static_cast<size_t>(ehdr->e_phnum) * sizeof(Phdr) > size) {
+    const size_t phoff = static_cast<size_t>(ehdr->e_phoff);
+    const size_t phnum = static_cast<size_t>(ehdr->e_phnum);
+    if (phoff != ehdr->e_phoff || !range_within(phoff, phnum * sizeof(Phdr), size)
+            || phnum > (size - phoff) / sizeof(Phdr)) {
         return false;
     }
-    auto *phdrs = reinterpret_cast<const Phdr *>(base + ehdr->e_phoff);
+    auto *phdrs = reinterpret_cast<const Phdr *>(base + phoff);
     uintptr_t bias = map_start;
     for (int i = 0; i < ehdr->e_phnum; ++i) {
         if (phdrs[i].p_type == PT_LOAD && phdrs[i].p_offset == 0) {
+            if (phdrs[i].p_vaddr > map_start) return false;
             bias = map_start - static_cast<uintptr_t>(phdrs[i].p_vaddr);
             break;
         }
@@ -158,9 +191,12 @@ const Dyn *dynamic_table(const ElfView &view, size_t &count) {
     auto *phdrs = reinterpret_cast<const Phdr *>(view.base + ehdr->e_phoff);
     for (int i = 0; i < ehdr->e_phnum; ++i) {
         if (phdrs[i].p_type != PT_DYNAMIC) continue;
-        if (phdrs[i].p_offset + phdrs[i].p_filesz > view.size) return nullptr;
-        count = static_cast<size_t>(phdrs[i].p_filesz / sizeof(Dyn));
-        return reinterpret_cast<const Dyn *>(view.base + phdrs[i].p_offset);
+        const size_t offset = static_cast<size_t>(phdrs[i].p_offset);
+        const size_t length = static_cast<size_t>(phdrs[i].p_filesz);
+        if (offset != phdrs[i].p_offset || length != phdrs[i].p_filesz
+                || !range_within(offset, length, view.size)) return nullptr;
+        count = length / sizeof(Dyn);
+        return reinterpret_cast<const Dyn *>(view.base + offset);
     }
     return nullptr;
 }
@@ -194,24 +230,24 @@ void inspect_libc_hooks(const std::vector<MapEntry> &maps, std::vector<std::stri
         return;
     }
 
-    const char *strtab = nullptr;
-    const Sym *symtab = nullptr;
+    uintptr_t strtab = 0;
+    uintptr_t symtab = 0;
     size_t syment = sizeof(Sym);
-    const void *pltrel = nullptr;
+    uintptr_t pltrel = 0;
     size_t pltrel_size = 0;
     long pltrel_type = DT_RELA;
 
     for (size_t i = 0; i < dyn_count && dyn[i].d_tag != DT_NULL; ++i) {
         auto tag = dyn[i].d_tag;
         auto val = dyn[i].d_un.d_ptr;
-        if (tag == DT_STRTAB) strtab = reinterpret_cast<const char *>(view.load_bias + val);
-        if (tag == DT_SYMTAB) symtab = reinterpret_cast<const Sym *>(view.load_bias + val);
+        if (tag == DT_STRTAB && !add_address(view.load_bias, val, strtab)) strtab = 0;
+        if (tag == DT_SYMTAB && !add_address(view.load_bias, val, symtab)) symtab = 0;
         if (tag == DT_SYMENT) syment = static_cast<size_t>(dyn[i].d_un.d_val);
-        if (tag == DT_JMPREL) pltrel = reinterpret_cast<const void *>(view.load_bias + val);
+        if (tag == DT_JMPREL && !add_address(view.load_bias, val, pltrel)) pltrel = 0;
         if (tag == DT_PLTRELSZ) pltrel_size = static_cast<size_t>(dyn[i].d_un.d_val);
         if (tag == DT_PLTREL) pltrel_type = static_cast<long>(dyn[i].d_un.d_val);
     }
-    if (strtab == nullptr || symtab == nullptr) {
+    if (strtab == 0 || symtab == 0 || syment != sizeof(Sym)) {
         my_munmap(mapped, static_cast<size_t>(st.st_size));
         return;
     }
@@ -221,8 +257,7 @@ void inspect_libc_hooks(const std::vector<MapEntry> &maps, std::vector<std::stri
 
     const std::vector<std::string> wanted = list_monitored_libc_symbols();
 
-    auto check_symbol = [&](const char *name, uintptr_t file_addr, uintptr_t got_addr) {
-        if (name == nullptr) return;
+    auto check_symbol = [&](const std::string &name, uintptr_t file_addr, uintptr_t got_addr) {
         bool match = false;
         for (const auto &item : wanted) {
             if (item == name) {
@@ -260,33 +295,54 @@ void inspect_libc_hooks(const std::vector<MapEntry> &maps, std::vector<std::stri
     };
 
     auto resolve_sym = [&](size_t index) -> const Sym * {
-        return reinterpret_cast<const Sym *>(
-                reinterpret_cast<const uint8_t *>(symtab) + index * syment);
+        if (index > (std::numeric_limits<uintptr_t>::max() - symtab) / syment) return nullptr;
+        uintptr_t address = symtab + index * syment;
+        return reinterpret_cast<const Sym *>(safe_read(maps, address, sizeof(Sym)));
     };
 
-    if (pltrel != nullptr && pltrel_size > 0) {
+    if (pltrel != 0 && pltrel_size > 0) {
         if (pltrel_type == DT_RELA && kElf64) {
-            size_t count = pltrel_size / sizeof(Rela);
-            auto *relas = reinterpret_cast<const Rela *>(pltrel);
+            size_t count = std::min<size_t>(pltrel_size / sizeof(Rela), 65536);
             for (size_t i = 0; i < count; ++i) {
-                size_t sym_index = kElf64 ? ELF64_R_SYM(relas[i].r_info)
-                                          : ELF32_R_SYM(relas[i].r_info);
+                if (i > (std::numeric_limits<uintptr_t>::max() - pltrel) / sizeof(Rela)) break;
+                auto *rela = reinterpret_cast<const Rela *>(
+                        safe_read(maps, pltrel + i * sizeof(Rela), sizeof(Rela)));
+                if (rela == nullptr) continue;
+                size_t sym_index = kElf64 ? ELF64_R_SYM(rela->r_info)
+                                          : ELF32_R_SYM(rela->r_info);
                 const Sym *sym = resolve_sym(sym_index);
-                const char *name = strtab + sym->st_name;
-                uintptr_t func = sym->st_value ? view.load_bias + sym->st_value : 0;
-                uintptr_t got = view.load_bias + relas[i].r_offset;
+                if (sym == nullptr) continue;
+                uintptr_t name_address = 0;
+                std::string name;
+                if (!add_address(strtab, sym->st_name, name_address)
+                        || !safe_cstring(maps, name_address, 256, name)) continue;
+                uintptr_t func = 0;
+                if (sym->st_value != 0
+                        && !add_address(view.load_bias, sym->st_value, func)) continue;
+                uintptr_t got = 0;
+                if (!add_address(view.load_bias, rela->r_offset, got)) continue;
                 check_symbol(name, func, got);
             }
         } else {
-            size_t count = pltrel_size / sizeof(Rel);
-            auto *rels = reinterpret_cast<const Rel *>(pltrel);
+            size_t count = std::min<size_t>(pltrel_size / sizeof(Rel), 65536);
             for (size_t i = 0; i < count; ++i) {
-                size_t sym_index = kElf64 ? ELF64_R_SYM(rels[i].r_info)
-                                          : ELF32_R_SYM(rels[i].r_info);
+                if (i > (std::numeric_limits<uintptr_t>::max() - pltrel) / sizeof(Rel)) break;
+                auto *rel = reinterpret_cast<const Rel *>(
+                        safe_read(maps, pltrel + i * sizeof(Rel), sizeof(Rel)));
+                if (rel == nullptr) continue;
+                size_t sym_index = kElf64 ? ELF64_R_SYM(rel->r_info)
+                                          : ELF32_R_SYM(rel->r_info);
                 const Sym *sym = resolve_sym(sym_index);
-                const char *name = strtab + sym->st_name;
-                uintptr_t func = sym->st_value ? view.load_bias + sym->st_value : 0;
-                uintptr_t got = view.load_bias + rels[i].r_offset;
+                if (sym == nullptr) continue;
+                uintptr_t name_address = 0;
+                std::string name;
+                if (!add_address(strtab, sym->st_name, name_address)
+                        || !safe_cstring(maps, name_address, 256, name)) continue;
+                uintptr_t func = 0;
+                if (sym->st_value != 0
+                        && !add_address(view.load_bias, sym->st_value, func)) continue;
+                uintptr_t got = 0;
+                if (!add_address(view.load_bias, rel->r_offset, got)) continue;
                 check_symbol(name, func, got);
             }
         }
@@ -422,7 +478,8 @@ std::string native_get_so_integrity_evidence() {
         if ((phdrs[i].p_flags & PF_X) == 0) continue;
         size_t file_off = static_cast<size_t>(phdrs[i].p_offset);
         size_t file_sz = static_cast<size_t>(phdrs[i].p_filesz);
-        if (file_sz == 0 || file_off + file_sz > static_cast<size_t>(st.st_size)) {
+        if (file_sz == 0
+                || !range_within(file_off, file_sz, static_cast<size_t>(st.st_size))) {
             continue;
         }
         uintptr_t mem_addr = view.load_bias + static_cast<uintptr_t>(phdrs[i].p_vaddr);

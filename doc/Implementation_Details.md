@@ -179,7 +179,7 @@ Scoring: strong≥2 or (strong≥1 and medium≥2) → `DEADLY`/10; strong≥1 o
 
 Additional ranks: `jni_slot_hook:`, `jni_self_hook:`, `art_native_flag:`, `wx_segment:self`, `unix_socket:frida`/`gum`, `late_text_mismatch`, `late_wx_self`, and `late_module:` are STRONG; `loader_unexpected:`, `loader_chain_deep:`, other `wx_segment:`, `late_tracer_attached`, and `late_wx_art` are MEDIUM. The classifier marks `loader_depth:` and `passes:` IGNORE.
 
-The implementation still retains IGNORE context in details. With only context such as `passes:0`, the detector's nonempty-details branch returns `LOW`/1/informational, which `DIAGNOSTIC` can make actionable. This is a current implementation limitation, not evidence that context itself proves a hook.
+IGNORE context remains available in details for diagnostics, but a context-only result such as `passes:0` now returns `SAFE`/0/informational and cannot become actionable in `DIAGNOSTIC` mode.
 
 ### 5.4 `process_scan`
 
@@ -195,11 +195,11 @@ Always registered; reads `nGetSoIntegrityRaw`:
 | --- | --- |
 | `text_mismatch` (optionally with `text_mismatch_seg:<index>`) | Executable-segment file/memory FNV-1a differs → `HIGH`/`DANGER`/8 |
 | `text_mismatch:anonymous_map` | Empty / memfd / ashmem maps path → same |
-| `text_mismatch:missing_map` | SO absent: initialization scene `LOGIN`/`PAYMENT` → `MEDIUM`/`WARNING`/4; other scenes → `UNAVAILABLE` |
+| `text_mismatch:missing_map` | SO absent: effective request scene `LOGIN`/`PAYMENT` → `MEDIUM`/`WARNING`/4; other scenes → `UNAVAILABLE` |
 | `text_mismatch:file_unreadable` / `text_mismatch:unreadable_segments` | Same scene policy |
 | `text_mismatch:bad_elf` | `UNAVAILABLE`, with no scene escalation |
 
-JNI read failures remain `UNAVAILABLE`. The scene comes from `config.getCollectScene()` when `DetectorRegistry` is constructed; **per-call scene overrides do not change this policy**. A missing map is not proof of tampering; sensitive-scene escalation is a risk policy. `sealed_verdict` scores these tokens separately (§5.12), so this item's unavailability does not imply an overall coverage-only result.
+JNI read failures remain `UNAVAILABLE`. The detector is constructed per report with that request's effective scene, so `collect(scene)` overrides and the final aggregation apply the same policy. A missing map is not proof of tampering; sensitive-scene escalation is a risk policy. `sealed_verdict` scores these tokens separately (§5.12), so this item's unavailability does not imply an overall coverage-only result.
 
 GOT/inline and JNI-table checks still flow through `hook_framework`.
 
@@ -325,19 +325,19 @@ JNI strings never pass untrusted bytes to `NewStringUTF`: the implementation cap
 - `-fstack-protector-strong`, Release `_FORTIFY_SOURCE=2`, `-Wformat -Wformat-security`
 - `-fvisibility=hidden`
 - Link: `relro,now`, `noexecstack`, `max-page-size=16384`, `--exclude-libs,ALL`
-- Release adds thin LTO, removes unwind tables/frame pointers, merges constants, garbage-collects sections, and strips symbols. The `exports.map` version script exports only `JNI_OnLoad`; JNI methods still bind through `RegisterNatives`.
+- Release adds thin LTO, removes unwind tables/frame pointers, merges constants, garbage-collects sections, and strips symbols. The `exports.map` version script exports only `JNI_OnLoad` and `JNI_OnUnload`; JNI methods still bind through `RegisterNatives`.
 
 ### 6.8 Sealed payload and periodic monitor
 
-The sealed blob is 64 hex characters encoding an 8-byte nonce, 4-byte flags, 4-byte score, 8-byte monotonic timestamp, and 8-byte tag. A 32-byte key comes first from `/dev/urandom`, then `AT_RANDOM`, then an address/tid-derived fallback. The tag is custom keyed FNV-1a, **not HMAC or a standard cryptographic MAC**. Verification checks length, tag, and the most recently issued nonce, but does not enforce timestamp expiry or consume the nonce; the latest blob can be verified repeatedly. The key lives in process memory, and Java calls/final scoring remain mutable, so this is not attestation.
+The sealed blob is 64 hex characters encoding an 8-byte nonce, 4-byte flags, 4-byte score, 8-byte monotonic timestamp, and 8-byte tag. A 32-byte key comes first from `/dev/urandom`, then `AT_RANDOM`, then an address/tid-derived fallback. Key initialization is serialized. The tag is custom keyed FNV-1a, **not HMAC or a standard cryptographic MAC**. Verification checks length, tag, and a 10-second monotonic freshness window. This avoids concurrent issuers invalidating each other while rejecting stale replay. The key lives in process memory, and Java calls/final scoring remain mutable, so this is not attestation.
 
-`JNI_OnLoad` starts a detached pthread. After each 20–26-second delay it checks self code, TracerPid, self/libart W+X, and Frida/LSPosed mappings. Deduplicated `late_*` findings accumulate and reads include `passes:<n>`. No frozen report is changed and no callback is pushed; a later `hook_framework` collection consumes findings. The monitor does not repeat full root/emulator scans.
+`JNI_OnLoad` starts a joinable pthread. After each interruptible 20–26-second wait it checks self code, TracerPid, self/libart W+X, and Frida/LSPosed mappings. Deduplicated `late_*` findings accumulate and reads include `passes:<n>`. No frozen report is changed and no callback is pushed; a later `hook_framework` collection consumes findings. The monitor does not repeat full root/emulator scans.
 
-`shutdown()` sets the stop flag without joining or clearing findings/counts. Reinitialization in the same process does not rerun `JNI_OnLoad`; there is currently no restart entry point.
+`shutdown()` wakes and joins the monitor. Reinitialization uses an explicit JNI restart entry point and clears findings/pass counts. `JNI_OnUnload` also joins the thread before code can be unmapped.
 
 ## 7. Shared signals
 
-Each report starts with `SignalSnapshot.reset()`. `SignalResult<T>` preserves success / empty / unavailable / error. Collectors and detectors share:
+Each report owns a new `SignalSnapshot`. Timed-out platform/native work can finish late without repopulating a later report's cache. `SignalResult<T>` preserves success / empty / unavailable / error. Collectors and detectors share:
 
 - ADB state, system properties, `/proc/self/maps` (Java path)
 - Loopback listening ports, process snapshots, text files, path existence, container signals
@@ -360,8 +360,6 @@ New shared signals include GPU vendor/renderer, network-interface names, namespa
 4. Collector coverage signals, multi-source inconsistency, existing synthesized fields.
 5. Layered fingerprint IDs, continuity comparison, and optional `fingerprint_continuity`. This final detection does not pass through scene/deduplication/correlation again and is absent from the earlier `runtime_integrity_score_inputs` summary.
 
-#New shared signals include GPU vendor/renderer, network-interface names, namespace/kernel-root evidence, JNI self-integrity, and sealed verdicts. `getGpuIdentity()` caches an offscreen probe for emulator/cloud detectors, but `GpuInfoCollector` still probes independently, so a report may create two EGL contexts. Interface names use sysfs first and Java enumeration only when empty, without comparing the two. System properties now use only the native allowlisted accessor; shell `getprop` fallback was removed and empty properties retain EMPTY status.
-
 ## 8.1 Scene lifts
 
 | Scene | Made actionable |
@@ -370,8 +368,6 @@ New shared signals include GPU vendor/renderer, network-interface names, namespa
 | `LOGIN` | `emulator`, `cloud_phone`, `sandbox` |
 | `PAYMENT` | LOGIN + `adb` |
 | `DIAGNOSTIC` | Every informational result except debug-and-debuggable-only |
-
-#New shared signals include GPU vendor/renderer, network-interface names, namespace/kernel-root evidence, JNI self-integrity, and sealed verdicts. `getGpuIdentity()` caches an offscreen probe for emulator/cloud detectors, but `GpuInfoCollector` still probes independently, so a report may create two EGL contexts. Interface names use sysfs first and Java enumeration only when empty, without comparing the two. System properties now use only the native allowlisted accessor; shell `getprop` fallback was removed and empty properties retain EMPTY status.
 
 ## 8.2 Correlation rules
 
@@ -504,7 +500,7 @@ Unit tests under `riskengine-sdk/src/test`:
 
 `integration-test` only compiles and links the public API; it does not run device detections. There is currently no automated device-matrix workflow. `Adversarial_Matrix.md` describes expected evidence and cannot replace ARM64 OEM validation.
 
-The commit's [Implementation_Status_2026-09.md](./Implementation_Status_2026-09.md) records successful four-ABI/native and Java compilation, with 2 failures among 52 tests: `RiskEngineConfigTest.disabledDetectorsAreNotRegistered` still expects 1 unconditional detector instead of 3, and `DataAggregatorTest.synthesizedFieldsAreExposedButNotDoubleCountedInCoverage` does not reflect the new `fingerprint_id` coverage count. These are historical results recorded with the commit, not rerun results from this documentation update. New EGL/ART/kernel/monitor behavior still needs device validation.
+The September review reran 56 unit tests successfully and compiled all four Native ABIs. New EGL/ART/kernel/monitor behavior still needs device validation; host-side success does not establish detector accuracy on OEM devices.
 
 ## 16. Build and release
 
@@ -521,9 +517,9 @@ The commit's [Implementation_Status_2026-09.md](./Implementation_Status_2026-09.
 ## 17. Verification boundaries
 
 - Namespace comparison depends on PID 1 procfs visibility and does not guarantee detection of complete DenyList/Shamiko hiding. Namespace differences and directory-listing contradictions can also arise from legitimate isolation or read timing.
-- Failure semantics are not yet uniform across paths: `root` records `ns_unreadable:*` as coverage failures, while the sealed verdict adds 1 native point. The sealed verdict scores all `text_mismatch*` suffixes (including missing_map/file_unreadable/bad_elf/unreadable_segments) as code risk; the monitor also latches those suffixes as `late_text_mismatch`. A `native_tamper` `UNAVAILABLE` result therefore does not imply an overall coverage-only outcome.
-- `native_tamper` binds its scene at initialization; sealed verification permits replay of the latest nonce; JNI self-checks inspect only the static registration table; the monitor does not automatically restart after shutdown in the same process. See §5–6.
+- Failure semantics are intentionally conservative: `root` and the sealed verdict record `ns_unreadable:*` as coverage loss without adding risk points. The monitor can still latch late integrity findings, so a `native_tamper` `UNAVAILABLE` result does not imply that every later integrity path is unavailable.
+- Sealed verification accepts authenticated blobs for a bounded 10-second freshness window to support concurrent requests. JNI self-checks inspect only the static registration table, not ART's live binding targets. See §5–6.
 - x86/i386 has no ARM trampoline heuristic; GOT and FNV-1a comparisons still run. FNV-1a is not a cryptographic hash.
 - Virtual GPUs, ethN, partition fingerprint differences, dynamic core counts, ClassLoader/dexElements, and anonymous mappings can have legitimate sources. OEM hardware and host-framework regression are required; offscreen GPU collection still needs driver compatibility validation.
-- Layered IDs depend on available fields and installation salt and cannot guarantee unique identification across reinstall or firmware changes. Two test expectations still differ from the implementation (§15).
+- Layered IDs depend on available fields and installation salt and cannot guarantee unique identification across reinstall or firmware changes.
 - Local signals, Java decisions, and in-process native keys can be tampered with. The SDK does not replace server risk analysis, hardware attestation, or Play Integrity.

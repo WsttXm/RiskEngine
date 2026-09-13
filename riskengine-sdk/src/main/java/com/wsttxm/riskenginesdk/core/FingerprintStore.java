@@ -34,6 +34,7 @@ public final class FingerprintStore {
     private static final String KEY_LAST_SYSTEM = "last_sys";
     private static final String KEY_FIRST_SEEN = "first_seen";
     private static final String KEY_OBSERVATIONS = "observations";
+    private static final Object STORE_LOCK = new Object();
 
     private final Context context;
 
@@ -52,27 +53,29 @@ public final class FingerprintStore {
     public String getOrCreateSalt() {
         SharedPreferences preferences = prefs();
         if (preferences == null) return "riskengine";
-        try {
-            String existing = preferences.getString(KEY_SALT, null);
-            if (existing != null && !existing.isEmpty()) {
-                return existing;
+        synchronized (STORE_LOCK) {
+            try {
+                String existing = preferences.getString(KEY_SALT, null);
+                if (existing != null && !existing.isEmpty()) {
+                    return existing;
+                }
+                byte[] random = new byte[32];
+                new SecureRandom().nextBytes(random);
+                StringBuilder hex = new StringBuilder(random.length * 2);
+                for (byte item : random) {
+                    hex.append(Character.forDigit((item >>> 4) & 0x0f, 16));
+                    hex.append(Character.forDigit(item & 0x0f, 16));
+                }
+                String salt = hex.toString();
+                preferences.edit()
+                        .putString(KEY_SALT, salt)
+                        .putLong(KEY_FIRST_SEEN, System.currentTimeMillis())
+                        .apply();
+                return salt;
+            } catch (Exception e) {
+                CLog.e("Fingerprint salt access failed", e);
+                return "riskengine";
             }
-            byte[] random = new byte[32];
-            new SecureRandom().nextBytes(random);
-            StringBuilder hex = new StringBuilder(random.length * 2);
-            for (byte item : random) {
-                hex.append(Character.forDigit((item >>> 4) & 0x0f, 16));
-                hex.append(Character.forDigit(item & 0x0f, 16));
-            }
-            String salt = hex.toString();
-            preferences.edit()
-                    .putString(KEY_SALT, salt)
-                    .putLong(KEY_FIRST_SEEN, System.currentTimeMillis())
-                    .apply();
-            return salt;
-        } catch (Exception e) {
-            CLog.e("Fingerprint salt access failed", e);
-            return "riskengine";
         }
     }
 
@@ -86,42 +89,48 @@ public final class FingerprintStore {
         if (preferences == null || id == null) {
             return new Continuity(State.UNKNOWN, 0, 0);
         }
-        try {
-            String previousHardware = preferences.getString(KEY_LAST_HARDWARE, "");
-            String previousSystem = preferences.getString(KEY_LAST_SYSTEM, "");
-            long firstSeen = preferences.getLong(KEY_FIRST_SEEN, 0L);
-            int observations = preferences.getInt(KEY_OBSERVATIONS, 0);
+        synchronized (STORE_LOCK) {
+            try {
+                String previousHardware = preferences.getString(KEY_LAST_HARDWARE, "");
+                String previousSystem = preferences.getString(KEY_LAST_SYSTEM, "");
+                long firstSeen = preferences.getLong(KEY_FIRST_SEEN, 0L);
+                int observations = preferences.getInt(KEY_OBSERVATIONS, 0);
+                int nextObservations = observations == Integer.MAX_VALUE
+                        ? Integer.MAX_VALUE : observations + 1;
+                long effectiveFirstSeen = firstSeen == 0L
+                        ? System.currentTimeMillis() : firstSeen;
 
-            State state;
-            if (previousHardware.isEmpty()) {
-                state = State.FIRST_OBSERVATION;
-            } else if (!id.isHardwareLayerReliable()) {
-                // Do not claim a mismatch when this run simply collected less.
-                state = State.INCONCLUSIVE;
-            } else if (previousHardware.equals(id.getHardwareId())) {
-                state = previousSystem.equals(id.getSystemId())
-                        ? State.STABLE : State.SYSTEM_CHANGED;
-            } else {
-                state = State.HARDWARE_CHANGED;
-            }
+                State state;
+                if (previousHardware.isEmpty()) {
+                    state = State.FIRST_OBSERVATION;
+                } else if (!id.isHardwareLayerReliable()) {
+                    // Do not claim a mismatch when this run simply collected less.
+                    state = State.INCONCLUSIVE;
+                } else if (previousHardware.equals(id.getHardwareId())) {
+                    state = previousSystem.equals(id.getSystemId())
+                            ? State.STABLE : State.SYSTEM_CHANGED;
+                } else {
+                    state = State.HARDWARE_CHANGED;
+                }
 
-            SharedPreferences.Editor editor = preferences.edit();
-            editor.putInt(KEY_OBSERVATIONS, observations + 1);
-            if (firstSeen == 0L) {
-                editor.putLong(KEY_FIRST_SEEN, System.currentTimeMillis());
-            }
-            // Only overwrite the baseline with a reliable measurement, so a
-            // degraded run cannot erase a good one.
-            if (id.isHardwareLayerReliable()) {
-                editor.putString(KEY_LAST_HARDWARE, id.getHardwareId());
-                editor.putString(KEY_LAST_SYSTEM, id.getSystemId());
-            }
-            editor.apply();
+                SharedPreferences.Editor editor = preferences.edit();
+                editor.putInt(KEY_OBSERVATIONS, nextObservations);
+                if (firstSeen == 0L) {
+                    editor.putLong(KEY_FIRST_SEEN, effectiveFirstSeen);
+                }
+                // Only overwrite the baseline with a reliable measurement, so a
+                // degraded run cannot erase a good one.
+                if (id.isHardwareLayerReliable()) {
+                    editor.putString(KEY_LAST_HARDWARE, id.getHardwareId());
+                    editor.putString(KEY_LAST_SYSTEM, id.getSystemId());
+                }
+                editor.apply();
 
-            return new Continuity(state, firstSeen, observations + 1);
-        } catch (Exception e) {
-            CLog.e("Fingerprint continuity check failed", e);
-            return new Continuity(State.UNKNOWN, 0, 0);
+                return new Continuity(state, effectiveFirstSeen, nextObservations);
+            } catch (Exception e) {
+                CLog.e("Fingerprint continuity check failed", e);
+                return new Continuity(State.UNKNOWN, 0, 0);
+            }
         }
     }
 

@@ -46,16 +46,14 @@ public class NativeCollectorBridge {
     }
 
     public static String getSystemProperty(String name) {
-        if (!NATIVE_AVAILABLE || !ALLOWED_PROPERTIES.contains(name)) {
-            return "";
+        return valueOr(getSystemPropertyResult(name), "");
+    }
+
+    public static SignalResult<String> getSystemPropertyResult(String name) {
+        if (name == null || !ALLOWED_PROPERTIES.contains(name)) {
+            return SignalResult.unavailable("property_not_allowed");
         }
-        try {
-            String value = nativeGetSystemPropertyRaw(name);
-            return value == null ? "" : value;
-        } catch (Exception | LinkageError e) {
-            CLog.e("Native system property lookup failed", e);
-            return "";
-        }
+        return callNativeResult(() -> nativeGetSystemPropertyRaw(name));
     }
 
     // Native methods
@@ -84,6 +82,7 @@ public class NativeCollectorBridge {
     private static native int nVerifySealedVerdictFlagsRaw(String blob);
     private static native String nGetJniSelfIntegrityRaw();
     private static native String nGetMonitorFindingsRaw();
+    private static native void nStartMonitorRaw();
     private static native void nStopMonitorRaw();
 
     public static boolean checkRoot() {
@@ -177,6 +176,16 @@ public class NativeCollectorBridge {
      */
     public static SignalResult<String> getMonitorFindingsResult() {
         return callNativeResult(NativeCollectorBridge::nGetMonitorFindingsRaw);
+    }
+
+    /** Starts or resumes the background monitor after engine initialization. */
+    public static void startMonitor() {
+        if (!NATIVE_AVAILABLE) return;
+        try {
+            nStartMonitorRaw();
+        } catch (Exception | LinkageError e) {
+            CLog.e("Monitor start failed", e);
+        }
     }
 
     /** Stops the background monitor. Called from RiskEngine.shutdown. */
@@ -311,7 +320,11 @@ public class NativeCollectorBridge {
                     for (String prop : props) {
                         SignalResult<String> cached = signals == null
                                 ? null : signals.getSystemProperty(prop);
-                        String value = cached == null || cached.getValue() == null
+                        if (cached != null && !cached.isSuccess()) {
+                            result.markError("property_read_failed:" + prop);
+                            continue;
+                        }
+                        String value = cached == null
                                 ? getSystemProperty(prop) : cached.getValue();
                         if (value != null && !value.isEmpty()) {
                             result.addValue(prop, value);

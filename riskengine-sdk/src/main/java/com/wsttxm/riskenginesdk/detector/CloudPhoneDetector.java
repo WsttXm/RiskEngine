@@ -181,7 +181,7 @@ public class CloudPhoneDetector extends BaseDetector {
     private boolean checkCameraCount(List<String> evidence) {
         try {
             PackageManager pm = context.getPackageManager();
-            if (pm.hasSystemFeature(PackageManager.FEATURE_CAMERA)) {
+            if (pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
                 return true;
             }
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);

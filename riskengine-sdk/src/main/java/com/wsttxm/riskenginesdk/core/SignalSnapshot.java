@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /** Per-report cache for expensive signals shared by collectors and detectors. */
 public final class SignalSnapshot {
@@ -269,36 +271,37 @@ public final class SignalSnapshot {
     }
 
     public SignalResult<Integer> getSelinuxEnforce() {
-        return cachedNative(selinuxEnforce, v -> selinuxEnforce = v,
+        return cachedNative(() -> selinuxEnforce, v -> selinuxEnforce = v,
                 NativeCollectorBridge::getSelinuxEnforceResult);
     }
 
     public SignalResult<String> getBuildPropFingerprint() {
-        return cachedNative(buildPropFingerprint, v -> buildPropFingerprint = v,
+        return cachedNative(() -> buildPropFingerprint, v -> buildPropFingerprint = v,
                 NativeCollectorBridge::getBuildPropFingerprintResult);
     }
 
     public SignalResult<String> getCpuInfo() {
-        return cachedNative(cpuInfo, v -> cpuInfo = v, NativeCollectorBridge::getCpuInfoResult);
+        return cachedNative(() -> cpuInfo, v -> cpuInfo = v,
+                NativeCollectorBridge::getCpuInfoResult);
     }
 
     public SignalResult<Long> getDiskSizeData() {
-        return cachedNative(diskSizeData, v -> diskSizeData = v,
+        return cachedNative(() -> diskSizeData, v -> diskSizeData = v,
                 () -> NativeCollectorBridge.getDiskSizeResult("/data"));
     }
 
     public SignalResult<String> getKernelInfo() {
-        return cachedNative(kernelInfo, v -> kernelInfo = v,
+        return cachedNative(() -> kernelInfo, v -> kernelInfo = v,
                 NativeCollectorBridge::getKernelInfoResult);
     }
 
     public SignalResult<String> getNativeProcessTokens() {
-        return cachedNative(nativeProcessTokens, v -> nativeProcessTokens = v,
+        return cachedNative(() -> nativeProcessTokens, v -> nativeProcessTokens = v,
                 NativeCollectorBridge::scanProcessTokensResult);
     }
 
     public SignalResult<String> getSoIntegrity() {
-        return cachedNative(soIntegrity, v -> soIntegrity = v,
+        return cachedNative(() -> soIntegrity, v -> soIntegrity = v,
                 NativeCollectorBridge::getSoIntegrityResult);
     }
 
@@ -337,15 +340,14 @@ public final class SignalSnapshot {
         SignalResult<T> get();
     }
 
-    private interface NativeCache<T> {
-        void set(SignalResult<T> value);
-    }
-
-    private <T> SignalResult<T> cachedNative(SignalResult<T> cached, NativeCache<T> store,
+    private <T> SignalResult<T> cachedNative(Supplier<SignalResult<T>> load,
+                                             Consumer<SignalResult<T>> store,
                                              NativeFetch<T> fetch) {
+        SignalResult<T> cached = load.get();
         if (cached != null) return cached;
         synchronized (this) {
-            // Re-read via fetch only once; store holds the field write.
+            cached = load.get();
+            if (cached != null) return cached;
             SignalResult<T> value;
             try {
                 if (!NativeCollectorBridge.isNativeAvailable()) {
@@ -356,29 +358,29 @@ public final class SignalSnapshot {
             } catch (Exception | LinkageError e) {
                 value = SignalResult.error(e.getClass().getSimpleName());
             }
-            store.set(value);
+            store.accept(value);
             return value;
         }
     }
 
     public SignalResult<String> getMountNamespaceEvidence() {
-        return cachedNative(mountNamespaceEvidence, v -> mountNamespaceEvidence = v,
+        return cachedNative(() -> mountNamespaceEvidence, v -> mountNamespaceEvidence = v,
                 NativeCollectorBridge::getMountNamespaceEvidenceResult);
     }
 
     public SignalResult<String> getKernelRootEvidence() {
-        return cachedNative(kernelRootEvidence, v -> kernelRootEvidence = v,
+        return cachedNative(() -> kernelRootEvidence, v -> kernelRootEvidence = v,
                 NativeCollectorBridge::getKernelRootEvidenceResult);
     }
 
     public SignalResult<String> getJniSelfIntegrity() {
-        return cachedNative(jniSelfIntegrity, v -> jniSelfIntegrity = v,
+        return cachedNative(() -> jniSelfIntegrity, v -> jniSelfIntegrity = v,
                 NativeCollectorBridge::getJniSelfIntegrityResult);
     }
 
     /** The native-sealed verdict for this collection. Issued once per report. */
     public SignalResult<String> getSealedVerdict() {
-        return cachedNative(sealedVerdict, v -> sealedVerdict = v,
+        return cachedNative(() -> sealedVerdict, v -> sealedVerdict = v,
                 NativeCollectorBridge::getSealedVerdictResult);
     }
 
@@ -463,11 +465,11 @@ public final class SignalSnapshot {
             return SignalResult.unavailable("native_library_unavailable");
         }
         try {
-            String value = NativeCollectorBridge.getSystemProperty(name);
-            if (value == null) {
-                return SignalResult.unavailable("property_read_failed");
+            SignalResult<String> result = NativeCollectorBridge.getSystemPropertyResult(name);
+            if (!result.isSuccess() || result.getValue() == null) {
+                return result;
             }
-            String trimmed = value.trim();
+            String trimmed = result.getValue().trim();
             return trimmed.isEmpty()
                     ? SignalResult.empty("") : SignalResult.success(trimmed);
         } catch (Exception | LinkageError e) {

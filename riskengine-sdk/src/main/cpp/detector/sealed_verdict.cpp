@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstring>
 #include <fcntl.h>
+#include <mutex>
 #include <string>
 #include <sys/auxv.h>
 #include <vector>
@@ -23,18 +24,21 @@ namespace {
 
 constexpr size_t kKeyBytes = 32;
 constexpr size_t kNonceBytes = 8;
+constexpr uint64_t kVerdictMaxAgeMs = 10'000;
 
 struct SealState {
     uint8_t key[kKeyBytes];
     bool initialized;
-    uint64_t last_nonce;
 };
 
 SealState g_state = {};
 std::atomic<bool> g_key_ready{false};
+std::mutex g_key_mutex;
 
 /** Seeds the per-process MAC key from the kernel. Never leaves native. */
 void ensure_key() {
+    if (g_key_ready.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(g_key_mutex);
     if (g_key_ready.load(std::memory_order_acquire)) return;
 
     uint8_t key[kKeyBytes] = {0};
@@ -157,7 +161,10 @@ bool from_hex(const std::string &hex, std::vector<uint8_t> &out) {
 }
 
 /** Native-side ranking. Replaces what the Java classifiers used to decide. */
-uint32_t compute_flags(JNIEnv *env, int &score_out) {
+uint32_t compute_flags(JNIEnv *env,
+                       const void *const *registered_methods,
+                       size_t registered_method_count,
+                       int &score_out) {
     uint32_t flags = 0;
 
     const std::string root = native_get_root_evidence();
@@ -201,6 +208,15 @@ uint32_t compute_flags(JNIEnv *env, int &score_out) {
         flags |= VerdictBits::kTextMismatch;
     }
 
+    const std::string jni_self = native_get_jni_self_table_evidence(
+            env, registered_methods, registered_method_count);
+    if (contains(jni_self, OBF("jni_self_hook:"))) {
+        flags |= VerdictBits::kJniSelfHook;
+    }
+    if (contains(jni_self, OBF("jni_self:no_range"))) {
+        flags |= VerdictBits::kCoverageLoss;
+    }
+
     if (!check_emulator_files().empty() || get_thermal_zone_count() == 0) {
         flags |= VerdictBits::kEmulator;
     }
@@ -229,14 +245,16 @@ uint32_t compute_flags(JNIEnv *env, int &score_out) {
 
 }  // namespace
 
-std::string native_build_sealed_verdict(JNIEnv *env) {
+std::string native_build_sealed_verdict(JNIEnv *env,
+                                        const void *const *registered_methods,
+                                        size_t registered_method_count) {
     ensure_key();
     if (!g_state.initialized) return std::string();
 
     int score = 0;
-    const uint32_t flags = compute_flags(env, score);
+    const uint32_t flags = compute_flags(
+            env, registered_methods, registered_method_count, score);
     const uint64_t nonce = random_nonce();
-    g_state.last_nonce = nonce;
 
     struct timespec ts = {};
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -273,9 +291,16 @@ bool verify_sealed_verdict(const std::string &blob, uint32_t &flags, uint32_t &s
     memcpy(&tag, raw.data() + kPayload, sizeof(tag));
     if (mac(g_state.key, raw.data(), kPayload) != tag) return false;
 
-    uint64_t nonce = 0;
-    memcpy(&nonce, raw.data(), kNonceBytes);
-    if (nonce != g_state.last_nonce) return false;
+    uint64_t issued_at_ms = 0;
+    memcpy(&issued_at_ms, raw.data() + kNonceBytes + 4 + 4, sizeof(issued_at_ms));
+    struct timespec now = {};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return false;
+    const uint64_t now_ms = static_cast<uint64_t>(now.tv_sec) * 1000ull
+                            + static_cast<uint64_t>(now.tv_nsec) / 1000000ull;
+    // A freshness window avoids the global "last nonce" race: concurrent
+    // callers can issue independent verdicts without invalidating each other,
+    // while stale blobs still cannot be replayed indefinitely.
+    if (issued_at_ms > now_ms || now_ms - issued_at_ms > kVerdictMaxAgeMs) return false;
 
     memcpy(&flags, raw.data() + kNonceBytes, sizeof(flags));
     memcpy(&score, raw.data() + kNonceBytes + 4, sizeof(score));

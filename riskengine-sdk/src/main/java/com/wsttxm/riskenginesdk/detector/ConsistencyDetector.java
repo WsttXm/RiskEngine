@@ -196,16 +196,21 @@ public class ConsistencyDetector extends BaseDetector {
                 coverage.failure("api_release:no_release");
                 return;
             }
-            coverage.success();
             int major;
             try {
                 String head = release.split("\\.")[0];
                 major = Integer.parseInt(head.trim());
             } catch (NumberFormatException e) {
+                coverage.failure("api_release:unparseable_release");
                 return;
             }
             int expected = expectedMajorFor(sdk);
-            if (expected > 0 && major != expected) {
+            if (expected <= 0) {
+                coverage.failure("api_release:unsupported_sdk_" + sdk);
+                return;
+            }
+            coverage.success();
+            if (major != expected) {
                 evidence.add("api_release_mismatch:sdk=" + sdk + ",release=" + release);
             }
         } catch (Exception e) {

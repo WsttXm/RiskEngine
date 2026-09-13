@@ -155,4 +155,34 @@ public class CorrelationEngineTest {
         assertEquals(RiskLevel.HIGH, out.get(0).getRiskLevel());
         assertEquals(DetectionStatus.DANGER, out.get(0).getStatus());
     }
+
+    @Test
+    public void informationalEvidenceDoesNotSuppressLaterActionableFamily() {
+        DetectionResult hint = new DetectionResult(
+                "hook_hint", RiskLevel.LOW, DetectionStatus.WARNING,
+                1, 10, true, List.of("frida_port_open:27042"), "frida hint");
+        DetectionResult confirmed = new DetectionResult(
+                "process_scan", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("suspicious_process:frida-server"), "frida process");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(hint, confirmed));
+
+        assertTrue(out.get(0).isInformational());
+        assertFalse(out.get(1).isInformational());
+    }
+
+    @Test
+    public void newFamilyRemainsActionableWhenOnlyPartOfEvidenceIsDuplicated() {
+        DetectionResult root = new DetectionResult(
+                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("native:mount:ksu"), "root");
+        DetectionResult combined = new DetectionResult(
+                "combined", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                10, 10, false,
+                List.of("sealed:root_strong", "sealed:hook_framework"), "root and hook");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, combined));
+
+        assertFalse(out.get(1).isInformational());
+    }
 }

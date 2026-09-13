@@ -89,9 +89,9 @@ public class SandboxDetector extends BaseDetector {
             ApplicationInfo info = context.getApplicationInfo();
             String dataDir = info.dataDir == null ? "" : info.dataDir.toLowerCase(Locale.ROOT);
             String pkg = context.getPackageName();
-            int appId = Process.myUid() % 100000;
+            int userId = Process.myUid() / 100000;
             String expected = "/data/user/0/" + pkg;
-            String expectedId = "/data/user/" + appId + "/" + pkg;
+            String expectedId = "/data/user/" + userId + "/" + pkg;
             if ((dataDir.contains("virtual") || dataDir.contains("parallel")
                     || dataDir.contains("plugin"))
                     && !dataDir.equals(expected) && !dataDir.equals(expectedId)) {
@@ -191,9 +191,12 @@ public class SandboxDetector extends BaseDetector {
             }
             int userId = uid / 100000;
             String dataDir = info.dataDir == null ? "" : info.dataDir;
-            if (!dataDir.isEmpty() && userId > 0
-                    && !dataDir.contains("/user/" + userId + "/")
-                    && !dataDir.startsWith("/data/data/")) {
+            boolean matchesUserDirectory = dataDir.contains("/user/" + userId + "/")
+                    || dataDir.contains("/user_de/" + userId + "/");
+            boolean matchesLegacyPrimaryDirectory = userId == 0
+                    && dataDir.startsWith("/data/data/");
+            if (!dataDir.isEmpty() && !matchesUserDirectory
+                    && !matchesLegacyPrimaryDirectory) {
                 evidence.add("uid_datadir_user_mismatch:uid_user=" + userId);
             }
             return true;

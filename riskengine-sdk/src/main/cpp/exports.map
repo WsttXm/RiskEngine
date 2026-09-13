@@ -1,7 +1,7 @@
 /*
  * Release export map.
  *
- * Only the loader entry point is exported. All detector and collector entry
+ * Only the loader lifecycle entry points are exported. All detector and collector entry
  * points reach Java through RegisterNatives, so nothing else needs to appear
  * in .dynsym. This removes the symbol names an analyst would otherwise use to
  * locate each check directly.
@@ -9,6 +9,7 @@
 {
     global:
         JNI_OnLoad;
+        JNI_OnUnload;
     local:
         *;
 };

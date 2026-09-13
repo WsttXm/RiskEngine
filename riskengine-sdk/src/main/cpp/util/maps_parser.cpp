@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fcntl.h>
+#include <limits>
 #include <sstream>
 #include <unistd.h>
 
@@ -14,6 +15,19 @@ std::string to_lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return value;
+}
+
+bool parse_address(const std::string &value, uintptr_t &out) {
+    if (value.empty()) return false;
+    errno = 0;
+    char *end = nullptr;
+    unsigned long long parsed = std::strtoull(value.c_str(), &end, 16);
+    if (errno == ERANGE || end == value.c_str() || *end != '\0'
+            || parsed > std::numeric_limits<uintptr_t>::max()) {
+        return false;
+    }
+    out = static_cast<uintptr_t>(parsed);
+    return true;
 }
 }  // namespace
 
@@ -58,10 +72,11 @@ std::vector<MapEntry> read_self_maps() {
         if (dash == std::string::npos) {
             continue;
         }
-        entry.start = static_cast<uintptr_t>(
-                std::strtoull(range.substr(0, dash).c_str(), nullptr, 16));
-        entry.end = static_cast<uintptr_t>(
-                std::strtoull(range.substr(dash + 1).c_str(), nullptr, 16));
+        if (!parse_address(range.substr(0, dash), entry.start)
+                || !parse_address(range.substr(dash + 1), entry.end)
+                || entry.start >= entry.end) {
+            continue;
+        }
         std::string path;
         std::getline(iss, path);
         if (!path.empty() && path[0] == ' ') {

@@ -222,9 +222,8 @@ static jstring jni_getKernelRootEvidence(JNIEnv *env, jclass) {
     return toJString(env, native_get_kernel_root_evidence());
 }
 
-static jstring jni_getSealedVerdict(JNIEnv *env, jclass) {
-    return toJString(env, native_build_sealed_verdict(env));
-}
+// Forward declarations; both functions inspect the registration table below.
+static jstring jni_getSealedVerdict(JNIEnv *env, jclass);
 
 static jint jni_verifySealedVerdict(JNIEnv *env, jclass, jstring jblob) {
     if (jblob == nullptr) return -1;
@@ -254,11 +253,17 @@ static jstring jni_getMonitorFindings(JNIEnv *env, jclass) {
     return toJString(env, native_monitor_findings());
 }
 
+static void jni_startMonitor(JNIEnv *env, jclass) {
+    JavaVM *vm = nullptr;
+    if (env != nullptr && env->GetJavaVM(&vm) == JNI_OK && vm != nullptr) {
+        native_monitor_start(vm);
+    }
+}
+
 static void jni_stopMonitor(JNIEnv *, jclass) {
     native_monitor_stop();
 }
 
-// Forward declaration; the table it inspects is defined below.
 static jstring jni_getJniSelfIntegrity(JNIEnv *env, jclass);
 
 // ==================== Registration ====================
@@ -294,8 +299,18 @@ static JNINativeMethod methods[] = {
         {"nVerifySealedVerdictFlagsRaw","(Ljava/lang/String;)I",                 (void *) jni_verifySealedVerdictFlags},
         {"nGetJniSelfIntegrityRaw",     "()Ljava/lang/String;",                  (void *) jni_getJniSelfIntegrity},
         {"nGetMonitorFindingsRaw",      "()Ljava/lang/String;",                  (void *) jni_getMonitorFindings},
+        {"nStartMonitorRaw",            "()V",                                   (void *) jni_startMonitor},
         {"nStopMonitorRaw",             "()V",                                   (void *) jni_stopMonitor},
 };
+
+static jstring jni_getSealedVerdict(JNIEnv *env, jclass) {
+    constexpr size_t kCount = sizeof(methods) / sizeof(methods[0]);
+    const void *pointers[kCount];
+    for (size_t i = 0; i < kCount; ++i) {
+        pointers[i] = methods[i].fnPtr;
+    }
+    return toJString(env, native_build_sealed_verdict(env, pointers, kCount));
+}
 
 static jstring jni_getJniSelfIntegrity(JNIEnv *env, jclass) {
     // Verify that every pointer this library registered still resolves inside
@@ -326,4 +341,10 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
     native_monitor_start(vm);
 
     return JNI_VERSION_1_6;
+}
+
+JNIEXPORT void JNI_OnUnload(JavaVM *, void *) {
+    // A custom ClassLoader can unload this library without the Java engine's
+    // shutdown hook running. Join the monitor before its code is unmapped.
+    native_monitor_stop();
 }

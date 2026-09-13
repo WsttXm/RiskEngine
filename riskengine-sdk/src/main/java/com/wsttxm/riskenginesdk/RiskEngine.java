@@ -33,11 +33,8 @@ public final class RiskEngine {
     private Context appContext;
     private RiskEngineConfig config;
     private TaskScheduler taskScheduler;
-    private CollectorRegistry collectorRegistry;
-    private DetectorRegistry detectorRegistry;
     private DataAggregator dataAggregator;
     private ReentrantLock collectionLock;
-    private SignalSnapshot signalSnapshot;
     private volatile boolean initialized;
     private volatile long lifecycleGeneration;
 
@@ -89,12 +86,12 @@ public final class RiskEngine {
             config = requestedConfig;
             CLog.setEnabled(config.isDebugLog());
             taskScheduler = new TaskScheduler();
-            signalSnapshot = new SignalSnapshot(appContext);
-            collectorRegistry = new CollectorRegistry(appContext, config, signalSnapshot);
-            detectorRegistry = new DetectorRegistry(appContext, config, signalSnapshot);
             dataAggregator = new DataAggregator(
                     new com.wsttxm.riskenginesdk.core.FingerprintStore(appContext));
             collectionLock = new ReentrantLock(true);
+            // JNI_OnLoad starts the monitor on first load. An explicit start
+            // is also required after shutdown/reinitialization in one process.
+            com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge.startMonitor();
             lifecycleGeneration++;
             initialized = true;
         }
@@ -167,30 +164,39 @@ public final class RiskEngine {
         }
         long deadlineNanos = startNanos
                 + TimeUnit.MILLISECONDS.toNanos(snapshot.config.getCollectTimeoutMs());
+        CollectScene scene = sceneOverride != null
+                ? sceneOverride : snapshot.config.getCollectScene();
         CLog.i("Starting collection...");
 
         if (!acquireCollectionLock(snapshot, deadlineNanos)) {
             ensureCollectionActive(snapshot);
-            return buildTimeoutReport(snapshot, startNanos);
+            return buildTimeoutReport(snapshot, startNanos, scene);
         }
         try {
             ensureCollectionActive(snapshot);
-            snapshot.signalSnapshot.reset();
 
-            List<BaseCollector> collectors = snapshot.collectorRegistry.getCollectors();
+            // Use a collection-local signal cache. invokeAll cancels work at
+            // the deadline, but platform/native calls are not guaranteed to
+            // react to interruption immediately. A late task must therefore
+            // be unable to repopulate the next report's cache.
+            SignalSnapshot signals = new SignalSnapshot(snapshot.appContext);
+            CollectorRegistry collectorRegistry = new CollectorRegistry(
+                    snapshot.appContext, snapshot.config, signals);
+            DetectorRegistry detectorRegistry = new DetectorRegistry(
+                    snapshot.appContext, snapshot.config, signals, scene);
+
+            List<BaseCollector> collectors = collectorRegistry.getCollectors();
             List<CollectorResult> collectorResults = snapshot.scheduler.submitAllAndWait(
                     collectors, remainingMillis(deadlineNanos));
             ensureCollectionActive(snapshot);
             addMissingCollectorResults(collectors, collectorResults);
 
-            List<BaseDetector> detectors = snapshot.detectorRegistry.getDetectors();
+            List<BaseDetector> detectors = detectorRegistry.getDetectors();
             List<DetectionResult> detectionResults = snapshot.scheduler.submitAllAndWait(
                     detectors, remainingMillis(deadlineNanos));
             ensureCollectionActive(snapshot);
             addMissingDetectionResults(detectors, detectionResults);
 
-            CollectScene scene = sceneOverride != null
-                    ? sceneOverride : snapshot.config.getCollectScene();
             RiskReport report = snapshot.dataAggregator.aggregate(
                     collectorResults, detectionResults, scene);
             long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
@@ -226,16 +232,19 @@ public final class RiskEngine {
         }
     }
 
-    private RiskReport buildTimeoutReport(EngineSnapshot snapshot, long startNanos) {
-        List<BaseCollector> collectors = snapshot.collectorRegistry.getCollectors();
+    private RiskReport buildTimeoutReport(EngineSnapshot snapshot, long startNanos,
+                                          CollectScene scene) {
+        SignalSnapshot signals = new SignalSnapshot(snapshot.appContext);
+        List<BaseCollector> collectors = new CollectorRegistry(
+                snapshot.appContext, snapshot.config, signals).getCollectors();
         List<CollectorResult> collectorResults = new ArrayList<>();
         addMissingCollectorResults(collectors, collectorResults);
 
-        List<BaseDetector> detectors = snapshot.detectorRegistry.getDetectors();
+        List<BaseDetector> detectors = new DetectorRegistry(
+                snapshot.appContext, snapshot.config, signals, scene).getDetectors();
         List<DetectionResult> detectionResults = new ArrayList<>();
         addMissingDetectionResults(detectors, detectionResults);
 
-        CollectScene scene = snapshot.config.getCollectScene();
         RiskReport report = snapshot.dataAggregator.aggregate(
                 collectorResults, detectionResults, scene);
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
@@ -248,24 +257,26 @@ public final class RiskEngine {
         RiskEngine engine = getInstance();
         TaskScheduler scheduler;
         synchronized (engine.lifecycleLock) {
+            boolean wasInitialized = engine.initialized;
             engine.initialized = false;
             engine.lifecycleGeneration++;
             scheduler = engine.taskScheduler;
             engine.taskScheduler = null;
-            engine.collectorRegistry = null;
-            engine.detectorRegistry = null;
             engine.dataAggregator = null;
             engine.collectionLock = null;
-            engine.signalSnapshot = null;
             engine.config = null;
             engine.appContext = null;
+            // Serialize stop against a concurrent reinitialization; otherwise
+            // an older shutdown could stop the newly initialized monitor.
+            if (wasInitialized) {
+                com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge.stopMonitor();
+            }
         }
         if (scheduler != null) {
             scheduler.shutdown();
         }
         // Stop the native re-verification thread so it does not outlive the
         // engine and keep running after the host app tears the SDK down.
-        com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge.stopMonitor();
         CLog.i("RiskEngine shutdown");
     }
 
@@ -301,8 +312,8 @@ public final class RiskEngine {
                 throw new IllegalStateException("RiskEngine not initialized");
             }
             return new EngineSnapshot(
-                    config, taskScheduler, collectorRegistry, detectorRegistry, dataAggregator,
-                    collectionLock, signalSnapshot, lifecycleGeneration);
+                    appContext, config, taskScheduler, dataAggregator,
+                    collectionLock, lifecycleGeneration);
         }
     }
 
@@ -363,30 +374,24 @@ public final class RiskEngine {
     }
 
     private static final class EngineSnapshot {
+        private final Context appContext;
         private final RiskEngineConfig config;
         private final TaskScheduler scheduler;
-        private final CollectorRegistry collectorRegistry;
-        private final DetectorRegistry detectorRegistry;
         private final DataAggregator dataAggregator;
         private final ReentrantLock collectionLock;
-        private final SignalSnapshot signalSnapshot;
         private final long generation;
 
-        private EngineSnapshot(RiskEngineConfig config,
+        private EngineSnapshot(Context appContext,
+                               RiskEngineConfig config,
                                TaskScheduler scheduler,
-                               CollectorRegistry collectorRegistry,
-                               DetectorRegistry detectorRegistry,
                                DataAggregator dataAggregator,
                                ReentrantLock collectionLock,
-                               SignalSnapshot signalSnapshot,
                                long generation) {
+            this.appContext = appContext;
             this.config = config;
             this.scheduler = scheduler;
-            this.collectorRegistry = collectorRegistry;
-            this.detectorRegistry = detectorRegistry;
             this.dataAggregator = dataAggregator;
             this.collectionLock = collectionLock;
-            this.signalSnapshot = signalSnapshot;
             this.generation = generation;
         }
     }

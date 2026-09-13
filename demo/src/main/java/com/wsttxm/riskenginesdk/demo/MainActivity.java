@@ -18,6 +18,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.content.res.AppCompatResources;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
@@ -333,8 +334,8 @@ public class MainActivity extends AppCompatActivity {
                 time, report.getRiskScore(), report.getDisplayThresholdMaximum()));
 
         layoutStats.setVisibility(View.VISIBLE);
-        tvStatRiskScore.setText(report.getRiskScore()
-                + "/" + report.getDisplayThresholdMaximum());
+        tvStatRiskScore.setText(getString(R.string.risk_score_fraction,
+                report.getRiskScore(), report.getDisplayThresholdMaximum()));
         tvStatFingerprints.setText(getString(
                 R.string.coverage_percent, report.getCoveragePercent()));
         tvStatElapsed.setText(formatElapsed(elapsedMs));
@@ -665,7 +666,7 @@ public class MainActivity extends AppCompatActivity {
         TypedValue selectable = new TypedValue();
         if (getTheme().resolveAttribute(
                 android.R.attr.selectableItemBackground, selectable, true)) {
-            row.setForeground(getDrawable(selectable.resourceId));
+            row.setForeground(AppCompatResources.getDrawable(this, selectable.resourceId));
         }
         return row;
     }

@@ -118,13 +118,13 @@ String json = RiskEngine.reportToJson(report);       // no second collection
 String freshJson = RiskEngine.collectReportJson();  // collect then serialize
 ```
 
-`init` rejects duplicate initialization; multi-entry applications should use atomic `initIfNeeded`. Call `RiskEngine.shutdown()` when the SDK is no longer needed: it advances the lifecycle generation, cancels work, clears registries, and requests that the native periodic monitor stop. Results from older generations are not delivered.
+`init` rejects duplicate initialization; multi-entry applications should use atomic `initIfNeeded`. Call `RiskEngine.shutdown()` when the SDK is no longer needed: it advances the lifecycle generation, cancels work, clears lifecycle state, and joins the native periodic monitor. Results from older generations are not delivered.
 
 The SDK AAR itself is not minified. Host R8 uses the bundled `consumer-rules.pro`; no extra keep rules are required for the public API.
 
 ## Collection scenes
 
-Scenes adjust the informational / actionable split. Every enabled detector still runs. `native_tamper` also has a scene policy: with an initialization scene of `LOGIN` / `PAYMENT`, missing maps, unreadable files, or wholly unreadable executable segments become `MEDIUM`/4; `STANDARD` / `DIAGNOSTIC` retain `UNAVAILABLE`. This policy is bound at initialization and is not updated by a per-call `collect(scene, ...)` / `collectSync(scene)` override.
+Scenes adjust the informational / actionable split. Every enabled detector still runs. `native_tamper` also has a scene policy: for a `LOGIN` / `PAYMENT` collection, missing maps, unreadable files, or wholly unreadable executable segments become `MEDIUM`/4; `STANDARD` / `DIAGNOSTIC` retain `UNAVAILABLE`. Per-call `collect(scene, ...)` / `collectSync(scene)` overrides apply to this policy as well as final aggregation.
 
 | Scene | Behavior |
 | --- | --- |
@@ -242,8 +242,8 @@ The `demo` module is a local diagnostic console, not an automatic collector:
 
 - Native I/O uses per-ABI inline syscalls (not libc `syscall()`); directory walks use `getdents64`. This reduces libc-hook blind spots; it does not defeat kernel-level hiding.
 - `sealed_verdict` independently scans and scores signals, with Java still aggregating the final report. It is not gated by Root/Hook group switches; disabling those groups does not stop equivalent probes inside the sealed verdict. When another detector already reports the same evidence family, the sealed result remains visible as informational corroboration and is not counted as a second danger.
-- Sealing uses an in-process key, a keyed FNV-1a tag, and comparison with the latest nonce. It is neither hardware attestation nor a standard cryptographic MAC, and does not guarantee protection against altered Java verification paths or native attackers in the process.
-- The native monitor starts when the SO loads, rechecking self code, TracerPid, W+X, and framework mappings every 20–26 seconds. Findings are latched for later `hook_framework` collections; no callback is pushed automatically. `shutdown()` requests a stop; reinitializing in the same process currently does not restart it.
+- Sealing uses an in-process key, a keyed FNV-1a tag, a random nonce, and a 10-second monotonic freshness window. It is neither hardware attestation nor a standard cryptographic MAC, and does not guarantee protection against altered Java verification paths or native attackers in the process.
+- The native monitor starts when the SO loads, rechecking self code, TracerPid, W+X, and framework mappings every 20–26 seconds. Findings are latched for later `hook_framework` collections; no callback is pushed automatically. `shutdown()` wakes and joins it; reinitialization starts a clean monitor generation.
 - Unreadable namespaces and unavailable self-integrity comparisons (including libraries mapped directly from an APK) are coverage gaps, not positive risk evidence. Only the exact `text_mismatch` token enters native tamper scoring; diagnostic suffixes such as `text_mismatch:missing_map` and `text_mismatch:apk_embedded` do not.
 - x86/i386 has no ARM trampoline heuristic; GOT checks and FNV-1a file/memory comparisons still run. Virtual GPUs, wired interfaces, and partition differences need OEM hardware regression and are not independently proof of tampering.
 - [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) describes expected evidence; the repository currently has no automated device-matrix workflow. Historical build results and open issues are in [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md).

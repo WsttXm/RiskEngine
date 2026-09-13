@@ -118,13 +118,13 @@ String json = RiskEngine.reportToJson(report);       // 不重复采集
 String freshJson = RiskEngine.collectReportJson();  // 重新采集并序列化
 ```
 
-`init` 拒绝重复初始化；多入口应用使用原子的 `initIfNeeded`。不再使用时调用 `RiskEngine.shutdown()`：会推进生命周期代次、取消任务、清空注册表，并请求停止 Native 周期复检；旧代次结果不会交付。
+`init` 拒绝重复初始化；多入口应用使用原子的 `initIfNeeded`。不再使用时调用 `RiskEngine.shutdown()`：会推进生命周期代次、取消任务、清空生命周期状态，并唤醒、等待 Native 周期复检线程退出；旧代次结果不会交付。
 
 SDK AAR 自身不 minify；宿主 R8 使用附带的 `consumer-rules.pro`，无需为公开 API 再写 keep 规则。
 
 ## 采集场景
 
-场景调整 informational / actionable 划分，每次采集仍运行全部已启用的 Detector。另有 `native_tamper` 的场景策略：初始化配置为 `LOGIN` / `PAYMENT` 时，映射缺失、文件不可读或可执行段全不可读会记为 `MEDIUM`/4；`STANDARD` / `DIAGNOSTIC` 下仍为 `UNAVAILABLE`。该策略在初始化时绑定，单次 `collect(scene, ...)` / `collectSync(scene)` 覆盖不会更新它。
+场景调整 informational / actionable 划分，每次采集仍运行全部已启用的 Detector。另有 `native_tamper` 的场景策略：本次采集为 `LOGIN` / `PAYMENT` 时，映射缺失、文件不可读或可执行段全不可读会记为 `MEDIUM`/4；`STANDARD` / `DIAGNOSTIC` 下仍为 `UNAVAILABLE`。单次 `collect(scene, ...)` / `collectSync(scene)` 覆盖同样会应用于该策略与最终聚合。
 
 | 场景 | 行为 |
 | --- | --- |
@@ -242,8 +242,8 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，�
 
 - Native I/O 走各 ABI 内联 syscall（不经过 libc `syscall()`），目录遍历使用 `getdents64`。这降低 libc hook 盲区，但不能对抗内核级隐藏。
 - `sealed_verdict` 独立扫描并计分，仍由 Java 聚合为最终报告；它不受 Root/Hook 等检测器组开关控制，关闭这些组不会停止其内部同类探测。当其他检测器已报告同一证据族时，密封结果仅作为可见的重复佐证，不再计为第二个高危项。
-- 密封校验使用进程内密钥、带密钥的 FNV-1a 标签和最新 nonce 对照，不是硬件证明或标准密码学 MAC；也不能保证防止 Java 验证路径被改写或进程内 Native 攻击。
-- Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、TracerPid、W+X 与框架映射；命中保留到后续 `hook_framework` 采集读取，不自动回调。`shutdown()` 请求停止；同一进程再次初始化目前不会自动重启。
+- 密封校验使用进程内密钥、带密钥的 FNV-1a 标签、随机 nonce 与 10 秒单调时钟新鲜度窗口，不是硬件证明或标准密码学 MAC；也不能保证防止 Java 验证路径被改写或进程内 Native 攻击。
+- Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、TracerPid、W+X 与框架映射；命中保留到后续 `hook_framework` 采集读取，不自动回调。`shutdown()` 会唤醒并等待线程退出；同一进程再次初始化会启动干净的新一代监控。
 - 命名空间不可读、自身完整性无法比对（包括 Native 库直接从 APK 加载）均属于覆盖缺口，不是风险命中。只有精确的 `text_mismatch` 标识参与 Native 篡改计分；`text_mismatch:missing_map`、`text_mismatch:apk_embedded` 等诊断后缀不计风险分。
 - x86/i386 没有 ARM trampoline 启发式；GOT 与 FNV-1a 文件/内存比对仍执行。虚拟 GPU、有线网卡、分区差异等需要 OEM 真机回归，不能单独视为环境篡改的证明。
 - [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) 是预期证据说明，当前仓库没有自动设备矩阵工作流。历史构建与待修问题见 [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md)。

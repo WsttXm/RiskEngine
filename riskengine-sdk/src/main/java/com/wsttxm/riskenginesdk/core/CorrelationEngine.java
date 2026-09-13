@@ -49,18 +49,18 @@ public final class CorrelationEngine {
         List<DetectionResult> out = new ArrayList<>(detections.size());
         for (DetectionResult detection : detections) {
             Set<String> families = EvidenceFamily.families(detection.getDetails());
-            boolean conflict = false;
-            for (String family : families) {
-                if (claimed.contains(family)) {
-                    conflict = true;
-                    break;
-                }
-            }
-            if (conflict && !detection.isInformational() && detection.getScore() > 0) {
+            boolean actionable = !detection.isInformational() && detection.getScore() > 0;
+            boolean fullyDuplicated = !families.isEmpty() && claimed.containsAll(families);
+            if (fullyDuplicated && actionable) {
                 out.add(detection.asInformationalDuplicate());
             } else {
                 out.add(detection);
-                claimed.addAll(families);
+                // Informational/context-only evidence contributed no score, so
+                // it must not suppress a later actionable finding. Likewise,
+                // a detector that adds a new family remains actionable.
+                if (actionable) {
+                    claimed.addAll(families);
+                }
             }
         }
         return out;

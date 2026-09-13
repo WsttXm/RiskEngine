@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <fcntl.h>
 #include <mutex>
 #include <pthread.h>
@@ -20,6 +22,10 @@ namespace {
 std::atomic<bool> g_running{false};
 std::atomic<int> g_passes{0};
 pthread_t g_thread;
+bool g_thread_started = false;
+std::mutex g_lifecycle_mutex;
+std::mutex g_sleep_mutex;
+std::condition_variable g_sleep_condition;
 std::mutex g_findings_mutex;
 std::vector<std::string> g_findings;
 JavaVM *g_vm = nullptr;
@@ -44,8 +50,8 @@ void latch(const std::string &token) {
     }
 }
 
-/** Sleeps with jitter so the cadence is not a stable timing signal. */
-void jittered_sleep(unsigned base_seconds) {
+/** Waits with jitter, but wakes immediately when shutdown is requested. */
+bool jittered_wait(unsigned base_seconds) {
     unsigned jitter = 0;
     int fd = static_cast<int>(my_openat(AT_FDCWD, OBF("/dev/urandom").c_str(),
                                         O_RDONLY | O_CLOEXEC, 0));
@@ -56,10 +62,12 @@ void jittered_sleep(unsigned base_seconds) {
         }
         my_close(fd);
     }
-    struct timespec ts = {};
-    ts.tv_sec = static_cast<time_t>(base_seconds + jitter);
-    ts.tv_nsec = 0;
-    nanosleep(&ts, nullptr);
+    std::unique_lock<std::mutex> lock(g_sleep_mutex);
+    g_sleep_condition.wait_for(
+            lock,
+            std::chrono::seconds(base_seconds + jitter),
+            [] { return !g_running.load(std::memory_order_acquire); });
+    return g_running.load(std::memory_order_acquire);
 }
 
 /**
@@ -122,8 +130,7 @@ void *monitor_main(void *) {
     // First pass is delayed: at startup the values are the same ones the
     // initial collection already reported, so an immediate pass adds nothing.
     while (g_running.load(std::memory_order_acquire)) {
-        jittered_sleep(20);
-        if (!g_running.load(std::memory_order_acquire)) break;
+        if (!jittered_wait(20)) break;
         run_pass();
     }
     return nullptr;
@@ -132,20 +139,32 @@ void *monitor_main(void *) {
 }  // namespace
 
 void native_monitor_start(JavaVM *vm) {
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mutex);
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true)) {
         return;  // Already running.
+    }
+    {
+        std::lock_guard<std::mutex> findings_lock(g_findings_mutex);
+        g_findings.clear();
+        g_passes.store(0, std::memory_order_relaxed);
     }
     g_vm = vm;
     if (pthread_create(&g_thread, nullptr, monitor_main, nullptr) != 0) {
         g_running.store(false, std::memory_order_release);
         return;
     }
-    pthread_detach(g_thread);
+    g_thread_started = true;
 }
 
 void native_monitor_stop() {
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mutex);
     g_running.store(false, std::memory_order_release);
+    g_sleep_condition.notify_all();
+    if (g_thread_started) {
+        pthread_join(g_thread, nullptr);
+        g_thread_started = false;
+    }
 }
 
 std::string native_monitor_findings() {

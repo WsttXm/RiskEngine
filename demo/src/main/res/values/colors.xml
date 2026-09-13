@@ -11,7 +11,6 @@
     <color name="surface">#FFFFFFFF</color>
     <color name="surface_elevated">#F7FFFFFF</color>
     <color name="surface_secondary">#FFF7F7FA</color>
-    <color name="surface_tinted">#FFF2F7FF</color>
     <color name="text_primary">#FF1C1C1E</color>
     <color name="text_secondary">#FF636366</color>
     <color name="text_tertiary">#FF6E6E73</color>

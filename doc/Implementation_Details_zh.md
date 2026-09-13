@@ -183,7 +183,7 @@ Java：Xposed 类与 `sHookedMethodCallbacks`、栈帧、Frida 默认端口 2704
 
 新增分档：`jni_slot_hook:`、`jni_self_hook:`、`art_native_flag:`、`wx_segment:self`、`unix_socket:frida`/`gum`、`late_text_mismatch`、`late_wx_self`、`late_module:` 为 STRONG；`loader_unexpected:`、`loader_chain_deep:`、其他 `wx_segment:`、`late_tracer_attached`、`late_wx_art` 为 MEDIUM。`loader_depth:` 与 `passes:` 在分类器中为 IGNORE。
 
-当前实现仍把 IGNORE 上下文保留在 details 中；若仅有 `passes:0` 等上下文，Detector 的非空 details 分支仍返回 `LOW`/1/informational，`DIAGNOSTIC` 又可将其计入分数。这是当前实现限制，并非上下文本身证明 Hook。
+IGNORE 上下文仍保留在 details 中用于诊断；若仅有 `passes:0` 等上下文，Detector 现在返回 `SAFE`/0/informational，`DIAGNOSTIC` 模式也不会把它变为可处置信号。
 
 ### 5.4 `process_scan`
 
@@ -199,11 +199,11 @@ Java `/proc` 进程列表 + Native `getdents64` 扫 `/proc` comm。Token 必须�
 | --- | --- |
 | `text_mismatch`（可附 `text_mismatch_seg:<index>`） | 可执行段文件/内存 FNV-1a 不同 → `HIGH`/`DANGER`/8 |
 | `text_mismatch:anonymous_map` | maps 路径为空 / memfd / ashmem → 同上 |
-| `text_mismatch:missing_map` | 找不到 SO：初始化场景 `LOGIN`/`PAYMENT` → `MEDIUM`/`WARNING`/4；其他场景 → `UNAVAILABLE` |
+| `text_mismatch:missing_map` | 找不到 SO：本次请求的有效场景为 `LOGIN`/`PAYMENT` → `MEDIUM`/`WARNING`/4；其他场景 → `UNAVAILABLE` |
 | `text_mismatch:file_unreadable` / `text_mismatch:unreadable_segments` | 同上 |
 | `text_mismatch:bad_elf` | `UNAVAILABLE`，不随场景升级 |
 
-JNI 读取本身失败仍为 `UNAVAILABLE`。场景取自 `DetectorRegistry` 构造时的 `config.getCollectScene()`，**单次场景覆盖不会改变此策略**。映射缺失不能证明篡改；敏感场景升级是风险策略。`sealed_verdict` 对相同 token 另有评分（§5.12），因此该项不可用不代表总报告只会显示覆盖缺口。
+JNI 读取本身失败仍为 `UNAVAILABLE`。Detector 每次报告都使用该请求的有效场景构造，因此 `collect(scene)` 覆盖与最终聚合采用同一策略。映射缺失不能证明篡改；敏感场景升级是风险策略。`sealed_verdict` 对相同 token 另有评分（§5.12），因此该项不可用不代表总报告只会显示覆盖缺口。
 
 GOT/inline 与 JNI 表检查仍经 `hook_framework` 消费。
 
@@ -329,19 +329,19 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 - `-fstack-protector-strong`、Release `_FORTIFY_SOURCE=2`、`-Wformat -Wformat-security`
 - `-fvisibility=hidden`
 - 链接：`relro,now`、`noexecstack`、`max-page-size=16384`、`--exclude-libs,ALL`
-- Release 增加 thin LTO、移除 unwind table/frame pointer、常量合并、section GC 与 strip；`exports.map` 版本脚本只导出 `JNI_OnLoad`，JNI 方法仍经 `RegisterNatives` 绑定。
+- Release 增加 thin LTO、移除 unwind table/frame pointer、常量合并、section GC 与 strip；`exports.map` 版本脚本只导出 `JNI_OnLoad` 与 `JNI_OnUnload`，JNI 方法仍经 `RegisterNatives` 绑定。
 
 ### 6.8 密封载荷与周期监控
 
-密封载荷为 64 个 hex 字符，编码 8 字节 nonce、4 字节 flags、4 字节 score、8 字节单调时钟时间与 8 字节标签。32 字节密钥优先从 `/dev/urandom` 获取，失败回退到 `AT_RANDOM`，再失败使用地址/tid 派生值。标签是自定义带密钥的 FNV-1a，**不是 HMAC 或标准密码学 MAC**。验证检查长度、标签与最近签发的 nonce，但不校验时间过期、不消费 nonce；最新载荷可重复验证。密钥位于进程内存，Java 调用与最终评分仍可被改写，因此不是安全证明。
+密封载荷为 64 个 hex 字符，编码 8 字节 nonce、4 字节 flags、4 字节 score、8 字节单调时钟时间与 8 字节标签。32 字节密钥优先从 `/dev/urandom` 获取，失败回退到 `AT_RANDOM`，再失败使用地址/tid 派生值；密钥初始化已串行化。标签是自定义带密钥的 FNV-1a，**不是 HMAC 或标准密码学 MAC**。验证检查长度、标签与 10 秒单调时钟新鲜度窗口，既避免并发签发者互相作废，也拒绝陈旧重放。密钥位于进程内存，Java 调用与最终评分仍可被改写，因此不是安全证明。
 
-`JNI_OnLoad` 启动 detached pthread，每次延迟 20–26 秒后检查自身代码、TracerPid、自身/libart W+X、Frida/LSPosed 映射。发现去重累积为 `late_*`，读取时附 `passes:<n>`；不会修改已冻结报告或主动回调，后续 `hook_framework` 采集才消费。监控不重复完整 Root/模拟器扫描。
+`JNI_OnLoad` 启动可 join 的 pthread，每次可中断地等待 20–26 秒后检查自身代码、TracerPid、自身/libart W+X、Frida/LSPosed 映射。发现去重累积为 `late_*`，读取时附 `passes:<n>`；不会修改已冻结报告或主动回调，后续 `hook_framework` 采集才消费。监控不重复完整 Root/模拟器扫描。
 
-`shutdown()` 仅设置停止标志，不 join 或清空发现/计数；同进程重新 `init` 不会再次调用 `JNI_OnLoad`，目前没有重启入口。
+`shutdown()` 会唤醒并 join 监控线程；同进程重新初始化通过显式 JNI 入口重启，并清空发现与计数。`JNI_OnUnload` 也会在线程代码被卸载前完成 join。
 
 ## 7. 共享信号
 
-每次报告开始前 `SignalSnapshot.reset()`。`SignalResult<T>` 保留 success / empty / unavailable / error。Collector 与 Detector 共享：
+每份报告拥有独立的 `SignalSnapshot`；已超时的平台或 Native 工作即使稍后结束，也不会回填下一份报告的缓存。`SignalResult<T>` 保留 success / empty / unavailable / error。Collector 与 Detector 共享：
 
 - ADB 状态、系统属性、`/proc/self/maps`（Java 路径）
 - 本机监听端口、进程快照、文本文件、路径存在性、容器信号
@@ -364,8 +364,6 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 4. Collector 覆盖信号、多来源不一致、原有合成字段。
 5. 分层指纹 ID、连续性比较与可选 `fingerprint_continuity`。后者不会再经过场景/去重/交叉规则，且不包含在此前生成的 `runtime_integrity_score_inputs` 中。
 
-#新增共享信号包括 GPU vendor/renderer、网络接口名、命名空间/内核 Root evidence、JNI 自身检查与密封裁决。`getGpuIdentity()` 为 Emulator/Cloud Detector 缓存离屏探测，但 `GpuInfoCollector` 仍独立采集，一次报告可能创建两次 EGL context。网卡名优先读 sysfs，无结果才用 Java 枚举，不做两源比较。系统属性现在只走 Native 白名单读取，已移除 shell `getprop` 回退；空属性保留 EMPTY。
-
 ## 8.1 场景提升
 
 | 场景 | 提升为可处置 |
@@ -374,8 +372,6 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 | `LOGIN` | `emulator`、`cloud_phone`、`sandbox` |
 | `PAYMENT` | LOGIN + `adb` |
 | `DIAGNOSTIC` | 除「debug 且仅 `debuggable_flag`」外的全部 informational |
-
-#新增共享信号包括 GPU vendor/renderer、网络接口名、命名空间/内核 Root evidence、JNI 自身检查与密封裁决。`getGpuIdentity()` 为 Emulator/Cloud Detector 缓存离屏探测，但 `GpuInfoCollector` 仍独立采集，一次报告可能创建两次 EGL context。网卡名优先读 sysfs，无结果才用 Java 枚举，不做两源比较。系统属性现在只走 Native 白名单读取，已移除 shell `getprop` 回退；空属性保留 EMPTY。
 
 ## 8.2 交叉规则
 
@@ -508,7 +504,7 @@ Demo 直接依赖工程内 SDK，是诊断控制台：
 
 `integration-test` 只编译链接公开 API，不跑设备检测。当前没有自动设备矩阵工作流；`Adversarial_Matrix.md` 是预期证据说明，不能代替 ARM64 OEM 真机验证。
 
-提交附带的 [Implementation_Status_2026-09.md](./Implementation_Status_2026-09.md) 记录四 ABI 与 Java 编译通过，以及 52 项测试中 2 项失败：`RiskEngineConfigTest.disabledDetectorsAreNotRegistered` 尚按 1 个而非 3 个无条件检测器断言；`DataAggregatorTest.synthesizedFieldsAreExposedButNotDoubleCountedInCoverage` 未反映新增 `fingerprint_id` 的覆盖计数。这是提交中的历史记录，不是本文档更新时重跑所得。新增 EGL/ART/内核/监控能力仍需设备验证。
+九月审查已重新运行 56 项单元测试并全部通过，同时完成四个 Native ABI 编译。新增 EGL/ART/内核/监控能力仍需设备验证；主机测试通过不能证明各 OEM 设备上的检测准确率。
 
 ## 16. 构建与发布
 
@@ -525,8 +521,8 @@ Demo 直接依赖工程内 SDK，是诊断控制台：
 ## 17. 已知边界
 
 - 命名空间差异依赖 PID 1 procfs 可见性，不保证识破完整 DenyList/Shamiko；命名空间不同、目录枚举差异本身也可能来自合法隔离或读取时序。
-- 各检测路径的失败语义尚不完全一致：`root` 对 `ns_unreadable:*` 记覆盖失败，密封裁决却加 1 个 Native 分；密封裁决把所有 `text_mismatch*`（含 missing_map/file_unreadable/bad_elf/unreadable_segments）计作代码风险，监控也把这些后缀锁存为 `late_text_mismatch`。因此不能把 `native_tamper` 的 `UNAVAILABLE` 推广为全报告仅覆盖不足。
-- `native_tamper` 场景在初始化时绑定；密封载荷验证不防最新 nonce 重放；JNI 自检只看静态注册表；监控停止后同进程不自动重启。详见 §5–6。
+- 失败语义按覆盖不足保守处理：`root` 与密封裁决都把 `ns_unreadable:*` 记为覆盖损失而不增加风险分。监控仍可能锁存后续完整性异常，因此不能把一次 `native_tamper` 的 `UNAVAILABLE` 推广为所有后续完整性路径均不可用。
+- 密封验证为并发请求接受 10 秒新鲜度窗口内、MAC 有效的载荷。JNI 自检只看静态注册表，不读取 ART 当前实际绑定目标。详见 §5–6。
 - x86/i386 无 ARM trampoline 检测；GOT 与 FNV-1a 比对仍运行。FNV-1a 不是密码学哈希。
 - 虚拟 GPU、ethN、分区指纹差异、动态核数、ClassLoader/dexElements 与匿名映射都可能有合法来源，需要 OEM 真机与宿主框架回归。GPU 离屏采集尚需驱动兼容性验证。
 - 分层 ID 依赖可用字段与安装盐，不能保证跨重装、跨固件唯一识别设备；当前仍有两项测试预期与实现不一致（§15）。

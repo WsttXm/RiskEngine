@@ -8,16 +8,9 @@ detection-hardening work.
 All four ABIs compile clean with zero warnings: arm64-v8a, armeabi-v7a, x86,
 x86_64. Java layer compiles clean.
 
-Unit tests: 52 run, 2 fail. Both were failing before this work and were left
-alone deliberately.
-
-- `RiskEngineConfigTest.disabledDetectorsAreNotRegistered` asserts exactly one
-  detector survives when all are disabled. Three now register unconditionally
-  (`native_tamper`, `consistency`, `sealed_verdict`), so the assertion should
-  become 3.
-- `DataAggregatorTest.synthesizedFieldsAreExposedButNotDoubleCountedInCoverage`
-  needs its expected check count revisited now that `fingerprint_id` is added
-  to the fingerprint.
+Unit tests: 56 run, 0 fail after the September code-review fixes. The two stale
+expectations previously recorded here were updated to match the unconditional
+detectors and synthesized `fingerprint_id` coverage behavior.
 
 ## Fingerprint
 

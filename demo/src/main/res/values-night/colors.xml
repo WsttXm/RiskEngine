@@ -8,7 +8,6 @@
     <color name="surface">#FF1C1C1E</color>
     <color name="surface_elevated">#F72C2C2E</color>
     <color name="surface_secondary">#FF2C2C2E</color>
-    <color name="surface_tinted">#FF15243A</color>
     <color name="text_primary">#FFF2F2F7</color>
     <color name="text_secondary">#FFAEAEB2</color>
     <color name="text_tertiary">#FFA1A1A6</color>

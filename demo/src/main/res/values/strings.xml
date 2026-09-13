@@ -80,8 +80,8 @@
     <string name="synthetic_analysis_title">SDK 合成分析</string>
     <string name="risk_progress_idle">尚未生成风险分</string>
     <string name="risk_progress_value">风险分 %1$d，严重阈值 %2$d</string>
+    <string name="risk_score_fraction">%1$d/%2$d</string>
     <string name="risk_progress_error">本次检测未完成，没有风险分</string>
-    <string name="coverage_incomplete_advice">另有 %1$d 项检查未完整执行，因此结果不能解释为“全部安全”。</string>
     <string name="evidence_adb_wifi">无线 ADB 已开启</string>
     <string name="evidence_adb_usb">USB 调试已开启</string>
     <string name="evidence_adb_tcp">ADB TCP 端口已开启</string>
@@ -153,7 +153,6 @@
     <string name="failure_so_unreadable">无法读取磁盘上的 Native 库文件</string>
     <string name="failure_so_bad_elf">Native 库文件不是有效 ELF</string>
     <string name="technical_detector_id">检测器：%1$s</string>
-    <string name="technical_field_id">字段：%1$s</string>
     <string name="evidence_process_mismatch">Java 与 Native 进程扫描结果不一致</string>
     <string name="evidence_suspicious_process">发现可疑进程</string>
     <string name="evidence_verified_boot_state">Verified Boot 状态异常：%1$s</string>

@@ -2,6 +2,7 @@ package com.wsttxm.riskenginesdk.detector;
 
 import android.content.Context;
 
+import com.wsttxm.riskenginesdk.CollectScene;
 import com.wsttxm.riskenginesdk.RiskEngineConfig;
 import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
@@ -17,6 +18,11 @@ public class DetectorRegistry {
     }
 
     public DetectorRegistry(Context context, RiskEngineConfig config, SignalSnapshot signals) {
+        this(context, config, signals, config.getCollectScene());
+    }
+
+    public DetectorRegistry(Context context, RiskEngineConfig config, SignalSnapshot signals,
+                            CollectScene scene) {
         if (config.isEnableRoot()) {
             detectors.add(new RootDetector(context, signals));
             detectors.add(new MountAnalysisDetector(context, signals));
@@ -43,7 +49,7 @@ public class DetectorRegistry {
         if (config.isEnableCustomRomDetection()) {
             detectors.add(new CustomRomDetector(context, signals));
         }
-        detectors.add(new NativeTamperDetector(context, signals, config.getCollectScene()));
+        detectors.add(new NativeTamperDetector(context, signals, scene));
         // Signature-free checks: these find contradictions rather than known
         // artifacts, so they do not go stale as tools are renamed.
         detectors.add(new ConsistencyDetector(context, signals));
