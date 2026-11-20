@@ -9,28 +9,36 @@ import android.opengl.EGLSurface;
 import android.opengl.GLES20;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
+import com.wsttxm.riskenginesdk.core.SignalResult;
+import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * Collects GPU identity through an offscreen EGL pbuffer context.
+ * Collects GPU identity through a single offscreen EGL pbuffer context shared
+ * via {@link SignalSnapshot}.
  *
- * This is the single highest-value fingerprint dimension the SDK was missing.
- * The renderer and vendor strings are hardware-bound, stable across reinstall
- * and factory reset, and simultaneously the strongest available signal for
- * virtualized graphics: emulators and cloud phones surface virgl, virtio,
- * SwiftShader or llvmpipe here even when every Build field has been spoofed.
- *
- * A pbuffer is used rather than a window surface so no Activity or UI thread is
- * required and the collector can run on the engine's worker pool.
+ * Teardown deliberately destroys only the collector's own surface/context and
+ * releases thread-local EGL state without calling {@code eglTerminate} on the
+ * process-shared {@code EGL_DEFAULT_DISPLAY}, protecting the host UI
+ * RenderThread on sensitive OEM GPU drivers.
  */
 public class GpuInfoCollector extends BaseCollector {
+    private final SignalSnapshot signals;
 
     public GpuInfoCollector(Context context) {
+        this(context, null);
+    }
+
+    public GpuInfoCollector(Context context, SignalSnapshot signals) {
         super(context);
+        this.signals = signals;
     }
 
     @Override
@@ -39,16 +47,39 @@ public class GpuInfoCollector extends BaseCollector {
     }
 
     /**
-     * Probes GPU identity into the given result without needing a collector
-     * instance. Shared with SignalSnapshot so the EGL context is created once
-     * per report rather than separately for the collector and the detectors.
+     * Probes full GPU metadata once into the supplied result. Used by
+     * {@link SignalSnapshot} so the EGL context is created at most once per
+     * collection report.
      */
     public static void probeInto(CollectorResult result) {
-        new GpuInfoCollector(null).collect(result);
+        probeUncached(result);
     }
 
     @Override
     protected void collect(CollectorResult result) {
+        if (signals == null) {
+            probeUncached(result);
+            return;
+        }
+        SignalResult<Map<String, String>> cached = signals.getGpuAttributes();
+        if (cached.isSuccess() && cached.getValue() != null) {
+            for (Map.Entry<String, String> entry : cached.getValue().entrySet()) {
+                result.addValue(entry.getKey(), entry.getValue());
+            }
+            return;
+        }
+        if (cached.getStatus() == SignalResult.Status.UNAVAILABLE) {
+            result.markUnsupported(cached.getFailureReason());
+        } else {
+            result.markError(cached.getFailureReason());
+        }
+    }
+
+    public static Map<String, String> copyValues(CollectorResult source) {
+        return new LinkedHashMap<>(source.getValues());
+    }
+
+    private static void probeUncached(CollectorResult result) {
         EGLDisplay display = EGL14.EGL_NO_DISPLAY;
         EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
         EGLSurface surface = EGL14.EGL_NO_SURFACE;
@@ -66,24 +97,14 @@ public class GpuInfoCollector extends BaseCollector {
             }
             result.addValue("egl_version", version[0] + "." + version[1]);
 
-            int[] configAttribs = {
-                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
-                    EGL14.EGL_RED_SIZE, 8,
-                    EGL14.EGL_GREEN_SIZE, 8,
-                    EGL14.EGL_BLUE_SIZE, 8,
-                    EGL14.EGL_NONE
-            };
-            EGLConfig[] configs = new EGLConfig[1];
-            int[] configCount = new int[1];
-            if (!EGL14.eglChooseConfig(display, configAttribs, 0, configs, 0, 1,
-                    configCount, 0) || configCount[0] == 0) {
+            EGLConfig config = choosePbufferConfig(display);
+            if (config == null) {
                 result.markUnsupported("egl_no_config");
                 return;
             }
 
             int[] contextAttribs = {EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE};
-            eglContext = EGL14.eglCreateContext(display, configs[0],
+            eglContext = EGL14.eglCreateContext(display, config,
                     EGL14.EGL_NO_CONTEXT, contextAttribs, 0);
             if (eglContext == EGL14.EGL_NO_CONTEXT) {
                 result.markUnsupported("egl_no_context");
@@ -93,7 +114,7 @@ public class GpuInfoCollector extends BaseCollector {
             int[] surfaceAttribs = {
                     EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE
             };
-            surface = EGL14.eglCreatePbufferSurface(display, configs[0], surfaceAttribs, 0);
+            surface = EGL14.eglCreatePbufferSurface(display, config, surfaceAttribs, 0);
             if (surface == EGL14.EGL_NO_SURFACE
                     || !EGL14.eglMakeCurrent(display, surface, surface, eglContext)) {
                 result.markUnsupported("egl_no_surface");
@@ -106,8 +127,6 @@ public class GpuInfoCollector extends BaseCollector {
             addIfPresent(result, "shading_language",
                     GLES20.glGetString(GLES20.GL_SHADING_LANGUAGE_VERSION));
 
-            // The extension list is long and device-specific. Store a stable
-            // hash plus the count: high entropy without a multi-KB field.
             String extensions = GLES20.glGetString(GLES20.GL_EXTENSIONS);
             if (extensions != null && !extensions.isBlank()) {
                 String[] parts = extensions.trim().split("\\s+");
@@ -128,6 +147,33 @@ public class GpuInfoCollector extends BaseCollector {
         }
     }
 
+    private static EGLConfig choosePbufferConfig(EGLDisplay display) {
+        int[][] candidates = {
+                {
+                        EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                        EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                        EGL14.EGL_RED_SIZE, 8,
+                        EGL14.EGL_GREEN_SIZE, 8,
+                        EGL14.EGL_BLUE_SIZE, 8,
+                        EGL14.EGL_NONE
+                },
+                {
+                        EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                        EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                        EGL14.EGL_NONE
+                }
+        };
+        EGLConfig[] configs = new EGLConfig[1];
+        int[] configCount = new int[1];
+        for (int[] attribs : candidates) {
+            if (EGL14.eglChooseConfig(display, attribs, 0, configs, 0, 1, configCount, 0)
+                    && configCount[0] > 0 && configs[0] != null) {
+                return configs[0];
+            }
+        }
+        return null;
+    }
+
     private static void releaseQuietly(EGLDisplay display, EGLContext context,
                                        EGLSurface surface) {
         try {
@@ -140,8 +186,9 @@ public class GpuInfoCollector extends BaseCollector {
                 if (context != EGL14.EGL_NO_CONTEXT) {
                     EGL14.eglDestroyContext(display, context);
                 }
-                EGL14.eglTerminate(display);
+                // Never call eglTerminate on process-shared EGL_DEFAULT_DISPLAY.
             }
+            EGL14.eglReleaseThread();
         } catch (Exception | LinkageError ignored) {
             // Teardown is best effort; the values are already recorded.
         }
@@ -165,10 +212,10 @@ public class GpuInfoCollector extends BaseCollector {
         }
     }
 
-    static String sha256(String value) {
+    public static String sha256(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(bytes.length * 2);
             for (byte item : bytes) {
                 hex.append(Character.forDigit((item >>> 4) & 0x0f, 16));

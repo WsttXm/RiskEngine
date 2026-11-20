@@ -4,6 +4,7 @@
 #include "../util/syscall_wrapper.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <fcntl.h>
 #include <string>
 #include <vector>
@@ -82,15 +83,21 @@ std::string native_get_mount_namespace_evidence() {
 
     std::string self_info = read_file_string(OBF("/proc/self/mountinfo").c_str());
     std::string init_info = read_file_string(OBF("/proc/1/mountinfo").c_str());
+    const int init_errno = init_info.empty() ? raw_last_error() : 0;
 
     if (self_info.empty()) {
         add_token(tokens, OBF("ns_unreadable:self"));
         return join_tokens(tokens);
     }
     if (init_info.empty()) {
-        // Expected on most stock devices for a non-privileged app. Report as a
-        // coverage token so the Java layer can mark PARTIAL instead of SAFE.
-        add_token(tokens, OBF("ns_unreadable:init"));
+        // On stock Android 10+ SELinux denies untrusted_app from reading PID 1's
+        // mountinfo (EACCES/EPERM). Distinguish expected sandbox restriction from
+        // unexpected failures so normal Android 13-16 devices are not penalized.
+        if (init_errno == EACCES || init_errno == EPERM) {
+            add_token(tokens, OBF("ns_restricted:init"));
+        } else {
+            add_token(tokens, OBF("ns_unreadable:init"));
+        }
     }
 
     if (!self_ns.empty() && !init_ns.empty() && self_ns != init_ns) {

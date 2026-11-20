@@ -1,7 +1,6 @@
 #include "custom_jni_register.h"
+#include "obf_str.h"
 #include <android/log.h>
-
-static constexpr const char *kLogTag = "RiskEngine-JNI";
 
 bool custom_register_natives(JNIEnv *env, const char *class_name,
                              const JNINativeMethod *methods, int numMethods) {
@@ -10,8 +9,8 @@ bool custom_register_natives(JNIEnv *env, const char *class_name,
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
         }
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                            "FindClass failed for %s", class_name);
+        __android_log_print(ANDROID_LOG_ERROR, OBF("RiskEngine-JNI").c_str(),
+                            "%s", OBF("FindClass failed").c_str());
         return false;
     }
     jint result = env->RegisterNatives(clazz, methods, numMethods);
@@ -19,8 +18,8 @@ bool custom_register_natives(JNIEnv *env, const char *class_name,
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
         }
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                            "RegisterNatives failed for %s: %d", class_name, result);
+        __android_log_print(ANDROID_LOG_ERROR, OBF("RiskEngine-JNI").c_str(),
+                            "%s: %d", OBF("RegisterNatives failed").c_str(), result);
     }
     env->DeleteLocalRef(clazz);
     return result == JNI_OK;

@@ -1,6 +1,7 @@
 package com.wsttxm.riskenginesdk.collector.java_layer;
 
 import android.content.Context;
+import android.os.Build;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.core.SignalResult;
@@ -34,6 +35,10 @@ public class PartitionFingerprintCollector extends BaseCollector {
     @Override
     protected void collect(CollectorResult result) {
         for (String property : DetectionLists.PARTITION_FINGERPRINT_PROPERTIES) {
+            if (Build.VERSION.SDK_INT >= 33
+                    && "ro.bootimage.build.fingerprint".equals(property)) {
+                continue;
+            }
             SignalResult<String> value = signals.getSystemProperty(property);
             if (value.isSuccess() && value.getValue() != null
                     && !value.getValue().isBlank()) {
@@ -45,6 +50,10 @@ public class PartitionFingerprintCollector extends BaseCollector {
                 "ro.boot.flash.locked", "ro.oem_unlock_supported",
                 "ro.build.date.utc", "ro.build.version.incremental",
                 "ro.build.tags", "ro.build.characteristics"}) {
+            if (Build.VERSION.SDK_INT >= 33
+                    && "ro.oem_unlock_supported".equals(property)) {
+                continue;
+            }
             SignalResult<String> value = signals.getSystemProperty(property);
             if (value.isSuccess() && value.getValue() != null
                     && !value.getValue().isBlank()) {

@@ -30,21 +30,24 @@ target_include_directories(riskengine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+set(IS_RELEASE_LIKE "$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>")
+
 target_compile_options(riskengine PRIVATE
     -Wall
     -Wextra
     -Wformat
     -Wformat-security
     -fstack-protector-strong
-    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-D_FORTIFY_SOURCE=2>"
-    # Release hardening: drop the frame pointer and unwind tables an analyst
-    # would otherwise use to reconstruct call graphs, and enable LTO so the
-    # detector call graph is inlined across translation units.
-    "$<$<CONFIG:Release>:-flto=thin>"
-    "$<$<CONFIG:Release>:-fno-unwind-tables>"
-    "$<$<CONFIG:Release>:-fno-asynchronous-unwind-tables>"
-    "$<$<CONFIG:Release>:-fomit-frame-pointer>"
-    "$<$<CONFIG:Release>:-fmerge-all-constants>"
+    "$<${IS_RELEASE_LIKE}:-D_FORTIFY_SOURCE=2>"
+    # Release hardening: AGP passes RelWithDebInfo for release AAR builds, so
+    # apply hardening flags to both Release and RelWithDebInfo.
+    "$<${IS_RELEASE_LIKE}:-ffunction-sections>"
+    "$<${IS_RELEASE_LIKE}:-fdata-sections>"
+    "$<${IS_RELEASE_LIKE}:-flto=thin>"
+    "$<${IS_RELEASE_LIKE}:-fno-unwind-tables>"
+    "$<${IS_RELEASE_LIKE}:-fno-asynchronous-unwind-tables>"
+    "$<${IS_RELEASE_LIKE}:-fomit-frame-pointer>"
+    "$<${IS_RELEASE_LIKE}:-fmerge-all-constants>"
 )
 
 find_library(android_log_lib log)
@@ -56,10 +59,9 @@ target_link_options(riskengine PRIVATE
     "-Wl,-z,relro,-z,now"
     "-Wl,-z,noexecstack"
     "-Wl,--exclude-libs,ALL"
-    # Only JNI_OnLoad needs to be externally visible. Everything else is
-    # resolved through RegisterNatives, so the symbol table can go.
-    "$<$<CONFIG:Release>:-flto=thin>"
-    "$<$<CONFIG:Release>:-Wl,--gc-sections>"
+    # Only JNI_OnLoad and JNI_OnUnload need to be externally visible.
+    "$<${IS_RELEASE_LIKE}:-flto=thin>"
+    "$<${IS_RELEASE_LIKE}:-Wl,--gc-sections>"
+    "$<${IS_RELEASE_LIKE}:-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map>"
     "$<$<CONFIG:Release>:-Wl,--strip-all>"
-    "$<$<CONFIG:Release>:-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map>"
 )

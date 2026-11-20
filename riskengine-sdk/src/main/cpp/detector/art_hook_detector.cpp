@@ -39,26 +39,18 @@ std::string to_lower(std::string value) {
     return value;
 }
 
-/**
- * Reads a method's Java modifiers via public reflection.
- *
- * Deliberately not by reading ArtMethod struct offsets: those shift between
- * Android releases and a stale offset reads unrelated memory. Modifiers are
- * stable API and still expose the flag flip, because a method not declared
- * native cannot legitimately become native at runtime.
- */
-bool method_is_native(JNIEnv *env, const char *class_name,
-                      const char *method_name, const char *signature,
+bool method_is_native(JNIEnv *env, const std::string &class_name,
+                      const std::string &method_name, const std::string &signature,
                       bool is_static, bool &found) {
     found = false;
-    jclass target = env->FindClass(class_name);
+    jclass target = env->FindClass(class_name.c_str());
     if (target == nullptr) {
         clear_exception(env);
         return false;
     }
     jmethodID method = is_static
-            ? env->GetStaticMethodID(target, method_name, signature)
-            : env->GetMethodID(target, method_name, signature);
+            ? env->GetStaticMethodID(target, method_name.c_str(), signature.c_str())
+            : env->GetMethodID(target, method_name.c_str(), signature.c_str());
     if (method == nullptr) {
         clear_exception(env);
         env->DeleteLocalRef(target);
@@ -75,7 +67,7 @@ bool method_is_native(JNIEnv *env, const char *class_name,
     jclass method_class = env->FindClass(OBF("java/lang/reflect/Method").c_str());
     if (method_class != nullptr) {
         jmethodID get_modifiers =
-                env->GetMethodID(method_class, OBF("getModifiers").c_str(), "()I");
+                env->GetMethodID(method_class, OBF("getModifiers").c_str(), OBF("()I").c_str());
         if (get_modifiers != nullptr) {
             modifiers = env->CallIntMethod(reflected, get_modifiers);
             if (env->ExceptionCheck()) {
@@ -98,13 +90,6 @@ bool method_is_native(JNIEnv *env, const char *class_name,
     return (modifiers & kAccNative) != 0;
 }
 
-/**
- * Walks the ClassLoader parent chain of this library's own bridge class.
- *
- * A stock app chain is short and well known. Xposed-family frameworks insert a
- * loader so their module dex resolves, and cloning containers insert their own.
- * Both appear as extra links or an unexpected implementation class.
- */
 void inspect_class_loader_chain(JNIEnv *env, std::vector<std::string> &tokens) {
     jclass anchor = env->FindClass(OBF(
             "com/wsttxm/riskenginesdk/collector/native_layer/NativeCollectorBridge").c_str());
@@ -183,6 +168,7 @@ void inspect_class_loader_chain(JNIEnv *env, std::vector<std::string> &tokens) {
         if (entry.find(OBF("pathclassloader")) != std::string::npos
             || entry.find(OBF("bootclassloader")) != std::string::npos
             || entry.find(OBF("dexclassloader")) != std::string::npos
+            || entry.find(OBF("inmemorydexclassloader")) != std::string::npos
             || entry.find(OBF("delegatelastclassloader")) != std::string::npos) {
             continue;
         }
@@ -190,33 +176,29 @@ void inspect_class_loader_chain(JNIEnv *env, std::vector<std::string> &tokens) {
     }
 }
 
-/**
- * Confirms the JNIEnv slots this module itself relies on still point into
- * libart. If they are redirected, the reflection results above cannot be
- * trusted, and that fact belongs in the report rather than being assumed away.
- */
-void inspect_reflection_slots(JNIEnv *env, std::vector<std::string> &tokens) {
-    auto maps = read_self_maps();
+void inspect_reflection_slots(JNIEnv *env, const std::vector<MapEntry> &maps,
+                              std::vector<std::string> &tokens) {
     uintptr_t art_start = 0, art_end = 0;
+    const std::string libart = OBF("libart.so");
     for (const auto &entry : maps) {
         if (!is_rx(entry)) continue;
-        if (entry.path.find(OBF("libart.so")) == std::string::npos) continue;
+        if (entry.path.find(libart) == std::string::npos) continue;
         if (art_start == 0 || entry.start < art_start) art_start = entry.start;
         if (entry.end > art_end) art_end = entry.end;
     }
     if (art_start == 0) return;
 
     struct Slot {
-        const char *name;
+        std::string name;
         const void *pointer;
     };
     const Slot slots[] = {
-            {"GetMethodID", reinterpret_cast<const void *>(env->functions->GetMethodID)},
-            {"GetStaticMethodID", reinterpret_cast<const void *>(env->functions->GetStaticMethodID)},
-            {"ToReflectedMethod", reinterpret_cast<const void *>(env->functions->ToReflectedMethod)},
-            {"CallIntMethod", reinterpret_cast<const void *>(env->functions->CallIntMethod)},
-            {"RegisterNatives", reinterpret_cast<const void *>(env->functions->RegisterNatives)},
-            {"GetStringUTFChars", reinterpret_cast<const void *>(env->functions->GetStringUTFChars)},
+            {OBF("GetMethodID"), reinterpret_cast<const void *>(env->functions->GetMethodID)},
+            {OBF("GetStaticMethodID"), reinterpret_cast<const void *>(env->functions->GetStaticMethodID)},
+            {OBF("ToReflectedMethod"), reinterpret_cast<const void *>(env->functions->ToReflectedMethod)},
+            {OBF("CallIntMethod"), reinterpret_cast<const void *>(env->functions->CallIntMethod)},
+            {OBF("RegisterNatives"), reinterpret_cast<const void *>(env->functions->RegisterNatives)},
+            {OBF("GetStringUTFChars"), reinterpret_cast<const void *>(env->functions->GetStringUTFChars)},
     };
     for (const auto &slot : slots) {
         auto addr = reinterpret_cast<uintptr_t>(slot.pointer);
@@ -228,28 +210,31 @@ void inspect_reflection_slots(JNIEnv *env, std::vector<std::string> &tokens) {
 
 }  // namespace
 
-std::string native_get_art_hook_evidence(JNIEnv *env) {
+std::string native_get_art_hook_evidence(JNIEnv *env, const std::vector<MapEntry> &maps) {
     std::vector<std::string> tokens;
     if (env == nullptr) return join_tokens(tokens);
 
-    inspect_reflection_slots(env, tokens);
+    inspect_reflection_slots(env, maps, tokens);
     inspect_class_loader_chain(env, tokens);
 
-    // Methods that must not be native on a clean device. Checked by mechanism,
-    // so a renamed framework is still caught. Do not include
-    // java.lang.reflect.Method.invoke: Android's own libcore declares it native.
+    // Non-native methods that must never flip to ACC_NATIVE at runtime.
+    // Includes both platform APIs and public/kept SDK entry points.
     struct Probe {
-        const char *cls;
-        const char *method;
-        const char *signature;
+        std::string cls;
+        std::string method;
+        std::string signature;
         bool is_static;
     };
+    const std::string bridge_cls =
+            OBF("com/wsttxm/riskenginesdk/collector/native_layer/NativeCollectorBridge");
+    const std::string engine_cls = OBF("com/wsttxm/riskenginesdk/RiskEngine");
     const Probe probes[] = {
-            {"java/lang/Runtime", "exec",
-             "(Ljava/lang/String;)Ljava/lang/Process;", false},
-            {"java/io/File", "exists", "()Z", false},
-            {"com/wsttxm/riskenginesdk/collector/native_layer/NativeCollectorBridge",
-             "isNativeAvailable", "()Z", true},
+            {OBF("java/lang/Runtime"), OBF("exec"),
+             OBF("(Ljava/lang/String;)Ljava/lang/Process;"), false},
+            {OBF("java/io/File"), OBF("exists"), OBF("()Z"), false},
+            {bridge_cls, OBF("isNativeAvailable"), OBF("()Z"), true},
+            {engine_cls, OBF("collectSync"),
+             OBF("()Lcom/wsttxm/riskenginesdk/model/RiskReport;"), true},
     };
     for (const auto &probe : probes) {
         bool found = false;
@@ -259,5 +244,30 @@ std::string native_get_art_hook_evidence(JNIEnv *env) {
         }
     }
 
+    // Native bridge methods that must remain ACC_NATIVE at runtime.
+    // Java-layer hooks (e.g. Frida Java.use().implementation) that replace a
+    // native method with a managed proxy clear ACC_NATIVE on the ArtMethod.
+    const Probe native_probes[] = {
+            {bridge_cls, OBF("nativeGetHookEvidenceRaw"), OBF("()Ljava/lang/String;"), true},
+            {bridge_cls, OBF("nativeGetRootEvidenceRaw"), OBF("()Ljava/lang/String;"), true},
+            {bridge_cls, OBF("nativeGetSealedVerdictWithChallengeRaw"),
+             OBF("(J)Ljava/lang/String;"), true},
+            {bridge_cls, OBF("nativeVerifySealedVerdictPackedRaw"),
+             OBF("(Ljava/lang/String;J)J"), true},
+    };
+    for (const auto &probe : native_probes) {
+        bool found = false;
+        bool is_native = method_is_native(env, probe.cls, probe.method, probe.signature,
+                                          probe.is_static, found);
+        if (found && !is_native) {
+            add_token(tokens, OBF("art_native_cleared:") + probe.method);
+        }
+    }
+
     return join_tokens(tokens);
+}
+
+std::string native_get_art_hook_evidence(JNIEnv *env) {
+    auto maps = read_self_maps();
+    return native_get_art_hook_evidence(env, maps);
 }

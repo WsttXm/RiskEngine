@@ -187,14 +187,23 @@ public class RiskReport {
             }
             String name = detection.getDetectorName();
             List<String> details = detection.getDetails();
-            if (containsAny(details, "inline_hook:", "got_hook:")) {
+            if (containsAny(details, "inline_hook:", "got_hook:",
+                    "jni_self_hook:", "verdict_unverifiable:",
+                    "late_text_mismatch", "late_wx_self",
+                    "memfd_private_elf:", "late_memfd_elf",
+                    "art_native_cleared:",
+                    "sealed:hook_inline", "sealed:text_mismatch",
+                    "sealed:jni_self_hook")) {
+                return true;
+            }
+            if ("native_tamper".equals(name) && containsAny(details, "text_mismatch")) {
                 return true;
             }
             if ("hook_framework".equals(name) && containsAny(details,
                     "frida_pid_port", "maps:frida", "maps:gadget")) {
                 return true;
             }
-            if ("signal_correlation".equals(name) && containsAny(details, "C3:")) {
+            if ("signal_correlation".equals(name) && containsAny(details, "C3:", "C6:")) {
                 return true;
             }
         }
@@ -284,7 +293,8 @@ public class RiskReport {
 
     private boolean isSyntheticCollector(String fieldName) {
         return "hook_memory_signals".equals(fieldName)
-                || "runtime_integrity_score_inputs".equals(fieldName);
+                || "runtime_integrity_score_inputs".equals(fieldName)
+                || "fingerprint_id".equals(fieldName);
     }
 
     private ReportStatus computeReportStatus() {

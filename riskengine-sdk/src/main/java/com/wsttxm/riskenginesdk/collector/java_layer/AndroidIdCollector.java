@@ -2,6 +2,7 @@ package com.wsttxm.riskenginesdk.collector.java_layer;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -11,20 +12,16 @@ import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.PrivacyUtils;
-import com.wsttxm.riskenginesdk.util.ShellExecutor;
 
 public class AndroidIdCollector extends BaseCollector {
-    private static final String CONTENT_QUERY_COMMAND =
-            "content query --uri content://settings/secure --where \"name=\\'android_id\\'\"";
-    private final SignalSnapshot signals;
+    private static final Uri SECURE_URI = Uri.parse("content://settings/secure");
 
     public AndroidIdCollector(Context context) {
-        this(context, new SignalSnapshot(context));
+        this(context, null);
     }
 
     public AndroidIdCollector(Context context, SignalSnapshot signals) {
         super(context);
-        this.signals = signals;
     }
 
     @Override
@@ -41,7 +38,7 @@ public class AndroidIdCollector extends BaseCollector {
     protected void collect(CollectorResult result) {
         collectViaSettingsApi(result);
         collectViaContentResolver(result);
-        collectViaContentQuery(result);
+        collectViaProviderQuery(result);
     }
 
     @SuppressLint("HardwareIds")
@@ -58,7 +55,7 @@ public class AndroidIdCollector extends BaseCollector {
     private void collectViaContentResolver(CollectorResult result) {
         try {
             Bundle callResult = context.getContentResolver().call(
-                    Uri.parse("content://settings/secure"),
+                    SECURE_URI,
                     "GET_secure",
                     "android_id",
                     new Bundle()
@@ -72,22 +69,24 @@ public class AndroidIdCollector extends BaseCollector {
         }
     }
 
-    private void collectViaContentQuery(CollectorResult result) {
-        try {
-            ShellExecutor.Result query = signals.getShellResult(CONTENT_QUERY_COMMAND);
-            String raw = query.getStdout();
-            if (query.isSuccess() && raw.contains("value=")) {
-                int idx = raw.indexOf("value=");
-                String value = raw.substring(idx + 6).trim();
-                if (value.contains(",")) {
-                    value = value.substring(0, value.indexOf(","));
-                }
-                if (!"NULL".equalsIgnoreCase(value) && !"null".equalsIgnoreCase(value)) {
-                    addHashed(result, "content_query", value);
+    /**
+     * In-process ContentResolver query without forking /system/bin/sh.
+     */
+    private void collectViaProviderQuery(CollectorResult result) {
+        try (Cursor cursor = context.getContentResolver().query(
+                SECURE_URI,
+                new String[]{"value"},
+                "name=?",
+                new String[]{"android_id"},
+                null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                String value = cursor.getString(0);
+                if (value != null && !"null".equalsIgnoreCase(value.trim())) {
+                    addHashed(result, "provider_query", value.trim());
                 }
             }
         } catch (Exception e) {
-            CLog.e("AndroidId content_query failed", e);
+            CLog.e("AndroidId provider_query failed", e);
         }
     }
 

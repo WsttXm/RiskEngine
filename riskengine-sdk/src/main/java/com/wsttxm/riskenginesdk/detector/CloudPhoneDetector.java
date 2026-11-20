@@ -9,6 +9,7 @@ import android.hardware.SensorManager;
 import android.hardware.camera2.CameraManager;
 import android.os.BatteryManager;
 
+import com.wsttxm.riskenginesdk.core.GpuClassifier;
 import com.wsttxm.riskenginesdk.core.SignalResult;
 import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.generated.DetectionLists;
@@ -48,7 +49,9 @@ public class CloudPhoneDetector extends BaseDetector {
         else coverage.failure("packages_unavailable");
         checkCloudProperties(strong, coverage);
         checkVirtualGpu(strong, coverage);
-        checkWiredInterface(strong, coverage);
+        // Wired ethN can legitimately appear on USB-C docks, tablets, and ChromeOS;
+        // treat as a weak corroborating signal rather than standalone HIGH danger.
+        checkWiredInterface(weak, coverage);
         if (checkBatteryAnomaly(weak)) coverage.success();
         else coverage.failure("battery_unavailable");
         if (checkCameraCount(weak)) coverage.success();
@@ -103,14 +106,9 @@ public class CloudPhoneDetector extends BaseDetector {
         }
         coverage.success();
         SignalSnapshot.GpuIdentity identity = gpu.getValue();
-        String haystack = (identity.renderer + " " + identity.vendor)
-                .toLowerCase(Locale.ROOT);
-        if (haystack.isBlank()) return;
-        for (String marker : DetectionLists.VIRTUAL_GPU_MARKERS) {
-            if (haystack.contains(marker)) {
-                evidence.add("virtual_gpu:" + marker + ":" + identity.renderer);
-                return;
-            }
+        String marker = GpuClassifier.matchVirtualMarker(identity.vendor, identity.renderer);
+        if (marker != null) {
+            evidence.add("virtual_gpu:" + marker + ":" + identity.renderer);
         }
     }
 
@@ -122,6 +120,12 @@ public class CloudPhoneDetector extends BaseDetector {
         SignalResult<List<String>> interfaces = signals.getNetworkInterfaceNames();
         if (!interfaces.isSuccess() || interfaces.getValue() == null
                 || interfaces.getValue().isEmpty()) {
+            if ("internet_permission_missing".equals(interfaces.getFailureReason())) {
+                // Zero-permission host apps intentionally omit INTERNET; treat as
+                // cleanly skipped rather than a runtime coverage failure.
+                coverage.success();
+                return;
+            }
             coverage.failure("net_iface:" + interfaces.getFailureReason());
             return;
         }

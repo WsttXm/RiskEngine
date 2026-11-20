@@ -14,9 +14,12 @@ import com.wsttxm.riskenginesdk.util.ProcfsUtils;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.File;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -47,12 +50,16 @@ public final class SignalSnapshot {
     private volatile SignalResult<String> nativeProcessTokens;
     private volatile SignalResult<String> soIntegrity;
     private volatile SignalResult<ScreenMetrics> screenMetrics;
+    private volatile SignalResult<Map<String, String>> gpuAttributes;
     private volatile SignalResult<GpuIdentity> gpuIdentity;
     private volatile SignalResult<List<String>> networkInterfaceNames;
     private volatile SignalResult<String> mountNamespaceEvidence;
     private volatile SignalResult<String> kernelRootEvidence;
     private volatile SignalResult<String> jniSelfIntegrity;
     private volatile SignalResult<String> sealedVerdict;
+    private volatile SignalResult<SealedVerdictSample> sealedVerdictSample;
+    private volatile SignalResult<Map<String, String>> procCmdlineBootProps;
+    private volatile SignalResult<Integer> possibleCpuCores;
 
     public SignalSnapshot(Context context) {
         Context application = context == null ? null : context.getApplicationContext();
@@ -77,12 +84,26 @@ public final class SignalSnapshot {
         nativeProcessTokens = null;
         soIntegrity = null;
         screenMetrics = null;
+        gpuAttributes = null;
         gpuIdentity = null;
         networkInterfaceNames = null;
         mountNamespaceEvidence = null;
         kernelRootEvidence = null;
         jniSelfIntegrity = null;
         sealedVerdict = null;
+        sealedVerdictSample = null;
+        procCmdlineBootProps = null;
+        possibleCpuCores = null;
+    }
+
+    public static final class SealedVerdictSample {
+        public final long challenge;
+        public final String blob;
+
+        public SealedVerdictSample(long challenge, String blob) {
+            this.challenge = challenge;
+            this.blob = blob == null ? "" : blob;
+        }
     }
 
     /** GPU identity strings, shared by the fingerprint and cloud detectors. */
@@ -384,10 +405,132 @@ public final class SignalSnapshot {
                 NativeCollectorBridge::getSealedVerdictResult);
     }
 
+    /** Challenge-bound sealed verdict sample issued once per report. */
+    public SignalResult<SealedVerdictSample> getSealedVerdictSample() {
+        return cachedNative(() -> sealedVerdictSample, v -> sealedVerdictSample = v, () -> {
+            long challenge = new SecureRandom().nextLong();
+            if (challenge == 0L) challenge = 1L;
+            SignalResult<String> raw = NativeCollectorBridge.getSealedVerdictResult(challenge);
+            if (!raw.isSuccess() || raw.getValue() == null || raw.getValue().isEmpty()) {
+                return raw.getStatus() == SignalResult.Status.UNAVAILABLE
+                        ? SignalResult.unavailable(raw.getFailureReason())
+                        : SignalResult.error(raw.getFailureReason());
+            }
+            return SignalResult.success(new SealedVerdictSample(challenge, raw.getValue()));
+        });
+    }
+
+    /** Boot parameters extracted from /proc/cmdline via native raw syscall. */
+    public SignalResult<Map<String, String>> getProcCmdlineBootProps() {
+        return cachedNative(() -> procCmdlineBootProps, v -> procCmdlineBootProps = v, () -> {
+            SignalResult<String> raw = NativeCollectorBridge.getProcCmdlineBootPropsResult();
+            if (!raw.isSuccess()) {
+                return raw.getStatus() == SignalResult.Status.UNAVAILABLE
+                        ? SignalResult.unavailable(raw.getFailureReason())
+                        : SignalResult.error(raw.getFailureReason());
+            }
+            Map<String, String> parsed = new LinkedHashMap<>();
+            String text = raw.getValue();
+            if (text != null && !text.isBlank()) {
+                for (String pair : text.split(";")) {
+                    int eq = pair.indexOf('=');
+                    if (eq > 0 && eq + 1 < pair.length()) {
+                        parsed.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+                    }
+                }
+            }
+            return parsed.isEmpty()
+                    ? SignalResult.empty(Collections.emptyMap())
+                    : SignalResult.success(Collections.unmodifiableMap(parsed));
+        });
+    }
+
+    /** Physical possible CPU count from sysfs (unaffected by runtime hotplug offline). */
+    public SignalResult<Integer> getPossibleCpuCoreCount() {
+        SignalResult<Integer> cached = possibleCpuCores;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = possibleCpuCores;
+            if (cached == null) {
+                try {
+                    String raw = ProcfsUtils.readFirstLine("/sys/devices/system/cpu/possible");
+                    if (raw == null || raw.isBlank()) {
+                        raw = ProcfsUtils.readFirstLine("/sys/devices/system/cpu/present");
+                    }
+                    int count = parseCpuRangeCount(raw);
+                    cached = count > 0
+                            ? SignalResult.success(count)
+                            : SignalResult.unavailable("cpu_possible_unavailable");
+                } catch (Exception e) {
+                    cached = SignalResult.error(e.getClass().getSimpleName());
+                }
+                possibleCpuCores = cached;
+            }
+        }
+        return cached;
+    }
+
+    static int parseCpuRangeCount(String raw) {
+        if (raw == null || raw.isBlank()) return -1;
+        int total = 0;
+        for (String part : raw.trim().split(",")) {
+            String segment = part.trim();
+            if (segment.isEmpty()) continue;
+            int dash = segment.indexOf('-');
+            try {
+                if (dash < 0) {
+                    Integer.parseInt(segment);
+                    total += 1;
+                } else {
+                    int start = Integer.parseInt(segment.substring(0, dash).trim());
+                    int end = Integer.parseInt(segment.substring(dash + 1).trim());
+                    if (end >= start) {
+                        total += (end - start + 1);
+                    }
+                }
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+        return total > 0 ? total : -1;
+    }
+
     /**
-     * Reads GPU vendor and renderer once per report through an offscreen EGL
-     * context. Cached because creating a context is comparatively expensive and
-     * both the fingerprint collector and the cloud detector need the values.
+     * Full GPU attributes from a single offscreen EGL pbuffer probe, shared by
+     * {@link GpuInfoCollector} and {@link #getGpuIdentity()}.
+     */
+    public SignalResult<Map<String, String>> getGpuAttributes() {
+        SignalResult<Map<String, String>> cached = gpuAttributes;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = gpuAttributes;
+            if (cached == null) {
+                try {
+                    CollectorResult probe = new CollectorResult("gpu_probe");
+                    GpuInfoCollector.probeInto(probe);
+                    probe.finish();
+                    if (probe.getStatus() == CollectorResult.Status.SUCCESS
+                            && !probe.getValues().isEmpty()) {
+                        cached = SignalResult.success(Collections.unmodifiableMap(
+                                GpuInfoCollector.copyValues(probe)));
+                    } else if (probe.getStatus() == CollectorResult.Status.ERROR) {
+                        cached = SignalResult.error(
+                                probe.getError() == null ? "egl_error" : probe.getError());
+                    } else {
+                        cached = SignalResult.unavailable(
+                                probe.getError() == null ? "egl_unavailable" : probe.getError());
+                    }
+                } catch (Exception | LinkageError e) {
+                    cached = SignalResult.error(e.getClass().getSimpleName());
+                }
+                gpuAttributes = cached;
+            }
+        }
+        return cached;
+    }
+
+    /**
+     * Reads GPU vendor and renderer from the cached single EGL probe.
      */
     public SignalResult<GpuIdentity> getGpuIdentity() {
         SignalResult<GpuIdentity> cached = gpuIdentity;
@@ -395,19 +538,19 @@ public final class SignalSnapshot {
         synchronized (this) {
             cached = gpuIdentity;
             if (cached == null) {
-                try {
-                    CollectorResult probe = new CollectorResult("gpu_probe");
-                    GpuInfoCollector.probeInto(probe);
-                    String vendor = probe.getValues().get("vendor");
-                    String renderer = probe.getValues().get("renderer");
+                SignalResult<Map<String, String>> attrs = getGpuAttributes();
+                if (!attrs.isSuccess() || attrs.getValue() == null) {
+                    cached = attrs.getStatus() == SignalResult.Status.ERROR
+                            ? SignalResult.error(attrs.getFailureReason())
+                            : SignalResult.unavailable(attrs.getFailureReason());
+                } else {
+                    String vendor = attrs.getValue().get("vendor");
+                    String renderer = attrs.getValue().get("renderer");
                     if (vendor == null && renderer == null) {
-                        cached = SignalResult.unavailable(
-                                probe.getError() == null ? "egl_unavailable" : probe.getError());
+                        cached = SignalResult.unavailable("gpu_identity_missing");
                     } else {
                         cached = SignalResult.success(new GpuIdentity(vendor, renderer));
                     }
-                } catch (Exception | LinkageError e) {
-                    cached = SignalResult.error(e.getClass().getSimpleName());
                 }
                 gpuIdentity = cached;
             }
@@ -434,6 +577,14 @@ public final class SignalSnapshot {
                         }
                     }
                     if (names.isEmpty()) {
+                        boolean hasInternet = context != null
+                                && context.checkSelfPermission(android.Manifest.permission.INTERNET)
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                        if (!hasInternet) {
+                            cached = SignalResult.unavailable("internet_permission_missing");
+                            networkInterfaceNames = cached;
+                            return cached;
+                        }
                         java.util.Enumeration<java.net.NetworkInterface> list =
                                 java.net.NetworkInterface.getNetworkInterfaces();
                         while (list != null && list.hasMoreElements()) {

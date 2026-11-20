@@ -1,6 +1,8 @@
 package com.wsttxm.riskenginesdk.detector;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.model.DetectionStatus;
@@ -13,7 +15,12 @@ import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -103,9 +110,10 @@ public class HookFrameworkDetector extends BaseDetector {
         try {
             StackTraceElement[] stack = Thread.currentThread().getStackTrace();
             for (StackTraceElement elem : stack) {
-                if (elem.getClassName().contains("xposed") ||
-                        elem.getClassName().contains("lsposed") ||
-                        elem.getClassName().contains("edxposed")) {
+                String cls = elem.getClassName().toLowerCase(Locale.ROOT);
+                if (cls.contains("xposed")
+                        || cls.contains("lsposed")
+                        || cls.contains("edxposed")) {
                     addMedium(details, score, "xposed_stack:" + elem.getClassName());
                     break;
                 }
@@ -158,13 +166,19 @@ public class HookFrameworkDetector extends BaseDetector {
             coverage.failure("frida_maps:" + e.getClass().getSimpleName());
         }
 
-        // Observe the TCP table without actively connecting to local services.
+        // Observe the TCP table; when the host app holds INTERNET permission,
+        // also perform a short loopback D-Bus AUTH handshake on port 27042 so
+        // idle frida-server / renamed server daemons are caught even on Android 10+
+        // where /proc/net/tcp is SELinux-blocked.
         try {
             SignalResult<Set<Integer>> ports = signals.getLoopbackListeningPorts();
             if (!ports.isSuccess() || ports.getValue() == null) {
                 coverage.failure("frida_ports:" + ports.getFailureReason());
             } else if (ports.getValue().contains(DEFAULT_FRIDA_PORT)) {
                 addWeak(details, score, "frida_port_open:" + DEFAULT_FRIDA_PORT);
+            }
+            if (probeFridaDbusLoopback(DEFAULT_FRIDA_PORT)) {
+                addStrong(details, score, "frida_dbus_port:" + DEFAULT_FRIDA_PORT);
             }
             if (ports.isSuccess()) coverage.success();
         } catch (Exception e) {
@@ -175,21 +189,31 @@ public class HookFrameworkDetector extends BaseDetector {
         try {
             java.io.File taskDir = new java.io.File("/proc/self/task");
             java.io.File[] tasks = taskDir.listFiles();
+            boolean sawGmain = false;
+            boolean sawFridaThread = false;
             if (tasks != null) {
                 for (java.io.File task : tasks) {
                     java.io.File comm = new java.io.File(task, "comm");
                     if (comm.exists()) {
                         try (BufferedReader br = new BufferedReader(new FileReader(comm))) {
                             String threadName = br.readLine();
-                            if (threadName != null && (threadName.contains("gum-js-loop") ||
-                                    threadName.contains("gmain") ||
-                                    threadName.contains("frida"))) {
+                            if (threadName == null) continue;
+                            String lower = threadName.toLowerCase(Locale.ROOT);
+                            if (lower.contains("gum-js-loop") || lower.contains("frida")) {
+                                sawFridaThread = true;
                                 addMedium(details, score,
-                                        "frida_thread:" + matchingThreadMarker(threadName));
+                                        "frida_thread:" + matchingThreadMarker(lower));
+                            } else if (lower.contains("gmain")) {
+                                sawGmain = true;
                             }
                         }
                     }
                 }
+            }
+            // Standalone gmain belongs to benign GLib apps; only attach as diagnostic
+            // context when a Frida-specific thread was also observed.
+            if (sawGmain && sawFridaThread) {
+                details.add("thread:gmain");
             }
             if (tasks == null) {
                 coverage.failure("frida_threads:procfs_unavailable");
@@ -219,6 +243,30 @@ public class HookFrameworkDetector extends BaseDetector {
             CLog.e("Frida pid correlation failed", e);
             coverage.failure("frida_processes:" + e.getClass().getSimpleName());
         }
+    }
+
+    private boolean probeFridaDbusLoopback(int port) {
+        if (context == null || context.checkSelfPermission(Manifest.permission.INTERNET)
+                != PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress("127.0.0.1", port), 120);
+            socket.setSoTimeout(120);
+            OutputStream out = socket.getOutputStream();
+            out.write("\0AUTH\r\n".getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            InputStream in = socket.getInputStream();
+            byte[] buf = new byte[64];
+            int n = in.read(buf);
+            if (n > 0) {
+                String reply = new String(buf, 0, n, StandardCharsets.US_ASCII);
+                return reply.contains("REJECT");
+            }
+        } catch (Exception ignored) {
+            // Connection refused / timeout means no D-Bus server on this port.
+        }
+        return false;
     }
 
     private String matchingThreadMarker(String threadName) {

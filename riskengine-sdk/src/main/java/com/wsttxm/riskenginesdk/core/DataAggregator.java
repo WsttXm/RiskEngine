@@ -23,6 +23,7 @@ public class DataAggregator {
     }
 
     private final FingerprintStore fingerprintStore;
+    private final String ephemeralSalt;
 
     public DataAggregator() {
         this(null);
@@ -30,11 +31,14 @@ public class DataAggregator {
 
     /**
      * @param fingerprintStore local salt and continuity store. When null the
-     *                         fingerprint ID is still computed but with a
-     *                         non-persistent salt and no continuity reporting.
+     *                         fingerprint ID is still computed using an
+     *                         ephemeral per-instance salt without continuity.
      */
     public DataAggregator(FingerprintStore fingerprintStore) {
         this.fingerprintStore = fingerprintStore;
+        this.ephemeralSalt = fingerprintStore == null
+                ? FingerprintStore.generateRandomHex(16)
+                : null;
     }
 
     public RiskReport aggregate(List<CollectorResult> collectorResults,
@@ -72,24 +76,22 @@ public class DataAggregator {
             CLog.w("Multi-source validation detected inconsistency: " + evidence);
         }
 
-        addSyntheticFingerprintSignals(fingerprint, allDetections);
         FingerprintId fingerprintId = buildFingerprintId(fingerprint, allDetections);
+        addSyntheticFingerprintSignals(fingerprint, allDetections);
         return new RiskReport(fingerprint, allDetections, scene, fingerprintId);
     }
 
     /**
      * Composes the layered fingerprint ID and records continuity.
      *
-     * A hardware layer that changed between runs is surfaced as a detection,
-     * because on a device whose hardware genuinely cannot change it indicates
-     * spoofed values. A degraded collection is reported as coverage loss rather
-     * than a mismatch, so a missing GPU read is never mistaken for tampering.
+     * Runs before synthetic runtime_integrity_score_inputs so any
+     * fingerprint_continuity finding is reflected in the score summary.
      */
     private FingerprintId buildFingerprintId(DeviceFingerprint fingerprint,
                                              List<DetectionResult> detections) {
         try {
             String salt = fingerprintStore == null
-                    ? "riskengine" : fingerprintStore.getOrCreateSalt();
+                    ? ephemeralSalt : fingerprintStore.getOrCreateSalt();
             FingerprintId id = FingerprintIdBuilder.build(fingerprint, salt);
 
             CollectorResult idResult = new CollectorResult("fingerprint_id");
@@ -118,16 +120,25 @@ public class DataAggregator {
                 idResult.addValue("continuity", continuity.getState().name());
                 idResult.addValue("observation_count",
                         String.valueOf(continuity.getObservationCount()));
+                if (!continuity.getChangedBuckets().isEmpty()) {
+                    idResult.addValue("changed_buckets",
+                            String.join(",", continuity.getChangedBuckets()));
+                }
                 if (continuity.getState() == FingerprintStore.State.HARDWARE_CHANGED) {
-                    List<String> details =
-                            List.of("hardware_layer_changed_between_observations");
+                    List<String> details = new ArrayList<>();
+                    details.add("hardware_layer_changed_between_observations");
+                    if (!continuity.getChangedBuckets().isEmpty()) {
+                        details.add("changed_buckets:"
+                                + String.join(",", continuity.getChangedBuckets()));
+                    }
                     detections.add(new DetectionResult(
                             "fingerprint_continuity",
                             RiskLevel.MEDIUM,
                             DetectionStatus.WARNING,
                             4, 10, false,
-                            details, details.get(0)));
-                    CLog.w("Fingerprint hardware layer changed between observations");
+                            details, String.join("; ", details)));
+                    CLog.w("Fingerprint hardware layer changed between observations: "
+                            + String.join(",", continuity.getChangedBuckets()));
                 }
             }
             fingerprint.addResult(idResult);

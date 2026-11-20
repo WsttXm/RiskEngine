@@ -63,8 +63,12 @@ public class RootDetector extends BaseDetector {
                 for (String token : nativeDetails.getValue().split(",")) {
                     String item = token.trim();
                     if (item.isEmpty()) continue;
+                    if (item.startsWith("ns_restricted:")) {
+                        // Expected SELinux sandbox restriction on /proc/1/mountinfo
+                        // on stock Android 10+; neither risk evidence nor a failure.
+                        continue;
+                    }
                     if (item.startsWith("ns_unreadable")) {
-                        // Expected for an unprivileged app on a stock device.
                         // Recorded as a coverage gap, never as evidence, so a
                         // normal device is not penalised for it.
                         coverage.failure("mount_ns:" + item);

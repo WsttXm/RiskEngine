@@ -1,5 +1,6 @@
 #include "periodic_monitor.h"
 
+#include "native_hook_detector.h"
 #include "native_integrity.h"
 #include "native_debug_detector.h"
 #include "../util/maps_parser.h"
@@ -10,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <mutex>
 #include <pthread.h>
@@ -28,7 +30,6 @@ std::mutex g_sleep_mutex;
 std::condition_variable g_sleep_condition;
 std::mutex g_findings_mutex;
 std::vector<std::string> g_findings;
-JavaVM *g_vm = nullptr;
 
 bool has_csv_token(const std::string &value, const std::string &wanted) {
     size_t start = 0;
@@ -50,7 +51,6 @@ void latch(const std::string &token) {
     }
 }
 
-/** Waits with jitter, but wakes immediately when shutdown is requested. */
 bool jittered_wait(unsigned base_seconds) {
     unsigned jitter = 0;
     int fd = static_cast<int>(my_openat(AT_FDCWD, OBF("/dev/urandom").c_str(),
@@ -70,65 +70,65 @@ bool jittered_wait(unsigned base_seconds) {
     return g_running.load(std::memory_order_acquire);
 }
 
-/**
- * One pass of the cheap checks.
- *
- * Each of these detects a change to running code or an attached tracer, which
- * is precisely the class of attack that arrives after the initial snapshot.
- */
 void run_pass() {
-    // Text-segment divergence: catches a hook written into our own code after
-    // the first collection completed.
-    const std::string self = native_get_so_integrity_evidence();
-    // Availability tokens such as text_mismatch:apk_embedded are coverage
-    // failures, not proof that executable bytes changed.
-    if (has_csv_token(self, OBF("text_mismatch"))) {
+    if (!g_running.load(std::memory_order_acquire)) return;
+
+    // Share one /proc/self/maps read across all checks in this pass.
+    auto maps = read_self_maps();
+    if (!g_running.load(std::memory_order_acquire)) return;
+
+    const std::string self = native_get_so_integrity_evidence(maps);
+    if (has_csv_token(self, OBF("text_mismatch"))
+        || has_csv_token(self, OBF("text_mismatch:anonymous_map"))) {
         latch(OBF("late_text_mismatch"));
     }
 
-    // A tracer that attached after startup.
+    if (!g_running.load(std::memory_order_acquire)) return;
     if (get_tracer_pid() > 0) {
         latch(OBF("late_tracer_attached"));
     }
 
-    // A writable+executable mapping of our own code, or of libart/libc, that
-    // was not present at load time.
-    for (const auto &entry : read_self_maps()) {
-        if (entry.perms.size() < 3) continue;
-        if (entry.perms[1] != 'w' || entry.perms[2] != 'x') continue;
-        std::string lower = entry.path;
-        std::transform(lower.begin(), lower.end(), lower.begin(),
+    if (!g_running.load(std::memory_order_acquire)) return;
+
+    const MapEntry *self_code = find_map_containing(
+            maps, reinterpret_cast<uintptr_t>(&run_pass));
+    for (const auto &entry : maps) {
+        if (entry.perms.size() >= 3 && entry.perms[1] == 'w' && entry.perms[2] == 'x') {
+            if (self_code != nullptr && entry.start == self_code->start) {
+                latch(OBF("late_wx_self"));
+            } else {
+                std::string lower_path = entry.path;
+                std::transform(lower_path.begin(), lower_path.end(), lower_path.begin(),
+                               [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+                if (lower_path.find(OBF("libriskengine.so")) != std::string::npos) {
+                    latch(OBF("late_wx_self"));
+                } else if (lower_path.find(OBF("libart.so")) != std::string::npos) {
+                    latch(OBF("late_wx_art"));
+                }
+            }
+        }
+
+        std::string lower_raw = entry.raw;
+        std::transform(lower_raw.begin(), lower_raw.end(), lower_raw.begin(),
                        [](unsigned char c) { return static_cast<char>(::tolower(c)); });
-        if (lower.find(OBF("libriskengine.so")) != std::string::npos) {
-            latch(OBF("late_wx_self"));
-        } else if (lower.find(OBF("libart.so")) != std::string::npos) {
-            latch(OBF("late_wx_art"));
+        if (lower_raw.find(OBF("frida")) != std::string::npos
+            || lower_raw.find(OBF("libgadget")) != std::string::npos) {
+            latch(OBF("late_module:frida"));
+        }
+        if (lower_raw.find(OBF("lsposed")) != std::string::npos
+            || lower_raw.find(OBF("lspd")) != std::string::npos) {
+            latch(OBF("late_module:lsposed"));
         }
     }
 
-    // A framework module mapped in after startup.
-    for (const auto &entry : read_self_maps()) {
-        std::string lower = entry.raw;
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return static_cast<char>(::tolower(c)); });
-        if (lower.find(OBF("frida")) != std::string::npos
-            || lower.find(OBF("libgadget")) != std::string::npos) {
-            latch(OBF("late_module:frida"));
-            break;
-        }
-        if (lower.find(OBF("lsposed")) != std::string::npos
-            || lower.find(OBF("lspd")) != std::string::npos) {
-            latch(OBF("late_module:lsposed"));
-            break;
-        }
+    if (!native_scan_memfd_private_elfs(maps).empty()) {
+        latch(OBF("late_memfd_elf"));
     }
 
     g_passes.fetch_add(1, std::memory_order_relaxed);
 }
 
 void *monitor_main(void *) {
-    // First pass is delayed: at startup the values are the same ones the
-    // initial collection already reported, so an immediate pass adds nothing.
     while (g_running.load(std::memory_order_acquire)) {
         if (!jittered_wait(20)) break;
         run_pass();
@@ -138,18 +138,17 @@ void *monitor_main(void *) {
 
 }  // namespace
 
-void native_monitor_start(JavaVM *vm) {
+void native_monitor_start(JavaVM *) {
     std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mutex);
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true)) {
-        return;  // Already running.
+        return;
     }
     {
         std::lock_guard<std::mutex> findings_lock(g_findings_mutex);
         g_findings.clear();
         g_passes.store(0, std::memory_order_relaxed);
     }
-    g_vm = vm;
     if (pthread_create(&g_thread, nullptr, monitor_main, nullptr) != 0) {
         g_running.store(false, std::memory_order_release);
         return;

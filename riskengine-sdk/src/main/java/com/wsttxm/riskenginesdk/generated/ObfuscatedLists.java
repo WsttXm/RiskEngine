@@ -51,11 +51,17 @@ final class ObfuscatedLists {
     }
 
     private static byte[] hexToBytes(String hex) {
+        if (hex == null || (hex.length() & 1) != 0) {
+            return new byte[0];
+        }
         int length = hex.length() / 2;
         byte[] out = new byte[length];
         for (int i = 0; i < length; i++) {
             int hi = Character.digit(hex.charAt(i * 2), 16);
             int lo = Character.digit(hex.charAt(i * 2 + 1), 16);
+            if (hi < 0 || lo < 0) {
+                return new byte[0];
+            }
             out[i] = (byte) ((hi << 4) | lo);
         }
         return out;

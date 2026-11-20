@@ -8,6 +8,7 @@ import android.os.Build;
 
 import com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge;
 import com.wsttxm.riskenginesdk.core.EmulatorEvidenceClassifier;
+import com.wsttxm.riskenginesdk.core.GpuClassifier;
 import com.wsttxm.riskenginesdk.core.SignalResult;
 import com.wsttxm.riskenginesdk.core.SignalSnapshot;
 import com.wsttxm.riskenginesdk.generated.DetectionLists;
@@ -140,9 +141,12 @@ public class EmulatorDetector extends BaseDetector {
                     evidence.add("qemu_prop:" + prop);
                 }
             }
-            SignalResult<String> virtual = signals.getSystemProperty("ro.hardware.virtual");
-            if (virtual.isSuccess() && virtual.getValue() != null && !virtual.getValue().isBlank()) {
-                evidence.add("qemu_prop:ro.hardware.virtual");
+            // ro.hardware.virtual is denied via default_prop SELinux policy on API 33+.
+            if (Build.VERSION.SDK_INT < 33) {
+                SignalResult<String> virtual = signals.getSystemProperty("ro.hardware.virtual");
+                if (virtual.isSuccess() && virtual.getValue() != null && !virtual.getValue().isBlank()) {
+                    evidence.add("qemu_prop:ro.hardware.virtual");
+                }
             }
             coverage.success();
         } catch (Exception e) {
@@ -335,6 +339,11 @@ public class EmulatorDetector extends BaseDetector {
 
     private void checkEmulatorIp(List<String> evidence, CheckCoverage coverage) {
         try {
+            if (context == null || context.checkSelfPermission(android.Manifest.permission.INTERNET)
+                    != PackageManager.PERMISSION_GRANTED) {
+                coverage.success();
+                return;
+            }
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces != null && interfaces.hasMoreElements()) {
                 NetworkInterface ni = interfaces.nextElement();
@@ -403,14 +412,9 @@ public class EmulatorDetector extends BaseDetector {
         }
         coverage.success();
         SignalSnapshot.GpuIdentity identity = gpu.getValue();
-        String haystack = (identity.renderer + " " + identity.vendor)
-                .toLowerCase(Locale.ROOT);
-        if (haystack.isBlank()) return;
-        for (String marker : DetectionLists.VIRTUAL_GPU_MARKERS) {
-            if (haystack.contains(marker)) {
-                evidence.add("virtual_gpu:" + marker);
-                return;
-            }
+        String marker = GpuClassifier.matchVirtualMarker(identity.vendor, identity.renderer);
+        if (marker != null) {
+            evidence.add("virtual_gpu:" + marker);
         }
     }
 

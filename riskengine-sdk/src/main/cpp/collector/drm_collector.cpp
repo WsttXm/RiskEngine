@@ -1,4 +1,5 @@
 #include "drm_collector.h"
+#include "../util/obf_str.h"
 #include <jni.h>
 #include <string>
 #include <vector>
@@ -28,7 +29,8 @@ std::string get_drm_id(JNIEnv *env) {
     auto cleanup = [&]() {
         clear_pending_exception(env);
         if (mediaDrm != nullptr && mediaDrmClass != nullptr) {
-            jmethodID closeMethod = env->GetMethodID(mediaDrmClass, "close", "()V");
+            jmethodID closeMethod = env->GetMethodID(
+                    mediaDrmClass, OBF("close").c_str(), OBF("()V").c_str());
             if (closeMethod != nullptr && !env->ExceptionCheck()) {
                 env->CallVoidMethod(mediaDrm, closeMethod);
             }
@@ -42,13 +44,13 @@ std::string get_drm_id(JNIEnv *env) {
         if (uuidClass != nullptr) env->DeleteLocalRef(uuidClass);
     };
 
-    uuidClass = env->FindClass("java/util/UUID");
+    uuidClass = env->FindClass(OBF("java/util/UUID").c_str());
     if (uuidClass == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";
     }
 
-    jmethodID uuidCtor = env->GetMethodID(uuidClass, "<init>", "(JJ)V");
+    jmethodID uuidCtor = env->GetMethodID(uuidClass, OBF("<init>").c_str(), OBF("(JJ)V").c_str());
     if (uuidCtor == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";
@@ -62,13 +64,14 @@ std::string get_drm_id(JNIEnv *env) {
         return "";
     }
 
-    mediaDrmClass = env->FindClass("android/media/MediaDrm");
+    mediaDrmClass = env->FindClass(OBF("android/media/MediaDrm").c_str());
     if (mediaDrmClass == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";
     }
 
-    jmethodID ctor = env->GetMethodID(mediaDrmClass, "<init>", "(Ljava/util/UUID;)V");
+    jmethodID ctor = env->GetMethodID(
+            mediaDrmClass, OBF("<init>").c_str(), OBF("(Ljava/util/UUID;)V").c_str());
     if (ctor == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";
@@ -79,13 +82,15 @@ std::string get_drm_id(JNIEnv *env) {
         return "";
     }
 
-    jmethodID getPropertyByteArray = env->GetMethodID(mediaDrmClass,
-                                                       "getPropertyByteArray", "(Ljava/lang/String;)[B");
+    jmethodID getPropertyByteArray = env->GetMethodID(
+            mediaDrmClass,
+            OBF("getPropertyByteArray").c_str(),
+            OBF("(Ljava/lang/String;)[B").c_str());
     if (getPropertyByteArray == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";
     }
-    propName = env->NewStringUTF("deviceUniqueId");
+    propName = env->NewStringUTF(OBF("deviceUniqueId").c_str());
     if (propName == nullptr || env->ExceptionCheck()) {
         cleanup();
         return "";

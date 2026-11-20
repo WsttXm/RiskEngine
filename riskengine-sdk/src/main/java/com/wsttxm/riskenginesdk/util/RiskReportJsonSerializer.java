@@ -2,6 +2,7 @@ package com.wsttxm.riskenginesdk.util;
 
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.FingerprintId;
 import com.wsttxm.riskenginesdk.model.RiskReport;
 
 import org.json.JSONArray;
@@ -42,6 +43,11 @@ public final class RiskReportJsonSerializer {
             }
             root.put("fingerprint", fingerprint);
 
+            FingerprintId fpId = report.getFingerprintId();
+            if (fpId != null) {
+                root.put("fingerprintId", fingerprintIdToJson(fpId));
+            }
+
             JSONArray detections = new JSONArray();
             for (DetectionResult detection : report.getDetections()) {
                 detections.put(detectionToJson(detection));
@@ -71,6 +77,27 @@ public final class RiskReportJsonSerializer {
             values.put(entry.getKey(), entry.getValue());
         }
         json.put("values", values);
+        return json;
+    }
+
+    private static JSONObject fingerprintIdToJson(FingerprintId fpId) throws JSONException {
+        JSONObject json = new JSONObject();
+        json.put("compositeId", fpId.getCompositeId());
+        json.put("hardwareId", fpId.getHardwareId());
+        json.put("systemId", fpId.getSystemId());
+        json.put("volatileId", fpId.getVolatileId());
+        json.put("hardwareFieldsPresent", fpId.getHardwareFieldsPresent());
+        json.put("hardwareFieldsTotal", fpId.getHardwareFieldsTotal());
+        json.put("hardwareCoveragePercent", fpId.getHardwareCoveragePercent());
+        json.put("hardwareLayerReliable", fpId.isHardwareLayerReliable());
+        json.put("systemFieldsPresent", fpId.getSystemFieldsPresent());
+        json.put("systemFieldsTotal", fpId.getSystemFieldsTotal());
+        json.put("contributingFields", new JSONArray(fpId.getContributingFields()));
+        JSONObject buckets = new JSONObject();
+        for (Map.Entry<String, String> entry : fpId.getHardwareBucketDigests().entrySet()) {
+            buckets.put(entry.getKey(), entry.getValue());
+        }
+        json.put("hardwareBucketDigests", buckets);
         return json;
     }
 

@@ -568,7 +568,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isSyntheticCollector(String name) {
-        return "hook_memory_signals".equals(name)
+        return "fingerprint_id".equals(name)
+                || "hook_memory_signals".equals(name)
                 || "runtime_integrity_score_inputs".equals(name);
     }
 
@@ -1090,6 +1091,9 @@ public class MainActivity extends AppCompatActivity {
                 || detail.startsWith("modules_found:")) {
             return getString(R.string.evidence_module_mount);
         }
+        if (detail.startsWith("system_tmpfs_mount:") || detail.contains("mount:system_tmpfs:")) {
+            return getString(R.string.evidence_system_tmpfs_mount);
+        }
         if (detail.contains("debug_ramdisk_mount") || detail.contains("mount:debug_ramdisk")) {
             return getString(R.string.evidence_debug_ramdisk_mount);
         }
@@ -1111,6 +1115,18 @@ public class MainActivity extends AppCompatActivity {
         if (detail.startsWith("art_native_flag:")) return getString(
                 R.string.evidence_art_native_flag,
                 detail.substring("art_native_flag:".length()));
+        if (detail.startsWith("art_native_cleared:")) return getString(
+                R.string.evidence_art_native_cleared,
+                detail.substring("art_native_cleared:".length()));
+        if (detail.startsWith("memfd_private_elf:") || detail.equals("late_memfd_elf")) {
+            return getString(R.string.evidence_memfd_private_elf);
+        }
+        if (detail.startsWith("frida_dbus_port:")) {
+            return getString(R.string.evidence_frida_dbus);
+        }
+        if (detail.equals("kernel_dirty_on_release")) {
+            return getString(R.string.evidence_kernel_dirty);
+        }
         if (detail.startsWith("loader_depth:")) return getString(
                 R.string.evidence_loader_depth,
                 detail.substring("loader_depth:".length()));
@@ -1154,6 +1170,7 @@ public class MainActivity extends AppCompatActivity {
         if (detail.startsWith("C3:")) return getString(R.string.evidence_correlation_c3);
         if (detail.startsWith("C4:")) return getString(R.string.evidence_correlation_c4);
         if (detail.startsWith("C5:")) return getString(R.string.evidence_correlation_c5);
+        if (detail.startsWith("C6:")) return getString(R.string.evidence_correlation_c6);
         if (detail.startsWith("C7:")) return getString(R.string.evidence_correlation_c7);
         if (detail.startsWith("community_rom:")) return getString(R.string.evidence_custom_rom);
         if (detail.startsWith("prop_mismatch:")) return getString(R.string.evidence_prop_mismatch);
@@ -1303,12 +1320,18 @@ public class MainActivity extends AppCompatActivity {
             case "settings": return getString(R.string.collector_settings);
             case "adb_state": return getString(R.string.collector_adb);
             case "container_signals": return getString(R.string.collector_container);
+            case "gpu_info": return getString(R.string.collector_gpu);
+            case "sensor_fingerprint": return getString(R.string.collector_sensor);
+            case "cpu_topology": return getString(R.string.collector_cpu_topology);
+            case "hardware_profile": return getString(R.string.collector_hardware_profile);
+            case "partition_fingerprints": return getString(R.string.collector_partition_fingerprints);
             case "drm_id": return getString(R.string.collector_drm);
             case "boot_id": return getString(R.string.collector_boot);
             case "system_properties_native": return getString(R.string.collector_properties);
             case "cpu_info": return getString(R.string.collector_cpu);
             case "disk_size": return getString(R.string.collector_disk);
             case "kernel_info": return getString(R.string.collector_kernel);
+            case "fingerprint_id": return getString(R.string.collector_fingerprint_id);
             case "hook_memory_signals": return getString(R.string.collector_hook_memory);
             case "runtime_integrity_score_inputs": return getString(R.string.collector_score_inputs);
             default: return getString(R.string.collector_other);

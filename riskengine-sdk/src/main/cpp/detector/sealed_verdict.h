@@ -5,25 +5,7 @@
 #include <cstdint>
 #include <string>
 
-/**
- * Native-computed verdict, sealed so the Java layer cannot forge it.
- *
- * Motivation: every native check previously returned a plain evidence string
- * that Java then ranked and scored. One Java-level hook returning "" made the
- * whole report read SAFE. Here native does the ranking itself and returns an
- * opaque blob authenticated with a process-local key that never crosses JNI.
- *
- * Threat model and its limit, stated honestly: an attacker with native code
- * execution in this process can read the key out of memory and mint blobs.
- * This does not stop that. What it stops is the cheap and overwhelmingly common
- * attack, a Java/Xposed hook on the bridge that fabricates a clean result,
- * because forging a blob now requires native access rather than a one-line
- * method replacement. Verification happens in native; Java only forwards the
- * blob back and receives a boolean.
- */
 struct VerdictBits {
-    // Bit flags, native-assigned. Kept numeric so no human-readable token
-    // ordering leaks the ranking logic into the Java layer.
     static constexpr uint32_t kRootStrong = 1u << 0;
     static constexpr uint32_t kRootHidden = 1u << 1;
     static constexpr uint32_t kHookInline = 1u << 2;
@@ -37,21 +19,30 @@ struct VerdictBits {
 };
 
 /**
- * Computes the native verdict and returns it as a hex-encoded sealed blob:
- * nonce | flags | score | timestamp | MAC. Empty string on failure.
+ * Computes the native verdict and returns a hex-encoded HMAC-SHA256 sealed blob:
+ * nonce (8B) | challenge (8B) | flags (4B) | score (4B) | timestamp (8B) | HMAC-SHA256[0..15] (16B).
  */
 std::string native_build_sealed_verdict(JNIEnv *env,
                                         const void *const *registered_methods,
-                                        size_t registered_method_count);
+                                        const uint64_t *expected_prologues,
+                                        size_t registered_method_count,
+                                        uint64_t challenge = 0);
 
 /**
- * Verifies a blob produced by this process and returns its score, or -1 when
- * the MAC fails, the blob is stale, or the blob is malformed. A failed
- * verification is itself a tamper signal.
+ * Verifies a blob in a single JNI call. Checks HMAC-SHA256 in constant time,
+ * caller challenge binding, 10s monotonic freshness window, and optional
+ * one-time nonce replay protection.
+ *
+ * Returns ((int64_t)flags << 32) | (score & 0xFFFFFFFFLL), or -1 on failure.
  */
+int64_t native_verify_sealed_verdict_packed(const std::string &blob,
+                                            uint64_t expected_challenge,
+                                            bool consume_nonce = true);
+
+/** Legacy score-only verifier (challenge=0, non-consuming). */
 int native_verify_sealed_verdict(const std::string &blob);
 
-/** Verifies the same blob and returns its native flag bitset, or -1. */
+/** Legacy flags-only verifier (challenge=0, non-consuming). */
 int native_verify_sealed_verdict_flags(const std::string &blob);
 
 #endif

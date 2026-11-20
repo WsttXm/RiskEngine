@@ -15,42 +15,31 @@ import java.util.Map;
 /**
  * Composes a layered device fingerprint ID from collected results.
  *
- * The previous DeviceFingerprint was a plain map with no ID at all, so callers
- * had nothing stable to key on. Three layers are hashed separately rather than
- * producing one digest, because a single digest changes completely when any one
- * input drifts and gives no way to tell a returning device from a new one.
- *
- * hardware  hardware-bound values: GPU, sensors, camera, CPU topology, DRM.
- *           Survives reinstall, app data clear and factory reset.
- * system    OS build identity: partition fingerprints, kernel, security patch.
- *           Changes only on firmware update or reflash.
- * volatile  resettable identifiers: ANDROID_ID, boot id.
- *
- * Similarity between two IDs is then computable per layer: matching hardware
- * with a changed system layer is one device after an update, whereas a changed
- * hardware layer is a different device.
+ * Hardware inputs are filtered to exclude privacy-toggle-dependent fields
+ * (Widevine DRM), foldable/resolution-dependent display metrics, dynamic
+ * accessories, and per-core hotplug-sensitive frequency arrays. Independent
+ * per-domain bucket digests allow intersection-based continuity comparison so
+ * one transiently missing collector never triggers a false HARDWARE_CHANGED.
  */
 public final class FingerprintIdBuilder {
 
-    /** Fields per layer, in a fixed order so the digest is reproducible. */
+    /**
+     * Hardware-layer inputs grouped by physical domain: {bucket, collector, key}.
+     */
     private static final String[][] HARDWARE_FIELDS = {
-            {"gpu_info", "vendor"},
-            {"gpu_info", "renderer"},
-            {"gpu_info", "extensions_hash"},
-            {"gpu_info", "max_texture_size"},
-            {"sensor_fingerprint", "tuple_hash"},
-            {"sensor_fingerprint", "vendor_hash"},
-            {"hardware_profile", "camera_profile_hash"},
-            {"hardware_profile", "ram_total_mb_bucket"},
-            {"hardware_profile", "display_modes"},
-            {"hardware_profile", "battery_technology"},
-            {"cpu_topology", "core_distribution"},
-            {"cpu_topology", "freq_ranges"},
-            {"cpu_topology", "soc_model"},
-            {"cpu_topology", "soc_manufacturer"},
-            {"drm_id", "widevine_hash"},
-            {"screen_info", "xdpi"},
-            {"screen_info", "ydpi"},
+            {"gpu", "gpu_info", "vendor"},
+            {"gpu", "gpu_info", "renderer"},
+            {"gpu", "gpu_info", "extensions_hash"},
+            {"gpu", "gpu_info", "max_texture_size"},
+            {"sensor", "sensor_fingerprint", "tuple_hash"},
+            {"sensor", "sensor_fingerprint", "vendor_hash"},
+            {"camera", "hardware_profile", "camera_profile_hash"},
+            {"cpu", "cpu_topology", "core_distribution"},
+            {"cpu", "cpu_topology", "freq_clusters"},
+            {"cpu", "cpu_topology", "soc_model"},
+            {"cpu", "cpu_topology", "soc_manufacturer"},
+            {"memory_battery", "hardware_profile", "ram_total_mb_bucket"},
+            {"memory_battery", "hardware_profile", "battery_technology"},
     };
 
     private static final String[][] SYSTEM_FIELDS = {
@@ -70,12 +59,41 @@ public final class FingerprintIdBuilder {
     private static final String[][] VOLATILE_FIELDS = {
             {"android_id", "settings_api"},
             {"boot_id", "native_hash"},
+            {"drm_id", "widevine_hash"},
     };
 
     private FingerprintIdBuilder() {}
 
     public static FingerprintId build(DeviceFingerprint fingerprint, String salt) {
-        Map<String, String> hardware = extract(fingerprint, HARDWARE_FIELDS);
+        Map<String, String> hardware = new LinkedHashMap<>();
+        Map<String, Map<String, String>> buckets = new LinkedHashMap<>();
+        Map<String, CollectorResult> results = fingerprint.getResults();
+
+        for (String[] spec : HARDWARE_FIELDS) {
+            String bucket = spec[0];
+            String collector = spec[1];
+            String key = spec[2];
+            CollectorResult result = results.get(collector);
+            if (result == null || result.getStatus() != CollectorResult.Status.SUCCESS) {
+                continue;
+            }
+            String value = result.getValues().get(key);
+            if (value == null || value.isBlank()) continue;
+            String compositeKey = collector + "." + key;
+            String trimmed = value.trim();
+            hardware.put(compositeKey, trimmed);
+            buckets.computeIfAbsent(bucket, k -> new LinkedHashMap<>())
+                    .put(compositeKey, trimmed);
+        }
+
+        Map<String, String> bucketDigests = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, String>> entry : buckets.entrySet()) {
+            String d = digest(entry.getValue(), salt, "hw:" + entry.getKey());
+            if (!d.isEmpty()) {
+                bucketDigests.put(entry.getKey(), d.substring(0, Math.min(16, d.length())));
+            }
+        }
+
         Map<String, String> system = extract(fingerprint, SYSTEM_FIELDS);
         Map<String, String> volatileValues = extract(fingerprint, VOLATILE_FIELDS);
 
@@ -83,15 +101,16 @@ public final class FingerprintIdBuilder {
         String systemId = digest(system, salt, "sys");
         String volatileId = digest(volatileValues, salt, "vol");
 
-        // The composite is derived from the layer digests, not from the raw
-        // values again, so a layer can be recomputed independently.
-        String composite = hashString(
-                salt + "|composite|" + hardwareId + "|" + systemId);
+        // Never fabricate a composite ID when both stable layers are empty.
+        String composite = (hardwareId.isEmpty() && systemId.isEmpty())
+                ? ""
+                : hashString(salt + "|composite|" + hardwareId + "|" + systemId);
 
         return new FingerprintId(composite, hardwareId, systemId, volatileId,
                 hardware.size(), HARDWARE_FIELDS.length,
                 system.size(), SYSTEM_FIELDS.length,
-                new ArrayList<>(hardware.keySet()));
+                new ArrayList<>(hardware.keySet()),
+                bucketDigests);
     }
 
     private static Map<String, String> extract(DeviceFingerprint fingerprint,
@@ -110,12 +129,6 @@ public final class FingerprintIdBuilder {
         return present;
     }
 
-    /**
-     * Digests one layer. Absent fields are skipped rather than substituted with
-     * a placeholder, and the contributing key list is recorded on the result so
-     * a caller can tell a thin ID from a complete one instead of treating a
-     * mostly-empty digest as equally trustworthy.
-     */
     private static String digest(Map<String, String> values, String salt, String label) {
         if (values.isEmpty()) return "";
         List<String> parts = new ArrayList<>(values.size());
@@ -123,7 +136,7 @@ public final class FingerprintIdBuilder {
             parts.add(entry.getKey() + "=" + entry.getValue());
         }
         Collections.sort(parts);
-        return hashString(salt + "|" + label + "|" + String.join("", parts));
+        return hashString(salt + "|" + label + "|" + String.join("\u001f", parts));
     }
 
     private static String hashString(String value) {

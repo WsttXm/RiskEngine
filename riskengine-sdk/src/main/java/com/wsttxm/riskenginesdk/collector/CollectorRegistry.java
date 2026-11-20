@@ -39,7 +39,7 @@ public class CollectorRegistry {
 
         // Hardware-bound fingerprint dimensions. These carry most of the
         // entropy and are the layers that survive reinstall and factory reset.
-        collectors.add(new GpuInfoCollector(context));
+        collectors.add(new GpuInfoCollector(context, signals));
         collectors.add(new SensorFingerprintCollector(context));
         collectors.add(new CpuTopologyCollector(context));
         collectors.add(new HardwareProfileCollector(context));

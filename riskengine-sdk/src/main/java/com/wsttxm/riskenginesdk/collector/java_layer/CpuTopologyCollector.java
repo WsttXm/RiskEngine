@@ -142,7 +142,17 @@ public class CpuTopologyCollector extends BaseCollector {
         }
         if (ranges.isEmpty()) return;
         result.addValue("freq_ranges", String.join(",", ranges));
-        long distinct = ranges.stream().distinct().count();
+        List<String> clusters = new ArrayList<>();
+        for (String range : ranges) {
+            if (!clusters.contains(range)) {
+                clusters.add(range);
+            }
+        }
+        Collections.sort(clusters);
+        // Sorted deduplicated frequency clusters stay stable even when an
+        // individual core is temporarily hotplug-offline.
+        result.addValue("freq_clusters", String.join(",", clusters));
+        long distinct = clusters.size();
         result.addValue("distinct_freq_clusters", String.valueOf(distinct));
         result.addValue("uniform_frequencies",
                 String.valueOf(distinct == 1 && ranges.size() > 2).toLowerCase(Locale.ROOT));

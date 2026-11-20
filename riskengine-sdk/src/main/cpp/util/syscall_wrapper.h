@@ -1,6 +1,7 @@
 #ifndef RISKENGINE_SYSCALL_WRAPPER_H
 #define RISKENGINE_SYSCALL_WRAPPER_H
 
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
@@ -14,6 +15,7 @@ int raw_last_error(void);
 
 long my_openat(int dirfd, const char *path, int flags, mode_t mode);
 long my_read(int fd, void *buf, size_t count);
+long my_pread64(int fd, void *buf, size_t count, uint64_t offset);
 long my_close(int fd);
 long my_lseek(int fd, long offset, int whence);
 long my_faccessat(int dirfd, const char *path, int mode, int flags);

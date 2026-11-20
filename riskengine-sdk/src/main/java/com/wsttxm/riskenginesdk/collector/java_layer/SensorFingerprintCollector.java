@@ -53,6 +53,13 @@ public class SensorFingerprintCollector extends BaseCollector {
             int wakeUp = 0;
             int dynamic = 0;
             for (Sensor sensor : sensors) {
+                if (sensor.isWakeUpSensor()) wakeUp++;
+                if (sensor.isDynamicSensor()) {
+                    // Dynamic sensors come from transient accessories (e.g. BLE/OTG)
+                    // and must not destabilise the static hardware sensor digest.
+                    dynamic++;
+                    continue;
+                }
                 tuples.add(String.format(Locale.ROOT, "%d|%s|%s|%d|%.6f|%.6f|%.4f|%d|%d",
                         sensor.getType(),
                         safe(sensor.getName()),
@@ -67,15 +74,17 @@ public class SensorFingerprintCollector extends BaseCollector {
                 if (!vendor.isEmpty() && !vendors.contains(vendor)) {
                     vendors.add(vendor);
                 }
-                if (sensor.isWakeUpSensor()) wakeUp++;
-                if (sensor.isDynamicSensor()) dynamic++;
             }
             Collections.sort(tuples);
             Collections.sort(vendors);
 
             result.addValue("count", String.valueOf(sensors.size()));
-            result.addValue("tuple_hash", GpuInfoCollector.sha256(String.join("||", tuples)));
-            result.addValue("vendor_hash", GpuInfoCollector.sha256(String.join(",", vendors)));
+            if (!tuples.isEmpty()) {
+                result.addValue("tuple_hash", GpuInfoCollector.sha256(String.join("||", tuples)));
+            }
+            if (!vendors.isEmpty()) {
+                result.addValue("vendor_hash", GpuInfoCollector.sha256(String.join(",", vendors)));
+            }
             result.addValue("vendor_count", String.valueOf(vendors.size()));
             result.addValue("wakeup_count", String.valueOf(wakeUp));
             result.addValue("dynamic_count", String.valueOf(dynamic));

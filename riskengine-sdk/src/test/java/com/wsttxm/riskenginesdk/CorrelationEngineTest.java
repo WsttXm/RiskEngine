@@ -172,6 +172,43 @@ public class CorrelationEngineTest {
     }
 
     @Test
+    public void c4HiddenRootMatchesRealNativePrefixedTokens() {
+        DetectionResult root = new DetectionResult(
+                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false,
+                List.of("native:syscall_mismatch:/system/bin/su", "native:mount:module"),
+                "native:syscall_mismatch");
+        DetectionResult correlated = CorrelationEngine.correlate(List.of(root),
+                CollectScene.STANDARD);
+        assertNotNull(correlated);
+        assertEquals(RiskLevel.HIGH, correlated.getRiskLevel());
+        assertTrue(correlated.getDetails().stream().anyMatch(item -> item.startsWith("C4:")));
+    }
+
+    @Test
+    public void dedupeRecognizesSuFoundAndSealedHookAndEmulatorFamilies() {
+        DetectionResult root = new DetectionResult(
+                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("su_found:/system/bin/su"), "su_found");
+        DetectionResult hook = new DetectionResult(
+                "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("maps:frida"), "maps:frida");
+        DetectionResult emulator = new DetectionResult(
+                "emulator", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("qemu_pipe:/dev/qemu_pipe"), "qemu_pipe");
+        DetectionResult sealed = new DetectionResult(
+                "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                10, 10, false,
+                List.of("sealed:root_strong", "sealed:hook_framework", "sealed:emulator"),
+                "sealed");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(
+                List.of(root, hook, emulator, sealed));
+        assertTrue(out.get(3).isInformational());
+        assertTrue(out.get(3).getDetails().contains("deduped:corroborating_evidence"));
+    }
+
+    @Test
     public void newFamilyRemainsActionableWhenOnlyPartOfEvidenceIsDuplicated() {
         DetectionResult root = new DetectionResult(
                 "root", RiskLevel.HIGH, DetectionStatus.DANGER,
@@ -184,5 +221,40 @@ public class CorrelationEngineTest {
         List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, combined));
 
         assertFalse(out.get(1).isInformational());
+    }
+
+    @Test
+    public void c6DetectsJavaBridgeSuppressionWhenSealedVerdictFires() {
+        DetectionResult hookNormal = new DetectionResult(
+                "hook_framework", RiskLevel.SAFE, DetectionStatus.NORMAL,
+                0, 10, false, List.of(), "");
+        DetectionResult sealedHook = new DetectionResult(
+                "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                10, 10, false, List.of("sealed:hook_inline", "native_score:9"),
+                "sealed:hook_inline");
+
+        DetectionResult correlated = CorrelationEngine.correlate(
+                List.of(hookNormal, sealedHook), CollectScene.STANDARD);
+        assertNotNull(correlated);
+        assertEquals(RiskLevel.DEADLY, correlated.getRiskLevel());
+        assertTrue(correlated.getDetails().contains("C6:bridge_tamper:hook_framework"));
+    }
+
+    @Test
+    public void systemTmpfsMountDeduplicatesAcrossRootAndMountAnalysis() {
+        DetectionResult root = new DetectionResult(
+                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false,
+                List.of("native:mount:system_tmpfs:/system/etc/security/cacerts"),
+                "system_tmpfs");
+        DetectionResult mount = new DetectionResult(
+                "mount_analysis", RiskLevel.MEDIUM, DetectionStatus.WARNING,
+                4, 10, false,
+                List.of("system_tmpfs_mount:/system/etc/security/cacerts"),
+                "system_tmpfs");
+
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, mount));
+        assertFalse(out.get(0).isInformational());
+        assertTrue(out.get(1).isInformational());
     }
 }

@@ -186,8 +186,14 @@ public final class RiskEngine {
                     snapshot.appContext, snapshot.config, signals, scene);
 
             List<BaseCollector> collectors = collectorRegistry.getCollectors();
+            // Cap collector phase at 45% of remaining budget so a slow collector
+            // cannot starve the security detector phase completely.
+            long totalRemainingMs = remainingMillis(deadlineNanos);
+            long collectorBudgetMs = totalRemainingMs <= 1
+                    ? totalRemainingMs
+                    : Math.max(1L, (long) (totalRemainingMs * 0.45));
             List<CollectorResult> collectorResults = snapshot.scheduler.submitAllAndWait(
-                    collectors, remainingMillis(deadlineNanos));
+                    collectors, collectorBudgetMs);
             ensureCollectionActive(snapshot);
             addMissingCollectorResults(collectors, collectorResults);
 

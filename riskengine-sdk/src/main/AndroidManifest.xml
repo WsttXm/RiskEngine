@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <queries>
+        <!-- Emulator packages -->
         <package android:name="com.google.android.launcher.layouts.genymotion" />
         <package android:name="com.bluestacks" />
         <package android:name="com.bignox.app" />
@@ -11,13 +12,36 @@
         <package android:name="com.netease.mumu" />
         <package android:name="com.microvirt.launcher" />
         <package android:name="com.tencent.tinput" />
+
+        <!-- Cloud phone packages -->
         <package android:name="com.redfinger.app" />
         <package android:name="com.redfinger.virtualphone" />
         <package android:name="com.vmos.pro" />
         <package android:name="com.vmos.app" />
+        <package android:name="com.cloudphone.client" />
+        <package android:name="com.armcloud.sdk" />
+        <package android:name="com.baidu.cloudphone" />
+        <package android:name="com.huaweicloud.cph" />
+
+        <!-- Sandbox / dual-app container packages -->
         <package android:name="com.lbe.parallel" />
         <package android:name="com.excelliance.dualaid" />
         <package android:name="com.parallel.space" />
+        <package android:name="com.lody.virtual" />
+        <package android:name="io.virtualapp" />
+        <package android:name="com.qihoo.magic" />
+        <package android:name="com.qihoo.magic.xposed" />
+        <package android:name="com.excelliance.multiaccounts" />
+        <package android:name="com.coloros.oppomultiapp" />
+        <package android:name="com.parallel.space.lite" />
+        <package android:name="com.ludashi.dualspace" />
+        <package android:name="com.ludashi.multspace" />
+        <package android:name="com.rinzz.avatar" />
+        <package android:name="com.rinzz.wdf" />
+        <package android:name="com.applisto.appcloner" />
+        <package android:name="info.red.virtual" />
+        <package android:name="com.jiubang.commerce.gomultiple" />
+        <package android:name="multi.parallel.dualspace.cloner" />
     </queries>
 
 </manifest>

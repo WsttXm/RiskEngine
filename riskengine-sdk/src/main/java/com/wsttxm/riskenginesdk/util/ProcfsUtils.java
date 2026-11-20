@@ -178,13 +178,24 @@ public final class ProcfsUtils {
         return pids;
     }
 
+    private static boolean isAllDigits(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
     public static List<ProcessInfo> snapshotProcesses() {
         List<ProcessInfo> processes = new ArrayList<>();
         File[] dirs = new File("/proc").listFiles();
         if (dirs == null) return processes;
         for (File dir : dirs) {
             String name = dir.getName();
-            if (!dir.isDirectory() || !name.matches("\\d+")) continue;
+            // Check numeric PID name BEFORE dir.isDirectory() so we never stat()
+            // restricted non-PID procfs entries (/proc/keys, /proc/kmsg, etc.).
+            if (!isAllDigits(name) || !dir.isDirectory()) continue;
             try {
                 int pid = Integer.parseInt(name);
                 processes.add(new ProcessInfo(pid,

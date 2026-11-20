@@ -114,15 +114,15 @@ Failed collectors also add a `collector:<fieldName>` `UNAVAILABLE` entry under `
 | hardware (`hw`) | 17 | GPU, sensors, camera, memory, display, battery, CPU/SoC, optional Widevine, screen xdpi/ydpi |
 | system (`sys`) | 11 | Partition fingerprints, build date/vbmeta, Build fingerprint/patch/bootloader, kernel, shared-library hash |
 | volatile (`vol`) | 2 | Enabled Android ID and Boot ID hashes |
-| composite | hardware + system | `SHA-256(salt + "\|composite\|" + hardwareId + "\|" + systemId)`; excludes volatile and may be nonempty even when both layers are empty |
+| composite | hardware + system | Empty string when both hardware and system layers are empty; otherwise `SHA-256(salt + "\|composite\|" + hardwareId + "\|" + systemId)`, excluding volatile |
 
-`FingerprintId` exposes layer getters, hardware/system field counts, and the list of contributing hardware fields. Hardware coverage uses integer truncation; reliability requires a nonempty digest and ≥ 50% coverage (currently at least 9/17). This is a field-coverage threshold, not a guarantee of uniqueness or stability across firmware changes.
+`FingerprintId` exposes layer getters, hardware/system field counts, the list of contributing hardware fields, and per-bucket digests (`gpu`, `sensor`, `camera`, `cpu`, `memory_battery`). The hardware layer selects 13 stable fields; reliability requires a nonempty digest and ≥ 50% coverage (at least 7/13) or key physical buckets. This is a field-coverage threshold, not a guarantee of uniqueness or stability across firmware changes.
 
-`RiskEngine` injects `FingerprintStore` into `DataAggregator`. Private `riskengine_fp` SharedPreferences hold a hex-encoded random 32-byte salt, `last_hw`, `last_sys`, `first_seen`, and `observations`. A storage-free `DataAggregator()` uses the fixed salt `riskengine` without continuity comparisons; salt-access exceptions also fall back to that value.
+`RiskEngine` injects `FingerprintStore` into `DataAggregator`. Private `riskengine_fp` SharedPreferences hold a hex-encoded random 32-byte salt (persisted synchronously with `commit()` on initial write), `last_hw`, `last_sys`, hardware bucket digests, `first_seen`, and `observations`. When storage is absent or unreadable, the aggregator falls back to a process-ephemeral random salt instead of a fixed constant.
 
-Comparison order: no hardware baseline → `FIRST_OBSERVATION`; baseline exists but current hardware is unreliable → `INCONCLUSIVE`; both layers match → `STABLE`; only system changes → `SYSTEM_CHANGED`; hardware differs → `HARDWARE_CHANGED`; storage unavailable → `UNKNOWN`. Only reliable measurements replace the digest baseline; observation counts still advance. Hardware changes append actionable `fingerprint_continuity` (`MEDIUM`/`WARNING`/4), after scene processing, deduplication, and correlation.
+Comparison order: no hardware baseline → `FIRST_OBSERVATION`; baseline exists but current hardware is unreliable → `INCONCLUSIVE`; hardware matches (exact or via bucketed intersection threshold) and system matches → `STABLE`; only system changes → `SYSTEM_CHANGED`; bucketed intersection confirms hardware change → `HARDWARE_CHANGED`; storage unavailable → `UNKNOWN`. Only reliable measurements replace the digest baseline; observation counts still advance. Hardware changes append actionable `fingerprint_continuity` (`MEDIUM`/`WARNING`/4).
 
-The aggregator appends `fingerprint_id` with nonempty `composite`/`hardware`/`system`/`volatile` values, `hardware_coverage`, `system_coverage`, and `hardware_layer_reliable`; storage adds `continuity` and `observation_count`. `RiskReport.getFingerprintId()` exposes the model, or `null` on composition failure. `RiskReport.isSyntheticCollector` does not yet exclude `fingerprint_id`, so it contributes to total and completed check counts.
+The aggregator builds layered fingerprint IDs and continuity before appending `fingerprint_id` and synthetic signals. `fingerprint_id` carries nonempty `composite`/`hardware`/`system`/`volatile` values, `hardware_coverage`, `system_coverage`, and `hardware_layer_reliable`; storage adds `continuity` and `observation_count`. `RiskReport.getFingerprintId()` exposes the model, or `null` on composition failure. `RiskReport.isSyntheticCollector` excludes `fingerprint_id`, so it no longer inflates check coverage counts.
 
 Changes in the contributing field set above the reliability threshold can still produce `HARDWARE_CHANGED`; drivers, privacy switches, and display configuration can also change the hardware digest. This state is not proof of physical hardware replacement or spoofing.
 
@@ -281,22 +281,22 @@ Shared library `libriskengine.so`. CMake 3.22.1, C++17, static libc++, hidden sy
 
 ### 6.3 String obfuscation
 
-`OBF("...")` derives a per-site seed from `__LINE__`, `__COUNTER__`, and literal length, then XOR-encodes with a rolling xorshift byte stream and decodes at runtime. It replaces the fixed `0x5A` key. This is static-string obfuscation, not an encryption guarantee. Java `ObfuscatedLists` is decoder scaffolding only; it is not wired into generation or consumption of `DetectionLists`, whose Java lists remain plaintext.
+`OBF("...")` derives a per-site seed from `__LINE__`, `__COUNTER__`, and literal length, uses `noinline` `decode_runtime` with `asm volatile` optimization barriers to prevent Clang `-O2`/ThinLTO from constant-folding literals back into `.rodata`, and XOR-decodes via a rolling xorshift stream at runtime; JNI registration names/signatures are also wiped with `secure_zero` after `RegisterNatives`. On the Java side, `:riskengine-sdk:generateDetectionLists` generates obfuscated `DetectionLists.java` (using `ObfuscatedLists.decode`) and `detection_lists.h` from `artifact_paths.ini`, eliminating plaintext artifact paths from Java bytecode.
 
 ### 6.4 Maps
 
-`maps_parser.cpp` reads `/proc/self/maps` via raw syscall and parses address ranges, permissions, and paths. Java `SignalSnapshot.getSelfMaps()` is a separate Java path shared by Java hook/debug checks. Native hook maps are **intentionally independent** so a libc hook cannot blind both layers at once.
+`maps_parser.cpp` reads `/proc/self/maps` via raw syscall using stream-free pointer parsing and captures `MapEntry.offset`. Native hook, integrity, and sealed-verdict checks share a single `maps` snapshot per pass to avoid redundant syscalls; Java `SignalSnapshot.getSelfMaps()` remains an independent Java path so a libc hook cannot blind both layers at once.
 
 ### 6.5 Integrity
 
 `native_integrity.cpp`:
 
-1. **libc GOT / inline hook**: mmap on-disk `libc.so`, parse the ELF dynamic table, inspect the 18 symbols in `list_monitored_libc_symbols()` (including file, directory, network, property, and dynamic-loading functions). A GOT target outside libc RX → `got_hook:<name>`. ARM64 recognizes `LDR X16/X17 + BR` and out-of-range `B`; ARM32 recognizes `bx/blx` and `ldr pc`. x86 has no trampoline heuristic.
+1. **libc / libdl disk comparison + GOT / inline hook**: reads on-disk `libc.so` and `libdl.so` ELF symbol tables (`DT_GNU_HASH` / `DT_HASH`) via raw `my_pread64`, compares the first 32 bytes of monitored symbols from `list_monitored_libc_symbols()` against memory, inspects ARM64 (`LDR X16/X17 + BR`, `ADRP+ADD+BR`, out-of-range `B`, `BRK`), ARM32 (`bx/blx`, `ldr pc`), and x86_64 (`0xE9`, `0xFF 0x25`, `0xCC`) trampolines, and verifies `libriskengine.so`'s own `DT_JMPREL` GOT pointers against trusted system modules.
 2. **JNI table**: if `JNIEnv->FindClass` / `GetVersion` function pointers fall outside `libart.so` RX → `jni_table_hook:...`.
-3. **Self SO FNV-1a**: walk the file-backed extent of every executable PT_LOAD, comparing disk and readable memory in 64 KiB windows with segment-address/offset seeds. Differences emit `text_mismatch` and `text_mismatch_seg:<index>`; candidate segments with no readable windows emit `text_mismatch:unreadable_segments`. Unreadable individual windows are skipped without a separate partial-coverage token, so empty evidence does not guarantee every window was compared.
-4. **JNI self-registration table**: check function pointers in this library's static `JNINativeMethod methods[]` against its RX range. Out-of-range pointers emit `jni_self_hook:<index>`; a missing range emits `jni_self:no_range`. This does not read ART's current registered targets and does not guarantee detection of later `RegisterNatives` rebinding.
+3. **Self SO FNV-1a (`extractNativeLibs=false` supported)**: uses `dladdr` and `MapEntry.offset` with raw `my_pread64` to locate the backing file (including an uncompressed `.so` embedded inside `base.apk`) and compares executable PT_LOAD segments in 64 KiB windows. Differences emit `text_mismatch` and `text_mismatch_seg:<index>`; anonymous executable mappings emit `text_mismatch:anonymous_map`; segments with no readable windows emit `text_mismatch:unreadable_segments`.
+4. **JNI self-registration table & entry prologues**: stores XOR-masked method pointers and 16-byte entry prologue FNV-1a digests recorded during `JNI_OnLoad`, verifying range and prologue integrity (`jni_self_hook:<index>` on tampering).
 
-ART checks use public reflection to read native modifiers on `Method.invoke`, `Runtime.exec`, `File.exists`, and `NativeCollectorBridge.isNativeAvailable`, without fixed ArtMethod offsets. They also inspect the ClassLoader parent chain and six reflection/registration-related JNIEnv slots against libart RX. Unix-socket scanning passively reads known Frida/gum names from `/proc/net/unix`; W+X scanning checks self, libart, and libc. Some native subprobes still return empty strings on read failure without individual coverage status.
+ART checks use public reflection to read native modifiers on `Method.invoke`, `Runtime.exec`, `File.exists`, `NativeCollectorBridge.isNativeAvailable`, and `RiskEngine.collectSync`, without fixed ArtMethod offsets. They also inspect the ClassLoader parent chain (whitelisting `inmemorydexclassloader`) and six reflection/registration-related JNIEnv slots against libart RX. Unix-socket scanning passively reads known Frida/gum names from `/proc/net/unix`; W+X scanning checks self (including APK-embedded SOs), libart, and libc.
 
 ### 6.6 Native detector entry points
 
@@ -314,24 +314,25 @@ ART checks use public reflection to read native modifiers on `Method.invoke`, `R
 | `nGetSoIntegrityRaw` | `native_get_so_integrity_evidence` | SO FNV-1a |
 | `nGetMountNsEvidenceRaw` | `mount_namespace_diff` | Self/PID 1 mount differences |
 | `nGetKernelRootEvidenceRaw` | `kernel_su_probe` | prctl / SELinux context |
-| `nGetSealedVerdictRaw` / `nVerifySealedVerdictRaw` | `sealed_verdict` | Build sealed payload / verify and return score |
-| `nGetJniSelfIntegrityRaw` | `native_get_jni_self_table_evidence` | Static self-registration pointer ranges |
+| `nGetSealedVerdictWithChallengeRaw` / `nVerifySealedVerdictPackedRaw` (plus legacy wrappers) | `sealed_verdict` | Challenge-bound HMAC-SHA256 sealed verdict / single-call packed verification |
+| `nGetProcCmdlineBootPropsRaw` | `native_root_detector` | Raw-syscall `/proc/cmdline` read for `androidboot.*` cross-check against `resetprop` |
+| `nGetJniSelfIntegrityRaw` | `native_get_jni_self_table_evidence` | XOR-masked registration pointers and 16-byte prologue digests |
 | `nGetMonitorFindingsRaw` / `nStopMonitorRaw` | `periodic_monitor` | Read latched findings / request stop |
 
 JNI strings never pass untrusted bytes to `NewStringUTF`: the implementation caps length, validates UTF-8, replaces malformed sequences, and constructs UTF-16 with `NewString`. C++ allocation failures and JNI character-access failures do not leave exceptions across the boundary. JNI registration failures clear pending exceptions and log the target class.
 
 ### 6.7 Native build hardening
 
-- `-fstack-protector-strong`, Release `_FORTIFY_SOURCE=2`, `-Wformat -Wformat-security`
+- `-fstack-protector-strong`, Release/RelWithDebInfo `_FORTIFY_SOURCE=2`, `-Wformat -Wformat-security`
 - `-fvisibility=hidden`
 - Link: `relro,now`, `noexecstack`, `max-page-size=16384`, `--exclude-libs,ALL`
-- Release adds thin LTO, removes unwind tables/frame pointers, merges constants, garbage-collects sections, and strips symbols. The `exports.map` version script exports only `JNI_OnLoad` and `JNI_OnUnload`; JNI methods still bind through `RegisterNatives`.
+- Applies thin LTO, unwind-table/frame-pointer removal, constant merging, section GC, and stripping to both `Release` and AGP's `RelWithDebInfo` build type. The `exports.map` version script exports only `JNI_OnLoad` and `JNI_OnUnload`; all JNI methods decode via `OBF(...)` before `RegisterNatives` and wipe temporary buffers afterward.
 
 ### 6.8 Sealed payload and periodic monitor
 
-The sealed blob is 64 hex characters encoding an 8-byte nonce, 4-byte flags, 4-byte score, 8-byte monotonic timestamp, and 8-byte tag. A 32-byte key comes first from `/dev/urandom`, then `AT_RANDOM`, then an address/tid-derived fallback. Key initialization is serialized. The tag is custom keyed FNV-1a, **not HMAC or a standard cryptographic MAC**. Verification checks length, tag, and a 10-second monotonic freshness window. This avoids concurrent issuers invalidating each other while rejecting stale replay. The key lives in process memory, and Java calls/final scoring remain mutable, so this is not attestation.
+The sealed blob uses standard HMAC-SHA256 (RFC 2104 + FIPS 180-4 in zero-dependency `crypto_mini.h`), encoding an 8-byte nonce, 8-byte caller challenge, 4-byte flags, 4-byte score, 8-byte monotonic timestamp, and 16-byte truncated HMAC-SHA256 tag. A 32-byte key comes first from `/dev/urandom`, then `AT_RANDOM`, then an address/tid-derived fallback, serialized once. `native_verify_sealed_verdict_packed` checks length, constant-time tag, challenge binding, a 10-second monotonic freshness window, and a 64-slot consumed-nonce replay cache, while folding periodic-monitor (`late_*`) and ART/JNI findings into `compute_flags`. Because the key lives in process memory, it is still not hardware attestation.
 
-`JNI_OnLoad` starts a joinable pthread. After each interruptible 20–26-second wait it checks self code, TracerPid, self/libart W+X, and Frida/LSPosed mappings. Deduplicated `late_*` findings accumulate and reads include `passes:<n>`. No frozen report is changed and no callback is pushed; a later `hook_framework` collection consumes findings. The monitor does not repeat full root/emulator scans.
+`JNI_OnLoad` starts a joinable pthread. After each interruptible 20–26-second wait it shares one `maps` snapshot to check self code, per-thread `/proc/self/task/*/status` TracerPid, self (including APK-embedded SO)/libart W+X, and Frida/LSPosed mappings. Deduplicated `late_*` findings accumulate and reads include `passes:<n>`. No frozen report is changed and no callback is pushed; later `hook_framework` and `sealed_verdict` collections consume findings.
 
 `shutdown()` wakes and joins the monitor. Reinitialization uses an explicit JNI restart entry point and clears findings/pass counts. `JNI_OnUnload` also joins the thread before code can be unmapped.
 
@@ -342,23 +343,23 @@ Each report owns a new `SignalSnapshot`. Timed-out platform/native work can fini
 - ADB state, system properties, `/proc/self/maps` (Java path)
 - Loopback listening ports, process snapshots, text files, path existence, container signals
 - Structured `ShellExecutor.Result` for the same command
-- SELinux, `build.prop` fingerprint, CPU/disk/kernel, native process tokens, SO integrity, screen metrics
+- SELinux, `build.prop` fingerprint, `/proc/cmdline` boot properties, CPU/disk/kernel, native process tokens, SO integrity, screen metrics
 
 ADB collection is therefore not duplicated, and Java hook/debug checks reuse maps and ports. Native hook maps remain an independent raw-syscall read.
 
 `ShellExecutor.Result` distinguishes `SUCCESS`, `INVALID_COMMAND`, `TIMEOUT`, `NON_ZERO_EXIT`, `INTERRUPTED`, and `EXECUTION_ERROR`, and carries stdout, stderr, exit code, duration, and failure reason. String-only helpers are deprecated.
 
-New shared signals include GPU vendor/renderer, network-interface names, namespace/kernel-root evidence, JNI self-integrity, and sealed verdicts. `getGpuIdentity()` caches an offscreen probe for emulator/cloud detectors, but `GpuInfoCollector` still probes independently, so a report may create two EGL contexts. Interface names use sysfs first and Java enumeration only when empty, without comparing the two. System properties now use only the native allowlisted accessor; shell `getprop` fallback was removed and empty properties retain EMPTY status.
+Shared signals include full GPU attributes (`getGpuAttributes()` runs a single offscreen EGL probe shared by `GpuInfoCollector` and Emulator/Cloud detectors, using `eglReleaseThread()` rather than `eglTerminate(EGL_DEFAULT_DISPLAY)`), network-interface names, namespace/kernel-root evidence, JNI self-integrity, and sealed verdicts. System properties use only the native allowlisted accessor; neither `AndroidIdCollector` nor `AdbInspector` forks `/system/bin/sh`.
 
 ## 8. Scene, family dedupe, and correlation
 
 `DataAggregator.aggregate` order:
 
-1. `CorrelationEngine.dedupeFamilies`: if an `EvidenceFamily` (`frida` / `debugger` / `xposed` / `root_fw` / `qemu`) is already claimed by an earlier detector, a later actionable result with `score > 0` becomes informational. Magisk must not add score twice via `root` and `process_scan`.
+1. `CorrelationEngine.dedupeFamilies`: if an `EvidenceFamily` (`frida` / `debugger` / `xposed` / `root_fw` / `qemu`) is already claimed by an earlier detector, a later actionable result with `score > 0` becomes informational (handling `native:` prefixes and composite-detector coverage accurately).
 2. `CorrelationEngine.applyScene`: lifts named detectors from informational to actionable for the scene. It never disables a detector and never downgrades an already-actionable result.
 3. `CorrelationEngine.correlate`: may append one `signal_correlation` result.
-4. Collector coverage signals, multi-source inconsistency, existing synthesized fields.
-5. Layered fingerprint IDs, continuity comparison, and optional `fingerprint_continuity`. This final detection does not pass through scene/deduplication/correlation again and is absent from the earlier `runtime_integrity_score_inputs` summary.
+4. Layered fingerprint IDs, bucketed continuity comparison, and optional `fingerprint_continuity`.
+5. Collector coverage signals, multi-source inconsistency, and synthesized fields.
 
 ## 8.1 Scene lifts
 
@@ -414,7 +415,7 @@ Other report fields:
 - `coveragePercent`: `round(completed / total * 100)`; 100 when total is 0
 - `reportStatus`: `COMPLETE` when every check finished; `UNAVAILABLE` when none finished and no detection is available; otherwise `PARTIAL`
 
-Coverage currently excludes only the synthetic `hook_memory_signals` and `runtime_integrity_score_inputs` fields; `fingerprint_id` still counts (§4.4).
+Coverage excludes all synthetic fields: `hook_memory_signals`, `runtime_integrity_score_inputs`, and `fingerprint_id`.
 
 Aggregation freezes `RiskReport`, `DeviceFingerprint`, and nested `CollectorResult`s.
 
@@ -430,30 +431,28 @@ Each of the three can be overridden on the Builder. `PrivacyUtils.hashIdentifier
 
 The SDK does not collect raw IMEI, IMSI, MAC, SSID, or BSSID. Native property reads are constrained by the ini allowlist.
 
-The five new hardware collectors and layered IDs run in every profile; `MINIMAL` does not disable them or `FingerprintStore`. Installation salt/digests live in private preferences and are normally removed by uninstall/data clearing. Keystore-based cross-reinstall linkage is not implemented; host backup/restore policy still affects persistence. A fixed-salt fallback on storage failure does not guarantee installation isolation.
+The five new hardware collectors and layered IDs run in every profile; `MINIMAL` does not disable them or `FingerprintStore`. Installation salt/digests live in private preferences and are normally removed by uninstall/data clearing. Keystore-based cross-reinstall linkage is not implemented; host backup/restore policy still affects persistence. When storage fails, the implementation falls back to a process-ephemeral random salt instead of a fixed constant.
 
 ## 11. Single-source lists
 
-Read-only manifest: `riskengine-sdk/src/main/resources/lists/artifact_paths.ini`.
+Read-only manifest: `riskengine-sdk/src/main/resources/lists/artifact_paths.ini` (14 sections, including `[partition_fingerprint_properties]`, `[cloud_phone_properties]`, `[virtual_gpu_markers]`, and `[monitored_libc_symbols]`).
 
-Generated mirrors (checked in; must be regenerated when the ini changes):
+Generated automatically by `:riskengine-sdk:generateDetectionLists` before `preBuild`:
 
-- `riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/generated/DetectionLists.java`
-- `riskengine-sdk/src/main/cpp/generated/detection_lists.h`
+- `riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/generated/DetectionLists.java` (all entries obfuscated via `ObfuscatedLists.decode`, zero plaintext paths)
+- `riskengine-sdk/src/main/cpp/generated/detection_lists.h` (all 10 native lists generated from the ini and wrapped with `OBF(...)`)
 
-`RootPathListConsistencyTest` fails if the Java arrays drift from the ini. Sections cover su / magisk / kernelsu / apatch / modules / emulator files and packages / cloud packages / sandbox packages / properties / process tokens.
-
-This change adds `[tamper_tool_paths]` and property entries and expands generated Java/native lists. Groups such as `PARTITION_FINGERPRINT_PROPERTIES`, `CLOUD_PHONE_PROPERTIES`, `VIRTUAL_GPU_MARKERS`, and `list_monitored_libc_symbols()` are also defined in generated source; not every group has a matching ini section. `ObfuscatedLists` has not replaced plaintext Java lists.
+`RootPathListConsistencyTest` validates all 14 ini sections against `DetectionLists`, `detection_lists.h`, zero plaintext in `DetectionLists.java`, and all 35 `<queries>` package declarations in `AndroidManifest.xml`.
 
 ## 12. JSON
 
 `RiskReportJsonSerializer` uses `org.json` (provided by the Android framework; unit tests depend on `org.json:json`). Root fields:
 
-`timestampMs`, `sdkVersion`, `riskScore`, `maxRiskScore`, `displayThresholdMaximum`, `warningCount`, `dangerCount`, `unknownCount`, `availableDetectionCount`, `detectionCount`, `checkCount`, `completedCheckCount`, `incompleteCheckCount`, `coveragePercent`, `reportStatus`, `overallRiskLevel`, `collectScene`, `fingerprint`, `detections`.
+`timestampMs`, `sdkVersion`, `riskScore`, `maxRiskScore`, `displayThresholdMaximum`, `warningCount`, `dangerCount`, `unknownCount`, `availableDetectionCount`, `detectionCount`, `checkCount`, `completedCheckCount`, `incompleteCheckCount`, `coveragePercent`, `reportStatus`, `overallRiskLevel`, `collectScene`, `fingerprintId` (optional object), `fingerprint`, `detections`.
 
 Each detection includes `detectorName`, `riskLevel`, `status`, `executionStatus`, `score`, `maxScore`, `informational`, `checksAttempted`/`Succeeded`/`Failed`, `failureReasons`, `details`, `evidence`, `timestampMs`.
 
-The serializer does not add a top-level `fingerprintId`; the Java getter does not automatically become a JSON field. Layered IDs and continuity use the existing collector serialization path at `fingerprint.fingerprint_id.values`, with string values. The hardware contributing-field list is available only on the Java `FingerprintId` model.
+The top-level `fingerprintId` object serializes `compositeId`, `hardwareId`, `systemId`, `volatileId`, `hardwareFieldsPresent`, `hardwareFieldsTotal`, `hardwareCoveragePercent`, `hardwareLayerReliable`, `systemFieldsPresent`, `systemFieldsTotal`, `contributingFields`, and `hardwareBucketDigests`, while retaining backward-compatible string fields under `fingerprint.fingerprint_id.values`.
 
 ## 13. ProGuard / R8
 

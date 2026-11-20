@@ -10,10 +10,10 @@
 
 namespace {
 
-// KernelSU's private prctl option and the reply it writes.
+// KernelSU's private prctl option and the reply it writes back to *arg5.
 constexpr int kKsuOption = 0xDEADBEEF;
 constexpr unsigned long kKsuCmdGetVersion = 2;
-constexpr int kKsuMagicReply = 0x5A5A5A5A;
+constexpr int kKsuMagicReply = 0xDEADBEEF;
 
 void add_token(std::vector<std::string> &tokens, const std::string &token) {
     if (!token.empty()
@@ -40,20 +40,18 @@ bool probe_ksu_version(int &version_out) {
     volatile int reply = 0;
     version_out = 0;
 
-    long ret = my_prctl(kKsuOption, kKsuCmdGetVersion,
-                        reinterpret_cast<unsigned long>(&version),
-                        0,
-                        reinterpret_cast<unsigned long>(&reply));
+    (void) my_prctl(kKsuOption, kKsuCmdGetVersion,
+                    reinterpret_cast<unsigned long>(&version),
+                    0,
+                    reinterpret_cast<unsigned long>(&reply));
 
-    // Any of: success return, a written version, or the magic reply.
+    // Only accept kernel-written output values; a seccomp filter or container
+    // returning 0 without touching out-params must not cause a false positive.
     if (version != 0) {
         version_out = version;
         return true;
     }
     if (reply == kKsuMagicReply) {
-        return true;
-    }
-    if (ret == 0) {
         return true;
     }
     return false;

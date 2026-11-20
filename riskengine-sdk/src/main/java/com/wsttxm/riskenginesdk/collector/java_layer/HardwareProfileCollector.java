@@ -7,11 +7,11 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.hardware.display.DisplayManager;
 import android.os.BatteryManager;
 import android.util.Size;
 import android.util.SizeF;
 import android.view.Display;
-import android.view.WindowManager;
 
 import com.wsttxm.riskenginesdk.collector.BaseCollector;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
@@ -71,9 +71,9 @@ public class HardwareProfileCollector extends BaseCollector {
 
     private void collectDisplay(CollectorResult result) {
         try {
-            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-            if (wm == null) return;
-            Display display = wm.getDefaultDisplay();
+            DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+            if (dm == null) return;
+            Display display = dm.getDisplay(Display.DEFAULT_DISPLAY);
             if (display == null) return;
             result.addValue("refresh_rate",
                     String.format(Locale.ROOT, "%.2f", display.getRefreshRate()));

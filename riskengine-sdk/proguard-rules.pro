@@ -6,8 +6,12 @@
 -keep public class com.wsttxm.riskenginesdk.PrivacyProfile { *; }
 -keep public class com.wsttxm.riskenginesdk.CollectScene { *; }
 -keep class com.wsttxm.riskenginesdk.model.** { *; }
--keep class com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge { *; }
 -keepattributes InnerClasses
 
-# Keep JNI methods
--keepclasseswithmembers class * { native <methods>; }
+-keep class com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge {
+    public static boolean isNativeAvailable();
+    native <methods>;
+}
+-keepclasseswithmembers,includedescriptorclasses class * {
+    native <methods>;
+}

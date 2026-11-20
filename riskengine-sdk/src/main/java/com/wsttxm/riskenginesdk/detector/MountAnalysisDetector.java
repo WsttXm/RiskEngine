@@ -103,7 +103,8 @@ public class MountAnalysisDetector extends BaseDetector {
         try {
             SignalResult<String> mountInfo = signals.getTextFile("/proc/self/mountinfo");
             if (!mountInfo.isSuccess() || mountInfo.getValue() == null) return false;
-            String lower = mountInfo.getValue().toLowerCase(Locale.ROOT);
+            String content = mountInfo.getValue();
+            String lower = content.toLowerCase(Locale.ROOT);
             if (lower.contains("kernelsu") || lower.contains("/data/adb/ksu")
                     || lower.contains(" ksu ")) {
                 addUnique(evidence, "mountinfo:ksu");
@@ -111,11 +112,36 @@ public class MountAnalysisDetector extends BaseDetector {
             if (lower.contains("magisk") || lower.contains("core/mirror")) {
                 addUnique(evidence, "mountinfo:magisk");
             }
+            // Detect tmpfs mounted directly onto read-only system partition subpaths
+            // (e.g. MoveCertificate / Magisk / KernelSU modules mounting tmpfs over
+            // /system/etc/security/cacerts, surviving per-process overlay umount).
+            for (String line : content.split("\\n")) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) continue;
+                int sep = trimmed.indexOf(" - ");
+                if (sep <= 0) continue;
+                String[] left = trimmed.substring(0, sep).split("\\s+");
+                if (left.length < 5) continue;
+                String mountPoint = left[4];
+                if (!isReadOnlySystemSubpath(mountPoint)) continue;
+                String[] right = trimmed.substring(sep + 3).trim().split("\\s+");
+                if (right.length > 0 && "tmpfs".equalsIgnoreCase(right[0])) {
+                    addUnique(evidence, "system_tmpfs_mount:" + mountPoint);
+                }
+            }
             return true;
         } catch (Exception e) {
             CLog.e("MountInfo check failed", e);
             return false;
         }
+    }
+
+    private static boolean isReadOnlySystemSubpath(String mountPoint) {
+        return mountPoint.startsWith("/system/")
+                || mountPoint.startsWith("/vendor/")
+                || mountPoint.startsWith("/product/")
+                || mountPoint.startsWith("/system_ext/")
+                || mountPoint.startsWith("/odm/");
     }
 
     private void addUnique(List<String> evidence, String signal) {

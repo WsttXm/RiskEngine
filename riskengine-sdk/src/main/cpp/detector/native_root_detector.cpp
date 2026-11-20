@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fcntl.h>
+#include <map>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -63,20 +64,20 @@ void probe_group(const std::vector<std::string> &paths, const std::string &prefi
 }
 
 void scan_path_env(std::vector<std::string> &tokens) {
-    char buf[8192];
-    int n = read_file_content(OBF("/proc/self/environ").c_str(), buf, sizeof(buf));
-    if (n <= 0) return;
+    std::string env_content = read_file_string(OBF("/proc/self/environ").c_str(), 32 * 1024);
+    if (env_content.empty()) return;
     std::string path_value;
+    const std::string path_prefix = OBF("PATH=");
     size_t i = 0;
-    while (i < static_cast<size_t>(n)) {
-        const char *entry = buf + i;
-        size_t len = 0;
-        while (i + len < static_cast<size_t>(n) && buf[i + len] != '\0') len++;
-        if (len > 5 && std::strncmp(entry, "PATH=", 5) == 0) {
-            path_value.assign(entry + 5, len - 5);
+    while (i < env_content.size()) {
+        size_t nul = env_content.find('\0', i);
+        if (nul == std::string::npos) nul = env_content.size();
+        if (nul - i > path_prefix.size()
+                && env_content.compare(i, path_prefix.size(), path_prefix) == 0) {
+            path_value = env_content.substr(i + path_prefix.size(), nul - i - path_prefix.size());
             break;
         }
-        i += len + 1;
+        i = nul + 1;
     }
     if (path_value.empty()) return;
 
@@ -100,10 +101,8 @@ void scan_path_env(std::vector<std::string> &tokens) {
 }
 
 void scan_mountinfo(std::vector<std::string> &tokens) {
-    char buf[65536];
-    int n = read_file_content(OBF("/proc/self/mountinfo").c_str(), buf, sizeof(buf));
-    if (n <= 0) return;
-    std::string content(buf, static_cast<size_t>(n));
+    std::string content = read_file_string(OBF("/proc/self/mountinfo").c_str(), 512 * 1024);
+    if (content.empty()) return;
     std::string lower = content;
     for (char &c : lower) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
@@ -127,6 +126,61 @@ void scan_mountinfo(std::vector<std::string> &tokens) {
     }
     if (lower.find(OBF("/data/adb/modules")) != std::string::npos) {
         add_token(tokens, OBF("mount:module"));
+    }
+
+    // Detect tmpfs mounted directly onto read-only system partition subpaths
+    // (e.g. MoveCertificate / Magisk / KernelSU module mounting tmpfs on
+    // /system/etc/security/cacerts, which survives KernelSU umount + Shamiko).
+    const std::string sep_marker = OBF(" - ");
+    const std::string tmpfs_tok = OBF("tmpfs");
+    const std::vector<std::string> ro_prefixes = {
+            OBF("/system/"), OBF("/vendor/"), OBF("/product/"),
+            OBF("/system_ext/"), OBF("/odm/")
+    };
+    size_t pos = 0;
+    while (pos < content.size()) {
+        size_t nl = content.find('\n', pos);
+        if (nl == std::string::npos) nl = content.size();
+        if (nl > pos) {
+            std::string line = content.substr(pos, nl - pos);
+            // mountinfo field 5 (0-based index 4) is the mount point
+            size_t field = 0;
+            size_t p = 0;
+            while (field < 4 && p != std::string::npos) {
+                p = line.find(' ', p);
+                if (p != std::string::npos) {
+                    ++p;
+                    ++field;
+                }
+            }
+            if (field == 4 && p < line.size()) {
+                size_t mp_end = line.find(' ', p);
+                if (mp_end != std::string::npos && mp_end > p) {
+                    std::string mount_point = line.substr(p, mp_end - p);
+                    bool under_ro = false;
+                    for (const auto &prefix : ro_prefixes) {
+                        if (mount_point.rfind(prefix, 0) == 0) {
+                            under_ro = true;
+                            break;
+                        }
+                    }
+                    if (under_ro) {
+                        size_t sep = line.find(sep_marker, mp_end);
+                        if (sep != std::string::npos) {
+                            size_t fs_start = sep + sep_marker.size();
+                            size_t fs_end = line.find(' ', fs_start);
+                            std::string fs_type = fs_end == std::string::npos
+                                    ? line.substr(fs_start)
+                                    : line.substr(fs_start, fs_end - fs_start);
+                            if (fs_type == tmpfs_tok) {
+                                add_token(tokens, OBF("mount:system_tmpfs:") + mount_point);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        pos = nl + 1;
     }
 }
 
@@ -152,16 +206,20 @@ std::string base_name_of(const std::string &path) {
 
 /**
  * Cross-checks direct stat against a getdents64 listing of the parent.
- *
- * Userspace hiding usually filters one path but not the other: a file that
- * stats successfully yet is absent from its parent's directory listing (or the
- * reverse) is a contradiction no honest filesystem produces.
+ * Caches parent directory listings within a single scan to avoid repeated
+ * getdents64 passes over /system/bin and /data/adb.
  */
 void cross_check_listing(const std::vector<std::string> &paths,
+                         std::map<std::string, RawDirResult> &dir_cache,
                          std::vector<std::string> &tokens) {
     for (const auto &path : paths) {
         bool stat_visible = my_faccessat(AT_FDCWD, path.c_str(), F_OK, 0) == 0;
-        RawDirResult dir = raw_list_dir(parent_dir_of(path).c_str());
+        const std::string parent = parent_dir_of(path);
+        auto it = dir_cache.find(parent);
+        if (it == dir_cache.end()) {
+            it = dir_cache.emplace(parent, raw_list_dir(parent.c_str())).first;
+        }
+        const RawDirResult &dir = it->second;
         if (!dir.ok()) continue;
         const std::string name = base_name_of(path);
         bool listed = std::find(dir.names.begin(), dir.names.end(), name)
@@ -179,21 +237,71 @@ int native_get_selinux_enforce() {
 }
 
 std::string native_get_build_prop_fingerprint() {
-    char buf[8192];
-    int n = read_file_content(OBF("/system/build.prop").c_str(), buf, sizeof(buf));
-    if (n <= 0) return "";
-    std::string content(buf, static_cast<size_t>(n));
+    std::string content = read_file_string(OBF("/system/build.prop").c_str(), 128 * 1024);
+    if (content.empty()) return "";
     const std::string key = OBF("ro.build.fingerprint=");
-    auto pos = content.find(key);
-    if (pos == std::string::npos) return "";
-    auto end = content.find('\n', pos);
-    std::string value = content.substr(pos + key.size(),
-                                       end == std::string::npos ? std::string::npos
-                                                                : end - pos - key.size());
-    while (!value.empty() && (value.back() == '\r' || value.back() == ' ')) {
-        value.pop_back();
+    size_t pos = 0;
+    while (pos < content.size()) {
+        size_t end = content.find('\n', pos);
+        if (end == std::string::npos) end = content.size();
+        if (end - pos > key.size() && content.compare(pos, key.size(), key) == 0) {
+            std::string value = content.substr(pos + key.size(), end - pos - key.size());
+            while (!value.empty() && (value.back() == '\r' || value.back() == ' ')) {
+                value.pop_back();
+            }
+            return value;
+        }
+        pos = end + 1;
     }
-    return value;
+    return "";
+}
+
+std::string native_get_proc_cmdline_boot_props() {
+    std::string cmdline = read_file_string(OBF("/proc/cmdline").c_str(), 16 * 1024);
+    if (cmdline.empty()) return "";
+
+    const std::vector<std::string> wanted_keys = {
+            OBF("androidboot.verifiedbootstate"),
+            OBF("androidboot.flash.locked"),
+            OBF("androidboot.vbmeta.digest"),
+            OBF("androidboot.qemu")
+    };
+
+    std::vector<std::string> pairs;
+    size_t pos = 0;
+    while (pos < cmdline.size()) {
+        while (pos < cmdline.size()
+                && (cmdline[pos] == ' ' || cmdline[pos] == '\t'
+                    || cmdline[pos] == '\n' || cmdline[pos] == '\r')) {
+            ++pos;
+        }
+        if (pos >= cmdline.size()) break;
+        size_t end = pos;
+        while (end < cmdline.size()
+                && cmdline[end] != ' ' && cmdline[end] != '\t'
+                && cmdline[end] != '\n' && cmdline[end] != '\r') {
+            ++end;
+        }
+        std::string item = cmdline.substr(pos, end - pos);
+        pos = end;
+        auto eq = item.find('=');
+        if (eq == std::string::npos || eq == 0 || eq + 1 >= item.size()) continue;
+        std::string key = item.substr(0, eq);
+        std::string val = item.substr(eq + 1);
+        for (const auto &wanted : wanted_keys) {
+            if (key == wanted) {
+                add_token(pairs, key + "=" + val);
+                break;
+            }
+        }
+    }
+
+    std::string joined;
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        if (i) joined += ";";
+        joined += pairs[i];
+    }
+    return joined;
 }
 
 bool native_check_root() {
@@ -212,8 +320,9 @@ std::string native_get_root_evidence() {
     scan_mountinfo(tokens);
 
     // Hidden-root detection that path probes cannot reach.
-    cross_check_listing(list_su_paths(), tokens);
-    cross_check_listing(list_magisk_paths(), tokens);
+    std::map<std::string, RawDirResult> dir_cache;
+    cross_check_listing(list_su_paths(), dir_cache, tokens);
+    cross_check_listing(list_magisk_paths(), dir_cache, tokens);
 
     const std::string kernel_evidence = native_get_kernel_root_evidence();
     if (!kernel_evidence.empty()) {

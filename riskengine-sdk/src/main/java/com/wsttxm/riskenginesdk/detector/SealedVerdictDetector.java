@@ -67,6 +67,12 @@ public class SealedVerdictDetector extends BaseDetector {
             return safe(coverage);
         }
 
+        if (nativeScore <= 0 && evidence.size() == 1
+                && "sealed:coverage_loss".equals(evidence.get(0))) {
+            coverage.failure("sealed:coverage_loss");
+            return safe(coverage);
+        }
+
         boolean tampered = false;
         for (String item : evidence) {
             if (item.startsWith("verdict_unverifiable")
@@ -119,35 +125,32 @@ public class SealedVerdictDetector extends BaseDetector {
     }
 
     /**
-     * Requests a sealed verdict and immediately asks native to verify it.
-     * A blob that native will not vouch for means something between the two
-     * calls altered it, which is itself the finding.
+     * Requests a challenge-bound sealed verdict and immediately verifies it in
+     * a single native HMAC-SHA256 + anti-replay call.
      */
     private int checkSealedVerdict(List<String> evidence, CheckCoverage coverage) {
-        SignalResult<String> sealed = signals.getSealedVerdict();
-        if (!sealed.isSuccess() || sealed.getValue() == null
-                || sealed.getValue().isEmpty()) {
-            coverage.failure("sealed_verdict:" + sealed.getFailureReason());
+        SignalResult<SignalSnapshot.SealedVerdictSample> sampleResult =
+                signals.getSealedVerdictSample();
+        if (!sampleResult.isSuccess() || sampleResult.getValue() == null
+                || sampleResult.getValue().blob.isEmpty()) {
+            coverage.failure("sealed_verdict:" + sampleResult.getFailureReason());
             return -1;
         }
-        SignalResult<Integer> verified =
-                NativeCollectorBridge.verifySealedVerdictResult(sealed.getValue());
-        SignalResult<Integer> verifiedFlags =
-                NativeCollectorBridge.verifySealedVerdictFlagsResult(sealed.getValue());
-        if (!verified.isSuccess() || verified.getValue() == null
-                || !verifiedFlags.isSuccess() || verifiedFlags.getValue() == null) {
-            String reason = !verified.isSuccess() || verified.getValue() == null
-                    ? verified.getFailureReason() : verifiedFlags.getFailureReason();
-            coverage.failure("verify:" + reason);
+        SignalSnapshot.SealedVerdictSample sample = sampleResult.getValue();
+        SignalResult<Long> packed = NativeCollectorBridge.verifySealedVerdictPackedResult(
+                sample.blob, sample.challenge);
+        if (!packed.isSuccess() || packed.getValue() == null) {
+            coverage.failure("verify:" + packed.getFailureReason());
             return -1;
         }
         coverage.success();
-        int score = verified.getValue();
-        int flags = verifiedFlags.getValue();
-        if (score < 0 || flags < 0) {
+        long raw = packed.getValue();
+        if (raw < 0L) {
             evidence.add("verdict_unverifiable:mac_or_nonce_rejected");
             return -1;
         }
+        int score = (int) (raw & 0x7FFFFFFFL);
+        int flags = (int) (raw >>> 32);
         appendFlagEvidence(evidence, flags);
         if (score > 0) {
             evidence.add("native_score:" + score);

@@ -68,6 +68,34 @@ long my_read(int fd, void *buf, size_t count) {
     return normalize(ret);
 }
 
+long my_pread64(int fd, void *buf, size_t count, uint64_t offset) {
+    if (buf == nullptr && count > 0) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+    long ret;
+    do {
+#if defined(__LP64__)
+        ret = raw_syscall4(__NR_pread64, fd, reinterpret_cast<long>(buf),
+                           static_cast<long>(count), static_cast<long>(offset));
+#elif defined(__arm__)
+        // ARM EABI aligns 64-bit syscall arguments to an even register pair (r4, r5).
+        ret = raw_syscall6(__NR_pread64, fd, reinterpret_cast<long>(buf),
+                           static_cast<long>(count), 0,
+                           static_cast<long>(offset & 0xffffffffull),
+                           static_cast<long>(offset >> 32));
+#elif defined(__i386__)
+        ret = raw_syscall5(__NR_pread64, fd, reinterpret_cast<long>(buf),
+                           static_cast<long>(count),
+                           static_cast<long>(offset & 0xffffffffull),
+                           static_cast<long>(offset >> 32));
+#else
+        ret = -ENOSYS;
+#endif
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+}
+
 long my_close(int fd) {
     return normalize(raw_syscall1(__NR_close, fd));
 }
@@ -77,7 +105,10 @@ long my_lseek(int fd, long offset, int whence) {
     return normalize(raw_syscall3(__NR_lseek, fd, offset, whence));
 #elif defined(__NR__llseek)
     unsigned long result[2] = {0, 0};
-    long ret = raw_syscall5(__NR__llseek, fd, offset >> 32, offset & 0xffffffffL,
+    const uint64_t off64 = static_cast<uint64_t>(offset);
+    long ret = raw_syscall5(__NR__llseek, fd,
+                            static_cast<long>(off64 >> 32),
+                            static_cast<long>(off64 & 0xffffffffull),
                             reinterpret_cast<long>(result), whence);
     if (normalize(ret) < 0) {
         return -1;

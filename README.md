@@ -26,7 +26,7 @@ A capable adversary can tamper with userspace signals. Kernel mount-namespace hi
 | --- | --- | --- |
 | Root | `root`, `mount_analysis` | Root paths, KernelSU prctl, SELinux context, directory-listing cross-checks, mount-namespace comparison with PID 1 |
 | Hook | `hook_framework`, `process_scan` | Xposed/Frida, GOT/inline checks for 18 libc symbols, ART reflection/JNI slots, Unix sockets, W+X mappings, periodic re-verification |
-| Native integrity | `native_tamper`, `sealed_verdict` | Windowed FNV-1a comparison of executable segments, JNI registration-pointer ranges, native sealed-score verification |
+| Native integrity | `native_tamper`, `sealed_verdict` | Windowed FNV-1a comparison of executable segments (including APK-embedded SOs), self-GOT verification, JNI pointer & prologue checks, HMAC-SHA256 challenge-bound sealed verdict |
 | Emulator | `emulator` | QEMU/ranchu, files/packages, runtime arch, hypervisor, virtual GPUs, `ro.build.characteristics` |
 | Debug | `debug` | TracerPid, debugger connection, executable maps paths, debuggable (informational by default) |
 | Sandbox / cloud phone / ROM | `sandbox`, `cloud_phone`, `custom_rom` | dexElements/UID consistency, parallel-space packages, cloud properties, virtual GPUs, wired interfaces, community ROM props |
@@ -179,19 +179,19 @@ Hard triggers include GOT/inline hooks, high-confidence Frida PID/port or maps F
 | `displayThresholdMaximum` | Severe threshold, fixed at 18 |
 | `warningCount` / `dangerCount` / `unknownCount` | Status counts (including informational) |
 | `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
-| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + collector coverage; excludes `collector:*` duplicates and the two older synthetic fields, but currently includes `fingerprint_id` |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + collector coverage; excludes `collector:*` duplicates and synthetic fields (including `fingerprint_id`) |
 | `collectScene` | Scene actually used for this report |
 | `timestampMs` / `sdkVersion` | Collection time and SDK version |
 
-JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency, including `informational`, `executionStatus`, `details`, and `failureReasons`. There is currently no top-level `fingerprintId`; layered IDs and continuity are under `fingerprint.fingerprint_id.values`.
+JSON is produced by `RiskReportJsonSerializer` with no extra runtime dependency, including `informational`, `executionStatus`, `details`, `failureReasons`, and a top-level `fingerprintId` object (while keeping compatible fields under `fingerprint.fingerprint_id.values`).
 
 ## Layered fingerprints and local storage
 
-`report.getFingerprintId()` returns a `FingerprintId`. The hardware layer uses GPU, sensor, camera, CPU, and related inputs; the system layer uses firmware, partition, and kernel information; the volatile layer uses enabled Android ID / Boot ID hashes. The composite ID combines only hardware and system layers, excluding the volatile layer.
+`report.getFingerprintId()` returns a `FingerprintId`. The hardware layer selects 13 stable hardware signals grouped into 5 physical buckets (GPU, sensor, camera, CPU, memory/battery); the system layer uses firmware, partition, and kernel information; the volatile layer uses enabled Android ID / Boot ID hashes. The composite ID combines only hardware and system layers, excluding the volatile layer (empty when both are empty).
 
-Each layer uses SHA-256 with a random 32-byte installation salt stored in the app's private `riskengine_fp` SharedPreferences. Storage also keeps the last reliable hardware/system digests, first-observation time, and observation count. Normal app-data clearing or uninstall removes these records; cross-reinstall linkage is not implemented, and host backup/restore policy affects whether records are retained.
+Each layer uses SHA-256 with a random 32-byte installation salt stored in the app's private `riskengine_fp` SharedPreferences (using synchronous `commit()` on initial write). Storage also keeps the last reliable hardware/system digests, hardware bucket digests, first-observation time, and observation count. Normal app-data clearing or uninstall removes these records; cross-reinstall linkage is not implemented, and host backup/restore policy affects whether records are retained.
 
-`isHardwareLayerReliable()` requires at least 9 of the 17 candidate hardware inputs. Continuity states are `FIRST_OBSERVATION`, `STABLE`, `SYSTEM_CHANGED`, `HARDWARE_CHANGED`, `INCONCLUSIVE`, and `UNKNOWN`. `HARDWARE_CHANGED` appends `fingerprint_continuity` (`MEDIUM`/4). The hardware layer is a measurement digest: drivers, configuration, or available fields can change it, so it does not guarantee unique physical-device identification.
+`isHardwareLayerReliable()` requires at least 7 of the 13 candidate hardware inputs (or key physical buckets). Continuity states are `FIRST_OBSERVATION`, `STABLE`, `SYSTEM_CHANGED`, `HARDWARE_CHANGED`, `INCONCLUSIVE`, and `UNKNOWN`, using bucketed intersection matching to suppress single-dimension jitter false positives. `HARDWARE_CHANGED` appends `fingerprint_continuity` (`MEDIUM`/4). The hardware layer is a measurement digest: drivers, configuration, or available fields can change it, so it does not guarantee unique physical-device identification.
 
 ## Privacy
 
@@ -203,7 +203,7 @@ Each layer uses SHA-256 with a random 32-byte installation salt stored in the ap
 
 `collectAndroidId` / `collectBootId` / `collectDrmId` override a profile. Hashes include the host package name, so they are deterministic app-scoped pseudonyms — **not** encryption, anonymization, or an absolute non-reversibility guarantee. Reports never expose raw Android ID, DRM ID, boot ID, IMEI, IMSI, Wi-Fi/Bluetooth MAC, SSID, or BSSID.
 
-The five new hardware collectors and layered-ID composition run in every privacy profile. `MINIMAL` disables only the three identifiers above, not hardware fingerprinting or local continuity storage. If storage is unavailable, the implementation can fall back to the fixed salt `riskengine`, so installation isolation is not guaranteed in that case.
+The five new hardware collectors and layered-ID composition run in every privacy profile. `MINIMAL` disables only the three identifiers above, not hardware fingerprinting or local continuity storage. If storage is unavailable, the implementation falls back to a process-ephemeral random salt (never a fixed constant salt), valid for the current process lifetime only.
 
 ## Demo
 
@@ -242,10 +242,10 @@ The `demo` module is a local diagnostic console, not an automatic collector:
 
 - Native I/O uses per-ABI inline syscalls (not libc `syscall()`); directory walks use `getdents64`. This reduces libc-hook blind spots; it does not defeat kernel-level hiding.
 - `sealed_verdict` independently scans and scores signals, with Java still aggregating the final report. It is not gated by Root/Hook group switches; disabling those groups does not stop equivalent probes inside the sealed verdict. When another detector already reports the same evidence family, the sealed result remains visible as informational corroboration and is not counted as a second danger.
-- Sealing uses an in-process key, a keyed FNV-1a tag, a random nonce, and a 10-second monotonic freshness window. It is neither hardware attestation nor a standard cryptographic MAC, and does not guarantee protection against altered Java verification paths or native attackers in the process.
-- The native monitor starts when the SO loads, rechecking self code, TracerPid, W+X, and framework mappings every 20–26 seconds. Findings are latched for later `hook_framework` collections; no callback is pushed automatically. `shutdown()` wakes and joins it; reinitialization starts a clean monitor generation.
-- Unreadable namespaces and unavailable self-integrity comparisons (including libraries mapped directly from an APK) are coverage gaps, not positive risk evidence. Only the exact `text_mismatch` token enters native tamper scoring; diagnostic suffixes such as `text_mismatch:missing_map` and `text_mismatch:apk_embedded` do not.
-- x86/i386 has no ARM trampoline heuristic; GOT checks and FNV-1a file/memory comparisons still run. Virtual GPUs, wired interfaces, and partition differences need OEM hardware regression and are not independently proof of tampering.
+- Sealing uses an in-process 32-byte random key, a standard HMAC-SHA256 tag (constant-time verified), a 64-bit caller challenge binding, a random nonce, a 10-second monotonic freshness window, and a 64-slot consumed-nonce replay cache, folding periodic-monitor (`late_*`) and ART/JNI integrity findings into the verdict. Because the key lives in process memory, it is still not hardware attestation against an attacker with arbitrary native memory access.
+- The native monitor starts when the SO loads, rechecking self code, per-thread TracerPid, W+X (including APK-embedded SOs), and framework mappings every 20–26 seconds. Findings are latched for later `hook_framework` and `sealed_verdict` collections; no callback is pushed automatically. `shutdown()` wakes and joins it; reinitialization starts a clean monitor generation.
+- Unreadable namespaces are coverage gaps, not positive risk evidence. Self `.text` integrity supports `extractNativeLibs=false` (locating the embedded SO inside the APK via `MapEntry.offset` and raw `pread64`). Both exact `text_mismatch` and anonymous executable mappings (`text_mismatch:anonymous_map`) trigger tamper scoring; diagnostic suffixes such as `text_mismatch:missing_map` remain coverage gaps.
+- Both ARM64 and x86_64 run inline trampoline heuristics alongside disk-vs-memory 32-byte ELF export comparisons for `libc.so` / `libdl.so`, self-GOT checks, and registered JNI entry prologue verification. Virtual GPU matching uses `GpuClassifier` to avoid misclassifying real-device ANGLE-on-Vulkan renderers.
 - [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) describes expected evidence; the repository currently has no automated device-matrix workflow. Historical build results and open issues are in [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md).
 
 ## Documentation

@@ -8,6 +8,8 @@
 struct MapEntry {
     uintptr_t start = 0;
     uintptr_t end = 0;
+    uint64_t offset = 0;
+    uint64_t inode = 0;
     std::string perms;
     std::string path;
     std::string raw;

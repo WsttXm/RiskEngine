@@ -118,15 +118,15 @@ RiskEngine 是本地 Android 风险信号 SDK：Java 负责编排、隐私、场
 | hardware（`hw`） | 17 项 | GPU、传感器、摄像头、内存、显示、电池、CPU/SoC、可选 Widevine、屏幕 xdpi/ydpi |
 | system（`sys`） | 11 项 | 分区指纹、构建日期/vbmeta、Build 指纹/补丁/bootloader、内核、共享库哈希 |
 | volatile（`vol`） | 2 项 | 已启用的 Android ID 与 Boot ID 哈希 |
-| composite | hardware + system | `SHA-256(salt + "\|composite\|" + hardwareId + "\|" + systemId)`；不包含 volatile，即使两层为空也可能非空 |
+| composite | hardware + system | 硬件层与系统层均为空时返回空字符串；否则为 `SHA-256(salt + "\|composite\|" + hardwareId + "\|" + systemId)`，不包含 volatile |
 
-`FingerprintId` 公开各层 getter、硬件/系统字段数量、硬件参与字段列表；硬件覆盖百分比为整数截断，可靠条件为非空摘要且覆盖 ≥ 50%（当前至少 9/17）。这只是字段覆盖门槛，不代表唯一性或跨固件稳定性的保证。
+`FingerprintId` 公开各层 getter、硬件/系统字段数量、硬件参与字段列表与分桶摘要（`gpu`、`sensor`、`camera`、`cpu`、`memory_battery`）；硬件层精选 13 项稳定特征，可靠条件为非空摘要且覆盖 ≥ 50%（至少 7/13）或命中关键硬件桶。这只是字段覆盖门槛，不代表唯一性或跨固件稳定性的保证。
 
-`RiskEngine` 为 `DataAggregator` 注入 `FingerprintStore`。应用私有 `riskengine_fp` SharedPreferences 保存 32 字节随机盐的 hex、`last_hw`、`last_sys`、`first_seen` 和 `observations`。无存储的 `DataAggregator()` 使用固定盐 `riskengine` 且不比较连续性；盐访问异常也回退到该固定值。
+`RiskEngine` 为 `DataAggregator` 注入 `FingerprintStore`。应用私有 `riskengine_fp` SharedPreferences 保存 32 字节随机盐的 hex（首次写入使用同步 `commit()` 落盘）、`last_hw`、`last_sys`、硬件分桶摘要、`first_seen` 和 `observations`。无存储或盐访问异常时回退到进程内随机生成的临时盐（不再使用固定常量 `riskengine`）。
 
-比较顺序：无硬件基线 → `FIRST_OBSERVATION`；有基线但本次不可靠 → `INCONCLUSIVE`；硬件相同且系统相同 → `STABLE`；仅系统变化 → `SYSTEM_CHANGED`；硬件不同 → `HARDWARE_CHANGED`；存储不可用 → `UNKNOWN`。仅可靠测量更新摘要基线，观察次数仍递增。硬件变化追加 `fingerprint_continuity`（`MEDIUM`/`WARNING`/4，可处置），发生在场景、去重和交叉规则之后。
+比较顺序：无硬件基线 → `FIRST_OBSERVATION`；有基线但本次不可靠 → `INCONCLUSIVE`；硬件摘要相同（或分桶交集满足连续性阈值，抑制单维度抖动）且系统相同 → `STABLE`；仅系统变化 → `SYSTEM_CHANGED`；分桶交集确认硬件变化 → `HARDWARE_CHANGED`；存储不可用 → `UNKNOWN`。仅可靠测量更新摘要基线，观察次数仍递增。硬件变化追加 `fingerprint_continuity`（`MEDIUM`/`WARNING`/4，可处置）。
 
-聚合器追加 `fingerprint_id`，包含 `composite`/`hardware`/`system`/`volatile`（非空时）、`hardware_coverage`、`system_coverage`、`hardware_layer_reliable`，有存储时再加 `continuity`、`observation_count`。`RiskReport.getFingerprintId()` 返回模型；构建异常时返回 `null`。当前 `RiskReport.isSyntheticCollector` 尚未排除 `fingerprint_id`，因此它也计入总检查数和完成数。
+聚合器先完成分层指纹构建与连续性检测，再写入 `fingerprint_id` 与合成信号；`fingerprint_id` 包含 `composite`/`hardware`/`system`/`volatile`（非空时）、`hardware_coverage`、`system_coverage`、`hardware_layer_reliable`，有存储时再加 `continuity`、`observation_count`。`RiskReport.getFingerprintId()` 返回模型；构建异常时返回 `null`。`RiskReport.isSyntheticCollector` 已排除 `fingerprint_id`，不再计入总检查数和完成数。
 
 可靠门槛以上的字段集合变化仍可能导致 `HARDWARE_CHANGED`；驱动、隐私开关或显示配置变化也可能改变硬件摘要。该状态不是物理硬件更换或伪装的证明。
 
@@ -285,22 +285,22 @@ TracerPid > 0 → `HIGH`/`DANGER`/8。调试器连接或 maps 可执行调试路
 
 ### 6.3 字符串混淆
 
-`OBF("...")` 使用 `__LINE__`、`__COUNTER__` 与字符串长度生成每个调用点的种子，再以滚动 xorshift 字节流 XOR 编码，运行时解码；不再使用固定 `0x5A`。这是静态字符串混淆，不是加密保证。Java `ObfuscatedLists` 仅提供解码脚手架，尚未接入 `DetectionLists` 的生成与消费，Java 名单仍是明文。
+`OBF("...")` 使用 `__LINE__`、`__COUNTER__` 与字符串长度生成每个调用点的种子，经 `noinline` `decode_runtime` 与 `asm volatile` 优化屏障防止 Clang `-O2`/ThinLTO 常量折叠回 `.rodata`，并在运行时以滚动 xorshift 字节流 XOR 解码；JNI 注册表名/签名也在注册后通过 `secure_zero` 清零。这是静态字符串混淆，不是加密保证。Java 侧由 `:riskengine-sdk:generateDetectionLists` 任务从 `artifact_paths.ini` 生成 `DetectionLists.java`（调用 `ObfuscatedLists.decode`）与 `detection_lists.h`，Java 字节码中不再包含明文路径名单。
 
 ### 6.4 maps
 
-`maps_parser.cpp` 用 raw syscall 读 `/proc/self/maps`，解析起止地址、权限、路径。Java `SignalSnapshot.getSelfMaps()` 是另一条 Java 路径，供 Hook/Debug 的 Java 侧复用；Native Hook maps **故意独立**，减少 libc hook 造成的同一盲区。
+`maps_parser.cpp` 用 raw syscall 读 `/proc/self/maps`（采用无流零拷贝指针解析并提取 `MapEntry.offset`）。Native Hook、完整性与密封裁决在单次检测中共享同一份 `maps` 快照以减少重复 syscall；Java `SignalSnapshot.getSelfMaps()` 仍是另一条 Java 路径，Native Hook maps **故意独立**，减少 libc hook 造成的同一盲区。
 
 ### 6.5 完整性
 
 `native_integrity.cpp`：
 
-1. **libc GOT / inline hook**：mmap 磁盘上的 `libc.so`，解析 ELF 动态表，检查 `list_monitored_libc_symbols()` 列出的 18 个符号（包括文件、目录、网络、属性与动态加载相关函数）。GOT 目标落在 libc RX 之外 → `got_hook:<name>`。ARM64 识别 `LDR X16/X17 + BR` 与越界 `B`；ARM32 识别 `bx/blx` 与 `ldr pc`。x86 无 trampoline 启发式。
+1. **libc / libdl 磁盘比对 + GOT / inline hook**：通过 raw `my_pread64` 解析磁盘 `libc.so` 与 `libdl.so` 的 ELF 符号表（`DT_GNU_HASH` / `DT_HASH`），比对 `list_monitored_libc_symbols()` 监控符号的前 32 字节代码，同时检查 ARM64（`LDR X16/X17 + BR`、`ADRP+ADD+BR`、越界 `B`、`BRK`）、ARM32（`bx/blx`、`ldr pc`）与 x86_64（`0xE9`、`0xFF 0x25`、`0xCC`）trampoline，并校验自身 `libriskengine.so` 的 `DT_JMPREL` GOT 指针是否指向受信任系统模块。
 2. **JNI 表**：`JNIEnv->FindClass` / `GetVersion` 函数指针若落在 `libart.so` RX 之外 → `jni_table_hook:...`。
-3. **自身 SO FNV-1a**：遍历所有可执行 PT_LOAD 的文件范围，以 64 KiB 窗口比较磁盘与可读内存，种子含段地址与偏移。发现不同输出 `text_mismatch` 与 `text_mismatch_seg:<index>`；有候选段但所有窗口不可读输出 `text_mismatch:unreadable_segments`。部分窗口不可读会跳过，当前不单独上报部分覆盖，因此空 evidence 不保证每个窗口都已比对。
-4. **JNI 自身注册表**：检查本库静态 `JNINativeMethod methods[]` 中的函数指针是否落在自身 RX 范围，越界输出 `jni_self_hook:<index>`；无范围输出 `jni_self:no_range`。它并不读取 ART 当前实际注册目标，不能保证发现后续 `RegisterNatives` 重绑定。
+3. **自身 SO FNV-1a（支持 `extractNativeLibs=false`）**：通过 `dladdr` 与 `MapEntry.offset` 定位磁盘文件（含 APK 内嵌未解压的 `.so`），用 `my_pread64` 遍历可执行 PT_LOAD 的 64 KiB 窗口并与可读内存逐窗比对。发现不同输出 `text_mismatch` 与 `text_mismatch_seg:<index>`；匿名可执行映射输出 `text_mismatch:anonymous_map`；所有窗口不可读输出 `text_mismatch:unreadable_segments`。
+4. **JNI 自身注册表与前导校验**：以 XOR 掩码保存 `JNI_OnLoad` 阶段注册的方法指针及其前 16 字节入口指令 FNV-1a 摘要，复检指针是否落于自身 RX 范围且入口前导未被 patch/trampoline，异常输出 `jni_self_hook:<index>`。
 
-ART 检查通过公开反射读取 `Method.invoke`、`Runtime.exec`、`File.exists`、`NativeCollectorBridge.isNativeAvailable` 的 native modifier，不使用固定 ArtMethod 偏移；另检查 ClassLoader 父链与六个反射/注册相关 JNIEnv 槽位是否在 libart RX 范围内。Unix socket 扫描被动读取 `/proc/net/unix` 的已知 Frida/gum 名称，W+X 扫描检查自身、libart 与 libc；读取失败的部分 Native 子探测仍返回空串，尚无逐项覆盖状态。
+ART 检查通过公开反射读取 `Method.invoke`、`Runtime.exec`、`File.exists`、`NativeCollectorBridge.isNativeAvailable` 与 `RiskEngine.collectSync` 的 native modifier，不使用固定 ArtMethod 偏移；另检查 ClassLoader 父链（白名单放行 `inmemorydexclassloader`）与六个反射/注册相关 JNIEnv 槽位是否在 libart RX 范围内。Unix socket 扫描被动读取 `/proc/net/unix` 的已知 Frida/gum 名称，W+X 扫描同时覆盖独立 `.so` 与 APK 内嵌自身库、`libart` 与 `libc`。
 
 ### 6.6 Native Detector 入口
 
@@ -318,24 +318,25 @@ ART 检查通过公开反射读取 `Method.invoke`、`Runtime.exec`、`File.exis
 | `nGetSoIntegrityRaw` | `native_get_so_integrity_evidence` | SO FNV-1a |
 | `nGetMountNsEvidenceRaw` | `mount_namespace_diff` | 自身与 PID 1 挂载差异 |
 | `nGetKernelRootEvidenceRaw` | `kernel_su_probe` | prctl / SELinux 上下文 |
-| `nGetSealedVerdictRaw` / `nVerifySealedVerdictRaw` | `sealed_verdict` | 密封载荷生成 / 验证并返回分数 |
-| `nGetJniSelfIntegrityRaw` | `native_get_jni_self_table_evidence` | 本库静态注册指针范围 |
+| `nGetSealedVerdictWithChallengeRaw` / `nVerifySealedVerdictPackedRaw`（含旧版兼容入口） | `sealed_verdict` | 绑定 64 位 challenge 生成 HMAC-SHA256 密封载荷 / 一次性单调用打包校验 |
+| `nGetProcCmdlineBootPropsRaw` | `native_root_detector` | raw syscall 读取 `/proc/cmdline` 校验 `androidboot.*` 防止 `resetprop` 伪造 |
+| `nGetJniSelfIntegrityRaw` | `native_get_jni_self_table_evidence` | XOR 掩码注册指针范围与 16 字节入口前导摘要校验 |
 | `nGetMonitorFindingsRaw` / `nStopMonitorRaw` | `periodic_monitor` | 读取累积发现 / 请求停止 |
 
 JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 UTF-8、非法序列替换后走 UTF-16 `NewString`。C++ 分配失败与 JNI 字符获取失败不跨边界遗留异常。注册失败会清理挂起异常并记录目标类名。
 
 ### 6.7 Native 构建加固
 
-- `-fstack-protector-strong`、Release `_FORTIFY_SOURCE=2`、`-Wformat -Wformat-security`
+- `-fstack-protector-strong`、Release/RelWithDebInfo `_FORTIFY_SOURCE=2`、`-Wformat -Wformat-security`
 - `-fvisibility=hidden`
 - 链接：`relro,now`、`noexecstack`、`max-page-size=16384`、`--exclude-libs,ALL`
-- Release 增加 thin LTO、移除 unwind table/frame pointer、常量合并、section GC 与 strip；`exports.map` 版本脚本只导出 `JNI_OnLoad` 与 `JNI_OnUnload`，JNI 方法仍经 `RegisterNatives` 绑定。
+- 同时对 `Release` 与 AGP 默认使用的 `RelWithDebInfo` 启用 thin LTO、移除 unwind table/frame pointer、常量合并、section GC 与 strip；`exports.map` 版本脚本只导出 `JNI_OnLoad` 与 `JNI_OnUnload`，所有 JNI 方法经 `OBF(...)` 动态解码后调用 `RegisterNatives` 绑定并清零临时明文缓冲。
 
 ### 6.8 密封载荷与周期监控
 
-密封载荷为 64 个 hex 字符，编码 8 字节 nonce、4 字节 flags、4 字节 score、8 字节单调时钟时间与 8 字节标签。32 字节密钥优先从 `/dev/urandom` 获取，失败回退到 `AT_RANDOM`，再失败使用地址/tid 派生值；密钥初始化已串行化。标签是自定义带密钥的 FNV-1a，**不是 HMAC 或标准密码学 MAC**。验证检查长度、标签与 10 秒单调时钟新鲜度窗口，既避免并发签发者互相作废，也拒绝陈旧重放。密钥位于进程内存，Java 调用与最终评分仍可被改写，因此不是安全证明。
+密封载荷采用标准 HMAC-SHA256（RFC 2104 + FIPS 180-4，零外部依赖实现于 `crypto_mini.h`），编码 8 字节随机 nonce、8 字节调用方 challenge、4 字节 flags、4 字节 score、8 字节单调时钟时间与 16 字节截断 HMAC-SHA256 标签。32 字节密钥优先从 `/dev/urandom` 获取，失败回退到 `AT_RANDOM`，再失败使用地址/tid 派生值；密钥初始化已串行化。`native_verify_sealed_verdict_packed` 使用恒定时间比较校验标签、challenge 绑定、10 秒单调时钟新鲜度窗口与 64 槽位已消费 nonce 重放缓存，并将周期监控发现（`late_*`）及 ART/JNI 完整性信号并入 `compute_flags`。密钥仍位于进程内存，因此不是硬件级证明。
 
-`JNI_OnLoad` 启动可 join 的 pthread，每次可中断地等待 20–26 秒后检查自身代码、TracerPid、自身/libart W+X、Frida/LSPosed 映射。发现去重累积为 `late_*`，读取时附 `passes:<n>`；不会修改已冻结报告或主动回调，后续 `hook_framework` 采集才消费。监控不重复完整 Root/模拟器扫描。
+`JNI_OnLoad` 启动可 join 的 pthread，每次可中断地等待 20–26 秒后共享单次 `maps` 快照复检自身代码、全线程 `/proc/self/task/*/status` TracerPid、自身（含 APK 内嵌 SO）/libart W+X、Frida 与 LSPosed 映射。发现去重累积为 `late_*`，读取时附 `passes:<n>`；不会修改已冻结报告或主动回调，后续 `hook_framework` 与 `sealed_verdict` 采集消费。监控不重复完整 Root/模拟器扫描。
 
 `shutdown()` 会唤醒并 join 监控线程；同进程重新初始化通过显式 JNI 入口重启，并清空发现与计数。`JNI_OnUnload` 也会在线程代码被卸载前完成 join。
 
@@ -346,23 +347,23 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 - ADB 状态、系统属性、`/proc/self/maps`（Java 路径）
 - 本机监听端口、进程快照、文本文件、路径存在性、容器信号
 - 同一命令的结构化 `ShellExecutor.Result`
-- SELinux、`build.prop` fingerprint、CPU/磁盘/内核、Native 进程 token、SO 完整性、屏幕度量
+- SELinux、`build.prop` fingerprint、`/proc/cmdline` 启动属性、CPU/磁盘/内核、Native 进程 token、SO 完整性、屏幕度量
 
 因此 ADB Collector 与 Detector 不再各扫一遍；Java Hook/Debug 复用 maps 与端口。Native Hook maps 仍独立读取。
 
 `ShellExecutor.Result` 区分 `SUCCESS`、`INVALID_COMMAND`、`TIMEOUT`、`NON_ZERO_EXIT`、`INTERRUPTED`、`EXECUTION_ERROR`，并携带 stdout/stderr/exitCode/durationMs/failureReason。字符串-only 助手已弃用。
 
-新增共享信号包括 GPU vendor/renderer、网络接口名、命名空间/内核 Root evidence、JNI 自身检查与密封裁决。`getGpuIdentity()` 为 Emulator/Cloud Detector 缓存离屏探测，但 `GpuInfoCollector` 仍独立采集，一次报告可能创建两次 EGL context。网卡名优先读 sysfs，无结果才用 Java 枚举，不做两源比较。系统属性现在只走 Native 白名单读取，已移除 shell `getprop` 回退；空属性保留 EMPTY。
+共享信号包括 GPU 完整属性（`getGpuAttributes()` 单次离屏探测，`GpuInfoCollector` 与 Emulator/Cloud Detector 共享同一结果，且不再调用危险的 `eglTerminate(EGL_DEFAULT_DISPLAY)`，改用 `eglReleaseThread()`）、网络接口名、命名空间/内核 Root evidence、JNI 自身检查与密封裁决。网卡名优先读 sysfs，无结果才用 Java 枚举。系统属性只走 Native 白名单读取，已移除 shell `getprop` 回退；`AndroidIdCollector` 与 `AdbInspector` 均不再 fork `/system/bin/sh`。
 
 ## 8. 场景、家族去重与交叉规则
 
 `DataAggregator.aggregate` 顺序：
 
-1. `CorrelationEngine.dedupeFamilies`：同一 `EvidenceFamily`（`frida` / `debugger` / `xposed` / `root_fw` / `qemu`）若已被靠前的检测器占用，后到且 `score > 0` 的可处置结果改为 informational，避免 Magisk 同时给 `root` 与 `process_scan` 加两份分。
+1. `CorrelationEngine.dedupeFamilies`：同一 `EvidenceFamily`（`frida` / `debugger` / `xposed` / `root_fw` / `qemu`）若已被靠前的检测器占用，后到且 `score > 0` 的可处置结果改为 informational（兼容 `native:` 前缀并支持复合检测器精确覆盖判定），避免 Magisk 同时给 `root` 与 `process_scan` 加两份分。
 2. `CorrelationEngine.applyScene`：按 `CollectScene` 把指定检测器从 informational 提升为 actionable。不关闭检测器，不降低已可处置的结果。
-3. `CorrelationEngine.correlate`：可能追加一条 `signal_correlation`。
-4. Collector 覆盖信号、多来源不一致、原有合成字段。
-5. 分层指纹 ID、连续性比较与可选 `fingerprint_continuity`。后者不会再经过场景/去重/交叉规则，且不包含在此前生成的 `runtime_integrity_score_inputs` 中。
+3. `CorrelationEngine.correlate`：可能追加一条 `signal_correlation`（已修正 `native:` 前缀匹配与规则去重）。
+4. 分层指纹 ID、分桶连续性比较与可选 `fingerprint_continuity`。
+5. Collector 覆盖信号、多来源不一致、合成字段。
 
 ## 8.1 场景提升
 
@@ -418,7 +419,7 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 - `coveragePercent`：`round(completed / total * 100)`；total 为 0 时为 100
 - `reportStatus`：全部完成 `COMPLETE`；一个都没完成且无可用检测 `UNAVAILABLE`；否则 `PARTIAL`
 
-当前覆盖统计只排除 `hook_memory_signals` 与 `runtime_integrity_score_inputs` 两项合成字段；`fingerprint_id` 仍计入，见 §4.4。
+覆盖统计排除所有合成字段：`hook_memory_signals`、`runtime_integrity_score_inputs` 与 `fingerprint_id`。
 
 聚合后 `RiskReport`、`DeviceFingerprint` 与内部 `CollectorResult` 被 freeze。
 
@@ -434,30 +435,28 @@ JNI 字符串不把不可信字节交给 `NewStringUTF`：限制长度、校验 
 
 SDK 不采集原始 IMEI、IMSI、MAC、SSID、BSSID。Native 属性读取受 ini 白名单约束。
 
-五个新增硬件 Collector 与分层 ID 在所有档位运行；`MINIMAL` 不禁用它们或 `FingerprintStore`。安装盐与摘要存在应用私有偏好文件，正常卸载/清除数据会删除，不实现 Keystore 跨重装关联；宿主备份/恢复策略仍影响持久性。盐读取失败回退固定值时，安装范围隔离不再有保证。
+五个新增硬件 Collector 与分层 ID 在所有档位运行；`MINIMAL` 不禁用它们或 `FingerprintStore`。安装盐与摘要存在应用私有偏好文件，正常卸载/清除数据会删除，不实现 Keystore 跨重装关联；宿主备份/恢复策略仍影响持久性。盐读取失败时回退为进程内随机生成的临时盐（不使用固定常量）。
 
 ## 11. 名单单源
 
-只读清单：`riskengine-sdk/src/main/resources/lists/artifact_paths.ini`。
+只读清单：`riskengine-sdk/src/main/resources/lists/artifact_paths.ini`（共 14 个 section，含 `[partition_fingerprint_properties]`、`[cloud_phone_properties]`、`[virtual_gpu_markers]`、`[monitored_libc_symbols]`）。
 
-生成物（提交在仓库中，修改 ini 后必须同步）：
+由 Gradle 任务 `:riskengine-sdk:generateDetectionLists` 自动生成并在 `preBuild` 前校验同步：
 
-- `riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/generated/DetectionLists.java`
-- `riskengine-sdk/src/main/cpp/generated/detection_lists.h`
+- `riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/generated/DetectionLists.java`（所有字符串均经 `ObfuscatedLists.decode` 混淆编码，零明文路径）
+- `riskengine-sdk/src/main/cpp/generated/detection_lists.h`（全部 10 个 C++ 列表均由 ini 单源生成，使用 `OBF(...)` 宏包装）
 
-`RootPathListConsistencyTest` 校验 Java 数组与 ini 一致。节包括 su / magisk / kernelsu / apatch / modules / emulator_files / emulator_packages / cloud_packages / sandbox_packages / properties / process tokens 等。
-
-此次新增 `[tamper_tool_paths]` 与属性条目，并扩展 Java/Native 生成列表。`PARTITION_FINGERPRINT_PROPERTIES`、`CLOUD_PHONE_PROPERTIES`、`VIRTUAL_GPU_MARKERS` 与 `list_monitored_libc_symbols()` 等分组还定义在生成源码中；不能假设所有分组均有同名 ini 节。`ObfuscatedLists` 尚未替换明文 Java 清单。
+`RootPathListConsistencyTest` 校验 14 个 ini 节与 `DetectionLists`、`detection_lists.h`、`DetectionLists.java` 零明文及 `AndroidManifest.xml` 全部 35 条 `<queries>` 包名一致。
 
 ## 12. JSON
 
 `RiskReportJsonSerializer` 使用 `org.json`（Android 框架已提供；单元测试用 `org.json:json`）。根对象字段：
 
-`timestampMs`、`sdkVersion`、`riskScore`、`maxRiskScore`、`displayThresholdMaximum`、`warningCount`、`dangerCount`、`unknownCount`、`availableDetectionCount`、`detectionCount`、`checkCount`、`completedCheckCount`、`incompleteCheckCount`、`coveragePercent`、`reportStatus`、`overallRiskLevel`、`collectScene`、`fingerprint`、`detections`。
+`timestampMs`、`sdkVersion`、`riskScore`、`maxRiskScore`、`displayThresholdMaximum`、`warningCount`、`dangerCount`、`unknownCount`、`availableDetectionCount`、`detectionCount`、`checkCount`、`completedCheckCount`、`incompleteCheckCount`、`coveragePercent`、`reportStatus`、`overallRiskLevel`、`collectScene`、`fingerprintId`（可选对象）、`fingerprint`、`detections`。
 
 每条 detection 含：`detectorName`、`riskLevel`、`status`、`executionStatus`、`score`、`maxScore`、`informational`、`checksAttempted`/`Succeeded`/`Failed`、`failureReasons`、`details`、`evidence`、`timestampMs`。
 
-当前序列化器未新增顶层 `fingerprintId`，Java getter 也不会自动成为 JSON 字段。分层 ID 与连续性通过已有 Collector 序列化路径输出到 `fingerprint.fingerprint_id.values`，其值为字符串；硬件参与字段列表只在 `FingerprintId` Java 模型中。
+顶层 `fingerprintId` 对象输出 `compositeId`、`hardwareId`、`systemId`、`volatileId`、`hardwareFieldsPresent`、`hardwareFieldsTotal`、`hardwareCoveragePercent`、`hardwareLayerReliable`、`systemFieldsPresent`、`systemFieldsTotal`、`contributingFields` 及 `hardwareBucketDigests`；同时在 `fingerprint.fingerprint_id.values` 保留原有字符串字段以向后兼容。
 
 ## 13. ProGuard / R8
 
@@ -522,8 +521,8 @@ Demo 直接依赖工程内 SDK，是诊断控制台：
 
 - 命名空间差异依赖 PID 1 procfs 可见性，不保证识破完整 DenyList/Shamiko；命名空间不同、目录枚举差异本身也可能来自合法隔离或读取时序。
 - 失败语义按覆盖不足保守处理：`root` 与密封裁决都把 `ns_unreadable:*` 记为覆盖损失而不增加风险分。监控仍可能锁存后续完整性异常，因此不能把一次 `native_tamper` 的 `UNAVAILABLE` 推广为所有后续完整性路径均不可用。
-- 密封验证为并发请求接受 10 秒新鲜度窗口内、MAC 有效的载荷。JNI 自检只看静态注册表，不读取 ART 当前实际绑定目标。详见 §5–6。
-- x86/i386 无 ARM trampoline 检测；GOT 与 FNV-1a 比对仍运行。FNV-1a 不是密码学哈希。
-- 虚拟 GPU、ethN、分区指纹差异、动态核数、ClassLoader/dexElements 与匿名映射都可能有合法来源，需要 OEM 真机与宿主框架回归。GPU 离屏采集尚需驱动兼容性验证。
-- 分层 ID 依赖可用字段与安装盐，不能保证跨重装、跨固件唯一识别设备；当前仍有两项测试预期与实现不一致（§15）。
+- 密封验证采用标准 HMAC-SHA256 + 64 位 challenge 绑定 + 10 秒新鲜度窗口 + 64 槽位一次性 nonce 重放缓存。JNI 自检除指针范围外还核验 16 字节入口指令前导摘要。详见 §5–6。
+- ARM64 与 x86_64 均包含 inline trampoline 检查，并对 `libc.so`/`libdl.so` 导出符号执行磁盘与内存比对、自身 GOT 检查与分窗 FNV-1a 代码校验（支持 `extractNativeLibs=false`）。
+- 虚拟 GPU（已通过 `GpuClassifier` 避免真机 ANGLE-on-Vulkan 误报）、ethN（云真机中已降级为 weak 信号）、分区指纹差异、动态核数（已使用 `/sys/devices/system/cpu/possible`）与匿名映射仍建议在目标 OEM 机型上做真机回归。
+- 分层 ID 依赖可用字段与安装盐，不能保证跨重装、跨固件唯一识别设备。
 - 本地信号、Java 判定与进程内 Native 密钥可被篡改；SDK 不替代服务端风控、硬件证明或 Play Integrity。

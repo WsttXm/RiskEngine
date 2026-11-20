@@ -50,7 +50,7 @@ public final class CorrelationEngine {
         for (DetectionResult detection : detections) {
             Set<String> families = EvidenceFamily.families(detection.getDetails());
             boolean actionable = !detection.isInformational() && detection.getScore() > 0;
-            boolean fullyDuplicated = !families.isEmpty() && claimed.containsAll(families);
+            boolean fullyDuplicated = EvidenceFamily.isCoveredBy(families, claimed);
             if (fullyDuplicated && actionable) {
                 out.add(detection.asInformationalDuplicate());
             } else {
@@ -74,6 +74,8 @@ public final class CorrelationEngine {
         DetectionResult hook = find(detections, "hook_framework");
         DetectionResult cloud = find(detections, "cloud_phone");
         DetectionResult rom = find(detections, "custom_rom");
+        DetectionResult sealed = find(detections, "sealed_verdict");
+        DetectionResult nativeTamper = find(detections, "native_tamper");
 
         List<String> details = new ArrayList<>();
         int score = 0;
@@ -123,9 +125,16 @@ public final class CorrelationEngine {
             status = DetectionStatus.DANGER;
         }
 
-        if ((containsPrefix(root, "syscall_mismatch") || containsPrefix(mount, "syscall_mismatch"))
-                && (containsPrefix(root, "mount:module") || containsPrefix(mount, "module_mount")
-                || containsPrefix(mount, "mountinfo:magisk") || containsPrefix(root, "mount:module"))) {
+        boolean hasSyscallMismatch = containsPrefix(root, "syscall_mismatch")
+                || containsPrefix(root, "native:syscall_mismatch")
+                || containsPrefix(mount, "syscall_mismatch");
+        boolean hasRootMount = containsPrefix(root, "mount:module")
+                || containsPrefix(root, "native:mount:module")
+                || containsPrefix(root, "native:mount:magisk")
+                || containsPrefix(mount, "module_mount")
+                || containsPrefix(mount, "mountinfo:magisk")
+                || containsPrefix(mount, "magisk_mount");
+        if (hasSyscallMismatch && hasRootMount) {
             details.add("C4:hidden_root");
             score = Math.max(score, 8);
             level = max(level, RiskLevel.HIGH);
@@ -141,6 +150,34 @@ public final class CorrelationEngine {
                 score = 1;
                 level = RiskLevel.LOW;
                 status = DetectionStatus.WARNING;
+            }
+        }
+
+        if (sealed != null) {
+            boolean sealedHook = containsPrefix(sealed, "sealed:hook_inline")
+                    || containsPrefix(sealed, "sealed:hook_framework");
+            if (sealedHook && hook != null && hook.getStatus() == DetectionStatus.NORMAL) {
+                details.add("C6:bridge_tamper:hook_framework");
+                score = Math.max(score, 10);
+                level = RiskLevel.DEADLY;
+                status = DetectionStatus.DANGER;
+            }
+            boolean sealedTamper = containsPrefix(sealed, "sealed:text_mismatch");
+            if (sealedTamper && nativeTamper != null
+                    && nativeTamper.getStatus() == DetectionStatus.NORMAL) {
+                details.add("C6:bridge_tamper:native_tamper");
+                score = Math.max(score, 10);
+                level = RiskLevel.DEADLY;
+                status = DetectionStatus.DANGER;
+            }
+            boolean sealedRoot = containsPrefix(sealed, "sealed:root_strong")
+                    || containsPrefix(sealed, "sealed:root_hidden")
+                    || containsPrefix(sealed, "sealed:kernel_root");
+            if (sealedRoot && root != null && root.getStatus() == DetectionStatus.NORMAL) {
+                details.add("C6:bridge_tamper:root");
+                score = Math.max(score, 10);
+                level = RiskLevel.DEADLY;
+                status = DetectionStatus.DANGER;
             }
         }
 

@@ -26,7 +26,7 @@ RiskEngine **没有服务端、没有上报通道、不依赖 Play Integrity 或
 | --- | --- | --- |
 | Root | `root`、`mount_analysis` | Root 路径、KernelSU prctl、SELinux 上下文、目录枚举交叉检查、与 PID 1 的挂载命名空间差异 |
 | Hook | `hook_framework`、`process_scan` | Xposed/Frida、18 个 libc 符号的 GOT/inline 检查、ART 反射/JNI 槽位、Unix socket、W+X 映射、周期复检 |
-| Native 完整性 | `native_tamper`、`sealed_verdict` | 自身可执行段分窗 FNV-1a 比对、JNI 注册指针范围检查、Native 密封分数验证 |
+| Native 完整性 | `native_tamper`、`sealed_verdict` | 自身可执行段分窗 FNV-1a 比对（支持 APK 内嵌 SO）、自身 GOT 校验、JNI 注册指针与函数前导校验、HMAC-SHA256 挑战绑定 Native 密封裁决 |
 | 模拟器 | `emulator` | QEMU/ranchu、文件/包名、运行时架构、hypervisor、虚拟 GPU、`ro.build.characteristics` |
 | 调试 | `debug` | TracerPid、调试器连接、maps 可执行路径、debuggable（默认仅提示） |
 | 沙箱 / 云真机 / ROM | `sandbox`、`cloud_phone`、`custom_rom` | dexElements/UID 一致性、双开包、云厂商属性、虚拟 GPU、有线网卡、社区 ROM 属性 |
@@ -179,19 +179,19 @@ SDK AAR 自身不 minify；宿主 R8 使用附带的 `consumer-rules.pro`，无�
 | `displayThresholdMaximum` | 严重阈值，固定 18 |
 | `warningCount` / `dangerCount` / `unknownCount` | 各状态计数（含提示性） |
 | `reportStatus` | `COMPLETE` / `PARTIAL` / `UNAVAILABLE` |
-| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + Collector 覆盖；排除 `collector:*` 重复项及原有两项合成字段，但当前仍计入 `fingerprint_id` |
+| `checkCount` / `completedCheckCount` / `coveragePercent` | Detector + Collector 覆盖；排除 `collector:*` 重复项以及合成字段（含 `fingerprint_id`） |
 | `collectScene` | 本次实际使用的场景 |
 | `timestampMs` / `sdkVersion` | 采集时间与 SDK 版本 |
 
-JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，包含 `informational`、`executionStatus`、`details`、`failureReasons`。当前没有顶层 `fingerprintId`；分层 ID 与连续性位于 `fingerprint.fingerprint_id.values`。
+JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，包含 `informational`、`executionStatus`、`details`、`failureReasons`，并在顶层输出 `fingerprintId` 对象（同时在 `fingerprint.fingerprint_id.values` 保留兼容字段）。
 
 ## 分层指纹与本地存储
 
-`report.getFingerprintId()` 返回 `FingerprintId`。硬件层使用 GPU、传感器、摄像头、CPU 等输入；系统层使用固件、分区与内核信息；易变层使用已启用的 Android ID / Boot ID 哈希。复合 ID 只组合硬件层和系统层，不包含易变层。
+`report.getFingerprintId()` 返回 `FingerprintId`。硬件层精选 13 项稳定硬件特征并按 5 个物理桶（GPU、传感器、摄像头、CPU、内存/电池）聚合；系统层使用固件、分区与内核信息；易变层使用已启用的 Android ID / Boot ID 哈希。复合 ID 只组合硬件层和系统层，不包含易变层（两者均为空时复合 ID 为空）。
 
-各层使用 SHA-256，并混入保存在应用私有 `riskengine_fp` SharedPreferences 中的 32 字节随机安装盐。存储还保留上次可靠的硬件/系统摘要、首次观察时间与观察次数。正常清除应用数据或卸载会清除这些记录；未实现跨重装关联，宿主的备份/恢复策略会影响记录是否保留。
+各层使用 SHA-256，并混入保存在应用私有 `riskengine_fp` SharedPreferences 中的 32 字节随机安装盐（首次写入使用 `commit()` 落盘）。存储还保留上次可靠的硬件/系统摘要、硬件分桶摘要、首次观察时间与观察次数。正常清除应用数据或卸载会清除这些记录；未实现跨重装关联，宿主的备份/恢复策略会影响记录是否保留。
 
-硬件层至少采到 17 项候选输入中的 9 项，`isHardwareLayerReliable()` 才返回 `true`。连续性状态包括 `FIRST_OBSERVATION`、`STABLE`、`SYSTEM_CHANGED`、`HARDWARE_CHANGED`、`INCONCLUSIVE`、`UNKNOWN`。`HARDWARE_CHANGED` 追加 `fingerprint_continuity`（`MEDIUM`/4）。硬件层是测量摘要，驱动、配置或可用字段变化也会改变它，不保证唯一识别物理设备。
+硬件层至少采到 13 项候选输入中的 7 项（或命中关键硬件桶），`isHardwareLayerReliable()` 才返回 `true`。连续性状态包括 `FIRST_OBSERVATION`、`STABLE`、`SYSTEM_CHANGED`、`HARDWARE_CHANGED`、`INCONCLUSIVE`、`UNKNOWN`，通过分桶交集比对判定硬件变更以降低单维度抖动误报。`HARDWARE_CHANGED` 追加 `fingerprint_continuity`（`MEDIUM`/4）。硬件层是测量摘要，驱动、配置或可用字段变化也会改变它，不保证唯一识别物理设备。
 
 ## 隐私
 
@@ -203,7 +203,7 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，�
 
 `collectAndroidId` / `collectBootId` / `collectDrmId` 可覆盖档位。哈希输入包含宿主包名，因此是确定性的应用范围假名，**不是**加密、匿名化或不可逆性保证。报告从不输出原始 Android ID、DRM ID、Boot ID、IMEI、IMSI、Wi-Fi/Bluetooth MAC、SSID 或 BSSID。
 
-五个新增硬件 Collector 和分层 ID 构建在所有隐私档位下运行；`MINIMAL` 仅关闭上述三类标识，不关闭硬件指纹或本地连续性存储。存储不可用时，当前实现可能回退到固定盐 `riskengine`，此时不能保证安装间隔离。
+五个新增硬件 Collector 和分层 ID 构建在所有隐私档位下运行；`MINIMAL` 仅关闭上述三类标识，不关闭硬件指纹或本地连续性存储。存储不可用时回退到进程内随机生成的临时盐（不使用固定常量盐），仅在本次进程生命周期有效。
 
 ## Demo
 
@@ -242,10 +242,10 @@ JSON 由 `RiskReportJsonSerializer` 生成，不引入额外运行时依赖，�
 
 - Native I/O 走各 ABI 内联 syscall（不经过 libc `syscall()`），目录遍历使用 `getdents64`。这降低 libc hook 盲区，但不能对抗内核级隐藏。
 - `sealed_verdict` 独立扫描并计分，仍由 Java 聚合为最终报告；它不受 Root/Hook 等检测器组开关控制，关闭这些组不会停止其内部同类探测。当其他检测器已报告同一证据族时，密封结果仅作为可见的重复佐证，不再计为第二个高危项。
-- 密封校验使用进程内密钥、带密钥的 FNV-1a 标签、随机 nonce 与 10 秒单调时钟新鲜度窗口，不是硬件证明或标准密码学 MAC；也不能保证防止 Java 验证路径被改写或进程内 Native 攻击。
-- Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、TracerPid、W+X 与框架映射；命中保留到后续 `hook_framework` 采集读取，不自动回调。`shutdown()` 会唤醒并等待线程退出；同一进程再次初始化会启动干净的新一代监控。
-- 命名空间不可读、自身完整性无法比对（包括 Native 库直接从 APK 加载）均属于覆盖缺口，不是风险命中。只有精确的 `text_mismatch` 标识参与 Native 篡改计分；`text_mismatch:missing_map`、`text_mismatch:apk_embedded` 等诊断后缀不计风险分。
-- x86/i386 没有 ARM trampoline 启发式；GOT 与 FNV-1a 文件/内存比对仍执行。虚拟 GPU、有线网卡、分区差异等需要 OEM 真机回归，不能单独视为环境篡改的证明。
+- 密封校验使用进程内 32 字节随机密钥、标准 HMAC-SHA256 标签（恒定时间比对）、64 位调用方 challenge 绑定、随机 nonce、10 秒单调时钟新鲜度窗口及 64 槽位一次性重放防护，并收敛周期监控（`late_*`）与 ART/JNI 完整性信号；它仍基于进程内密钥，不是硬件证明，不能保证对抗已控进程内存的高级 Native 攻击。
+- Native 监控在 SO 加载时启动，每 20–26 秒复检自身代码、全线程 TracerPid、W+X（含 APK 内嵌 SO）与框架映射；命中保留到后续 `hook_framework` 与 `sealed_verdict` 采集读取，不自动回调。`shutdown()` 会唤醒并等待线程退出；同一进程再次初始化会启动干净的新一代监控。
+- 命名空间不可读属于覆盖缺口，不是风险命中。自身 `.text` 完整性已支持 `extractNativeLibs=false`（通过 `MapEntry.offset` 与原始 `pread64` 直接从 APK 内定位 SO 校验）；`text_mismatch` 及匿名可执行映射 `text_mismatch:anonymous_map` 均视为高危篡改信号，`text_mismatch:missing_map` 等诊断后缀仍视为覆盖缺口。
+- ARM64 与 x86_64 均包含 inline trampoline 检查，同时对 `libc.so` / `libdl.so` 导出符号执行磁盘与内存前 32 字节比对、自身 GOT 指针校验及注册 JNI 函数前导校验。虚拟 GPU 检测通过 `GpuClassifier` 避免将真机 ANGLE-on-Vulkan 误判为虚拟渲染器。
 - [doc/Adversarial_Matrix.md](./doc/Adversarial_Matrix.md) 是预期证据说明，当前仓库没有自动设备矩阵工作流。历史构建与待修问题见 [Implementation_Status_2026-09.md](./doc/Implementation_Status_2026-09.md)。
 
 ## 文档

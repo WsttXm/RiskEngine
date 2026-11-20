@@ -1,4 +1,4 @@
-# Keep the complete source-level SDK contract, including nested builders and
+# Keep the complete source-level SDK contract, including nested builders.
 # Public model accessors and constructors are consumed by host applications.
 -keep public class com.wsttxm.riskenginesdk.RiskEngine { *; }
 -keep public class com.wsttxm.riskenginesdk.RiskEngineConfig { *; }
@@ -7,9 +7,13 @@
 -keep public class com.wsttxm.riskenginesdk.PrivacyProfile { *; }
 -keep public class com.wsttxm.riskenginesdk.CollectScene { *; }
 -keep class com.wsttxm.riskenginesdk.model.** { *; }
+-keepattributes InnerClasses
 
-# Native methods are registered by exact class and method name in JNI_OnLoad.
--keep class com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge { *; }
+# Native methods and ART reflection anchor are resolved by exact class and method name in JNI_OnLoad.
+-keep class com.wsttxm.riskenginesdk.collector.native_layer.NativeCollectorBridge {
+    public static boolean isNativeAvailable();
+    native <methods>;
+}
 -keepclasseswithmembers,includedescriptorclasses class * {
     native <methods>;
 }

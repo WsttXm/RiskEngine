@@ -78,6 +78,48 @@ public class RiskScoringModelTest {
         assertEquals(RiskLevel.LOW, report.getOverallRiskLevel());
     }
 
+    @Test
+    public void sealedTamperAndTextMismatchAreHardTriggers() {
+        RiskReport unverifiable = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(new DetectionResult(
+                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                        10, 10, false, List.of("verdict_unverifiable:mac_or_nonce_rejected"),
+                        "verdict_unverifiable")));
+        assertEquals(RiskLevel.DEADLY, unverifiable.getOverallRiskLevel());
+
+        RiskReport jniHook = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(new DetectionResult(
+                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                        10, 10, false, List.of("jni_self_hook:0"), "jni_self_hook:0")));
+        assertEquals(RiskLevel.DEADLY, jniHook.getOverallRiskLevel());
+
+        RiskReport textTamper = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(new DetectionResult(
+                        "native_tamper", RiskLevel.HIGH, DetectionStatus.DANGER,
+                        8, 10, false, List.of("text_mismatch", "text_mismatch_seg:1"),
+                        "text_mismatch")));
+        assertEquals(RiskLevel.DEADLY, textTamper.getOverallRiskLevel());
+
+        RiskReport sealedInline = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(new DetectionResult(
+                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
+                        10, 10, false, List.of("sealed:hook_inline", "native_score:9"),
+                        "sealed:hook_inline")));
+        assertEquals(RiskLevel.DEADLY, sealedInline.getOverallRiskLevel());
+
+        RiskReport memfdElf = new RiskReport(
+                new DeviceFingerprint(),
+                List.of(new DetectionResult(
+                        "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                        8, 10, false, List.of("memfd_private_elf:jit-cache"),
+                        "memfd_private_elf:jit-cache")));
+        assertEquals(RiskLevel.DEADLY, memfdElf.getOverallRiskLevel());
+    }
+
     private RiskReport reportAtScore(int score) {
         if (score == 0) {
             return new RiskReport(new DeviceFingerprint(), List.of(

@@ -29,10 +29,11 @@ public class DataAggregatorTest {
         assertTrue(report.getFingerprint().getResults().containsKey("hook_memory_signals"));
         assertTrue(report.getFingerprint().getResults()
                 .containsKey("runtime_integrity_score_inputs"));
-        // build_props + generated fingerprint_id + hook detector. The two
-        // synthetic diagnostic fields above are intentionally not counted.
-        assertEquals(3, report.getCheckCount());
-        assertEquals(3, report.getCompletedCheckCount());
+        assertTrue(report.getFingerprint().getResults().containsKey("fingerprint_id"));
+        // Only raw build_props collector + hook_framework detector count toward coverage;
+        // hook_memory_signals, runtime_integrity_score_inputs and fingerprint_id are synthetic.
+        assertEquals(2, report.getCheckCount());
+        assertEquals(2, report.getCompletedCheckCount());
         assertEquals(100, report.getCoveragePercent());
     }
 }

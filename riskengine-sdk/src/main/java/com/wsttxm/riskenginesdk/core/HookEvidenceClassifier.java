@@ -19,6 +19,9 @@ public final class HookEvidenceClassifier {
                 || value.startsWith("jni_slot_hook:")
                 || value.startsWith("jni_self_hook:")
                 || value.startsWith("art_native_flag:")
+                || value.startsWith("art_native_cleared:")
+                || value.startsWith("memfd_private_elf:")
+                || value.startsWith("late_memfd_elf")
                 || value.startsWith("wx_segment:self")
                 || value.startsWith("unix_socket:frida")
                 || value.startsWith("unix_socket:gum")
@@ -28,8 +31,10 @@ public final class HookEvidenceClassifier {
                 || value.startsWith("maps:frida")
                 || value.startsWith("maps:gadget")
                 || value.startsWith("frida_maps")
+                || value.startsWith("frida_dbus_port:")
                 || value.startsWith("frida_pid")
-                || value.startsWith("frida_pid_port")) {
+                || value.startsWith("frida_pid_port")
+                || value.startsWith("xposed_hooks_active")) {
             return Rank.STRONG;
         }
         if (value.startsWith("thread:gum-js-loop")
@@ -37,7 +42,6 @@ public final class HookEvidenceClassifier {
                 || value.startsWith("maps:xposed")
                 || value.startsWith("maps:lsposed")
                 || value.startsWith("maps:substrate")
-                || value.startsWith("xposed_hooks_active")
                 || value.startsWith("xposed_class_found")
                 || value.startsWith("xposed_stack")) {
             return Rank.MEDIUM;

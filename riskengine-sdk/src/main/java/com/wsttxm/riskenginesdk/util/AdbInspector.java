@@ -101,12 +101,11 @@ public final class AdbInspector {
             tcpPortProp = firstNonBlank(
                     getNativeProperty("service.adb.tcp.port"),
                     getNativeProperty("persist.adb.tcp.port"));
-            snapshot.success();
-        }
-        if (tcpPortProp.isEmpty() && signals == null) {
-            tcpPortProp = firstNonBlank(
-                    ShellExecutor.executeResult("getprop service.adb.tcp.port").getStdout(),
-                    ShellExecutor.executeResult("getprop persist.adb.tcp.port").getStdout());
+            if (NativeCollectorBridge.isNativeAvailable()) {
+                snapshot.success();
+            } else {
+                snapshot.failure("adb_properties:native_unavailable");
+            }
         }
         Integer port = parsePort(tcpPortProp);
         if (port != null && port > 0) {
