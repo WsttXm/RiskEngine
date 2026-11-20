@@ -1,0 +1,50 @@
+name: Set up Android build environment
+description: Configures JDK and Android SDK/NDK/CMake using versions pinned in gradle.properties
+
+runs:
+  using: composite
+  steps:
+    - name: Read toolchain versions from gradle.properties
+      id: toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        read_prop() {
+          local key="$1"
+          local val
+          val="$(grep -E "^${key}=" gradle.properties | tail -n 1 | cut -d'=' -f2- | tr -d '\r' | xargs)"
+          if [[ -z "$val" ]]; then
+            echo "Missing required property '${key}' in gradle.properties" >&2
+            exit 1
+          fi
+          printf '%s' "$val"
+        }
+
+        echo "java_version=$(read_prop androidJavaVersion)" >> "$GITHUB_OUTPUT"
+        echo "compile_sdk=$(read_prop androidCompileSdk)" >> "$GITHUB_OUTPUT"
+        echo "build_tools=$(read_prop androidBuildToolsVersion)" >> "$GITHUB_OUTPUT"
+        echo "cmake=$(read_prop androidCmakeVersion)" >> "$GITHUB_OUTPUT"
+        echo "ndk=$(read_prop androidNdkVersion)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: ${{ steps.toolchain.outputs.java_version }}
+        cache: gradle
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
+
+    - name: Install pinned Android build dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        sdkmanager \
+          "platforms;android-${{ steps.toolchain.outputs.compile_sdk }}" \
+          "build-tools;${{ steps.toolchain.outputs.build_tools }}" \
+          "cmake;${{ steps.toolchain.outputs.cmake }}" \
+          "ndk;${{ steps.toolchain.outputs.ndk }}"

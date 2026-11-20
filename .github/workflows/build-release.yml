@@ -23,23 +23,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build dependencies
-        run: |
-          sdkmanager \
-            "platforms;android-36" \
-            "build-tools;35.0.0" \
-            "cmake;3.22.1" \
-            "ndk;27.0.12077973"
+      - name: Set up Android build environment
+        uses: ./.github/actions/setup-android-env
 
       - name: Read and validate version
         id: version
@@ -71,20 +56,11 @@ jobs:
           echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "code=$version_code" >> "$GITHUB_OUTPUT"
 
-      - name: Build SDK AAR and demo APK
+      - name: Build and verify SDK AAR and demo APK
         run: |
-          ./gradlew \
-            :riskengine-sdk:test \
-            :riskengine-sdk:lint \
-            :riskengine-sdk:assembleRelease \
-            :riskengine-sdk:sourceReleaseJar \
-            :riskengine-sdk:generatePomFileForReleasePublication \
-            :integration-test:assembleDebug \
-            :demo:lintDebug \
-            :demo:assembleDebug \
+          ./scripts/ci-verify.sh \
             -PreleaseVersionName="${{ steps.version.outputs.name }}" \
-            -PreleaseVersionCode="${{ steps.version.outputs.code }}" \
-            --no-daemon
+            -PreleaseVersionCode="${{ steps.version.outputs.code }}"
 
       - name: Collect release artifacts
         env:

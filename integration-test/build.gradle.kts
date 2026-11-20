@@ -2,14 +2,20 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+val androidCompileSdk = providers.gradleProperty("androidCompileSdk").map(String::toInt).get()
+val androidMinSdk = providers.gradleProperty("androidMinSdk").map(String::toInt).get()
+val androidTargetSdk = providers.gradleProperty("androidTargetSdk").map(String::toInt).get()
+val androidBuildToolsVersion = providers.gradleProperty("androidBuildToolsVersion").get()
+
 android {
     namespace = "com.wsttxm.riskenginesdk.integrationtest"
-    compileSdk = 36
+    compileSdk = androidCompileSdk
+    buildToolsVersion = androidBuildToolsVersion
 
     defaultConfig {
         applicationId = "com.wsttxm.riskenginesdk.integrationtest"
-        minSdk = 30
-        targetSdk = 36
+        minSdk = androidMinSdk
+        targetSdk = androidTargetSdk
         versionCode = 1
         versionName = "1.0"
     }

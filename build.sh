@@ -28,6 +28,7 @@ Commands:
   install   Build and install Demo APK on a connected device
   clean     Clean Gradle build outputs
   all       Build SDK AAR and Demo APK
+  ci        Run the exact GitHub Actions verification suite locally (supports --clean)
   help      Show this help message
 
 Environment:
@@ -163,6 +164,7 @@ case "$1" in
     install) install_demo ;;
     clean) clean_all ;;
     all) build_all ;;
+    ci) shift; "$ROOT_DIR/scripts/ci-verify.sh" "$@" ;;
     help|-h|--help) usage ;;
     *)
         err "Unknown command: $1"

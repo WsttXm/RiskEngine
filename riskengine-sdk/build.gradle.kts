@@ -5,15 +5,22 @@ plugins {
 
 val releaseVersionName = providers.gradleProperty("releaseVersionName")
     .orElse(providers.gradleProperty("riskEngineVersion"))
+val androidCompileSdk = providers.gradleProperty("androidCompileSdk").map(String::toInt).get()
+val androidMinSdk = providers.gradleProperty("androidMinSdk").map(String::toInt).get()
+val androidBuildToolsVersion = providers.gradleProperty("androidBuildToolsVersion").get()
+val androidCmakeVersion = providers.gradleProperty("androidCmakeVersion").get()
+val androidNdkVersion = providers.gradleProperty("androidNdkVersion").get()
 version = releaseVersionName.get()
 group = "com.wsttxm"
 
 android {
     namespace = "com.wsttxm.riskenginesdk"
-    compileSdk = 36
+    compileSdk = androidCompileSdk
+    buildToolsVersion = androidBuildToolsVersion
+    ndkVersion = androidNdkVersion
 
     defaultConfig {
-        minSdk = 30
+        minSdk = androidMinSdk
 
         buildConfigField("String", "SDK_VERSION", "\"${releaseVersionName.get()}\"")
 
@@ -35,7 +42,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+            version = androidCmakeVersion
         }
     }
 
