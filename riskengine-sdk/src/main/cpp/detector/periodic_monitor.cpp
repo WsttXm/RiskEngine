@@ -1,7 +1,6 @@
 #include "periodic_monitor.h"
 
 #include "native_hook_detector.h"
-#include "native_integrity.h"
 #include "native_debug_detector.h"
 #include "../util/maps_parser.h"
 #include "../util/obf_str.h"
@@ -30,18 +29,6 @@ std::mutex g_sleep_mutex;
 std::condition_variable g_sleep_condition;
 std::mutex g_findings_mutex;
 std::vector<std::string> g_findings;
-
-bool has_csv_token(const std::string &value, const std::string &wanted) {
-    size_t start = 0;
-    while (start <= value.size()) {
-        size_t comma = value.find(',', start);
-        if (comma == std::string::npos) comma = value.size();
-        if (value.compare(start, comma - start, wanted) == 0) return true;
-        if (comma == value.size()) break;
-        start = comma + 1;
-    }
-    return false;
-}
 
 void latch(const std::string &token) {
     if (token.empty()) return;
@@ -77,13 +64,6 @@ void run_pass() {
     auto maps = read_self_maps();
     if (!g_running.load(std::memory_order_acquire)) return;
 
-    const std::string self = native_get_so_integrity_evidence(maps);
-    if (has_csv_token(self, OBF("text_mismatch"))
-        || has_csv_token(self, OBF("text_mismatch:anonymous_map"))) {
-        latch(OBF("late_text_mismatch"));
-    }
-
-    if (!g_running.load(std::memory_order_acquire)) return;
     if (get_tracer_pid() > 0) {
         latch(OBF("late_tracer_attached"));
     }

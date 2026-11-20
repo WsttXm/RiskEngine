@@ -35,7 +35,6 @@ public class RootPathListConsistencyTest {
         assertEquals(sections.get("modules"), List.of(DetectionLists.MODULE_PATHS));
         assertEquals(sections.get("emulator_packages"), List.of(DetectionLists.EMULATOR_PACKAGES));
         assertEquals(sections.get("cloud_packages"), List.of(DetectionLists.CLOUD_PACKAGES));
-        assertEquals(sections.get("sandbox_packages"), List.of(DetectionLists.SANDBOX_PACKAGES));
         assertEquals(sections.get("tamper_tool_paths"), List.of(DetectionLists.TAMPER_TOOL_PATHS));
         assertEquals(sections.get("properties"), List.of(DetectionLists.ALLOWED_PROPERTIES));
         assertEquals(sections.get("partition_fingerprint_properties"),
@@ -44,7 +43,6 @@ public class RootPathListConsistencyTest {
                 List.of(DetectionLists.CLOUD_PHONE_PROPERTIES));
         assertEquals(sections.get("virtual_gpu_markers"),
                 List.of(DetectionLists.VIRTUAL_GPU_MARKERS));
-        assertEquals(sections.get("process_tokens"), List.of(DetectionLists.PROCESS_TOKENS));
     }
 
     @Test
@@ -54,7 +52,6 @@ public class RootPathListConsistencyTest {
         assertFalse(source.contains("/system/bin/su"));
         assertFalse(source.contains("/data/adb/magisk"));
         assertFalse(source.contains("frida-server"));
-        assertFalse(source.contains("com.lody.virtual"));
     }
 
     @Test
@@ -71,7 +68,6 @@ public class RootPathListConsistencyTest {
         assertEquals(sections.get("tamper_tool_paths"), extractCppList(header, "list_tamper_tool_paths"));
         assertEquals(sections.get("emulator_files"), extractCppList(header, "list_emulator_files"));
         assertEquals(sections.get("properties"), extractCppList(header, "list_allowed_properties"));
-        assertEquals(sections.get("process_tokens"), extractCppList(header, "list_process_tokens"));
         assertEquals(sections.get("monitored_libc_symbols"),
                 extractCppList(header, "list_monitored_libc_symbols"));
     }
@@ -90,9 +86,6 @@ public class RootPathListConsistencyTest {
         }
         for (String pkg : DetectionLists.CLOUD_PACKAGES) {
             assertTrue("Missing <queries> for cloud pkg: " + pkg, declared.contains(pkg));
-        }
-        for (String pkg : DetectionLists.SANDBOX_PACKAGES) {
-            assertTrue("Missing <queries> for sandbox pkg: " + pkg, declared.contains(pkg));
         }
     }
 

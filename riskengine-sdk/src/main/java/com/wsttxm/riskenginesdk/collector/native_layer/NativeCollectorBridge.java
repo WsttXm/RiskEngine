@@ -74,16 +74,7 @@ public class NativeCollectorBridge {
     private static native int nGetSelinuxEnforceRaw();
     private static native String nGetBuildPropFingerprintRaw();
     private static native String nGetProcCmdlineBootPropsRaw();
-    private static native String nScanProcessTokensRaw();
-    private static native String nGetSoIntegrityRaw();
-    private static native String nGetMountNsEvidenceRaw();
     private static native String nGetKernelRootEvidenceRaw();
-    private static native String nGetSealedVerdictRaw();
-    private static native String nGetSealedVerdictWithChallengeRaw(long challenge);
-    private static native int nVerifySealedVerdictRaw(String blob);
-    private static native int nVerifySealedVerdictFlagsRaw(String blob);
-    private static native long nVerifySealedVerdictPackedRaw(String blob, long challenge);
-    private static native String nGetJniSelfIntegrityRaw();
     private static native String nGetMonitorFindingsRaw();
     private static native void nStartMonitorRaw();
     private static native void nStopMonitorRaw();
@@ -156,24 +147,8 @@ public class NativeCollectorBridge {
         return callNativeResult(NativeCollectorBridge::nGetProcCmdlineBootPropsRaw);
     }
 
-    public static SignalResult<String> scanProcessTokensResult() {
-        return callNativeResult(NativeCollectorBridge::nScanProcessTokensRaw);
-    }
-
-    public static SignalResult<String> getSoIntegrityResult() {
-        return callNativeResult(NativeCollectorBridge::nGetSoIntegrityRaw);
-    }
-
-    public static SignalResult<String> getMountNamespaceEvidenceResult() {
-        return callNativeResult(NativeCollectorBridge::nGetMountNsEvidenceRaw);
-    }
-
     public static SignalResult<String> getKernelRootEvidenceResult() {
         return callNativeResult(NativeCollectorBridge::nGetKernelRootEvidenceRaw);
-    }
-
-    public static SignalResult<String> getJniSelfIntegrityResult() {
-        return callNativeResult(NativeCollectorBridge::nGetJniSelfIntegrityRaw);
     }
 
     /**
@@ -203,50 +178,6 @@ public class NativeCollectorBridge {
         } catch (Exception | LinkageError e) {
             CLog.e("Monitor stop failed", e);
         }
-    }
-
-    /**
-     * Returns the native-sealed verdict blob. The blob is opaque here on
-     * purpose: ranking and scoring happen in native so a Java-level hook
-     * cannot fabricate a clean result by replacing one method's return value.
-     */
-    public static SignalResult<String> getSealedVerdictResult() {
-        return callNativeResult(NativeCollectorBridge::nGetSealedVerdictRaw);
-    }
-
-    public static SignalResult<String> getSealedVerdictResult(long challenge) {
-        return callNativeResult(() -> nGetSealedVerdictWithChallengeRaw(challenge));
-    }
-
-    /**
-     * Asks native to verify a blob it issued. Returns the native score, or -1
-     * when the MAC or nonce does not check out, which is itself tampering.
-     */
-    public static SignalResult<Integer> verifySealedVerdictResult(String blob) {
-        if (blob == null || blob.isEmpty()) {
-            return SignalResult.unavailable("sealed_verdict_absent");
-        }
-        return callNativeResult(() -> nVerifySealedVerdictRaw(blob));
-    }
-
-    /** Returns the authenticated native verdict flag bitset, or -1 on failure. */
-    public static SignalResult<Integer> verifySealedVerdictFlagsResult(String blob) {
-        if (blob == null || blob.isEmpty()) {
-            return SignalResult.unavailable("sealed_verdict_absent");
-        }
-        return callNativeResult(() -> nVerifySealedVerdictFlagsRaw(blob));
-    }
-
-    /**
-     * Single-call authenticated verifier bound to the caller's challenge with
-     * one-time nonce replay protection. Returns ((long)flags << 32) | score,
-     * or -1L on MAC/challenge/freshness/replay failure.
-     */
-    public static SignalResult<Long> verifySealedVerdictPackedResult(String blob, long challenge) {
-        if (blob == null || blob.isEmpty()) {
-            return SignalResult.unavailable("sealed_verdict_absent");
-        }
-        return callNativeResult(() -> nVerifySealedVerdictPackedRaw(blob, challenge));
     }
 
     public static SignalResult<String> getCpuInfoResult() {

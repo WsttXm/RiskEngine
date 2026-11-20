@@ -29,16 +29,12 @@ public class DetectorRegistry {
         }
         if (config.isEnableHookDetection()) {
             detectors.add(new HookFrameworkDetector(context, signals));
-            detectors.add(new ProcessScanDetector(context, signals));
         }
         if (config.isEnableAdbDetection()) {
             detectors.add(new AdbDetector(context, signals));
         }
         if (config.isEnableEmulatorDetection()) {
             detectors.add(new EmulatorDetector(context, signals));
-        }
-        if (config.isEnableSandboxDetection()) {
-            detectors.add(new SandboxDetector(context));
         }
         if (config.isEnableDebugDetection()) {
             detectors.add(new DebugDetector(context, signals));
@@ -49,11 +45,9 @@ public class DetectorRegistry {
         if (config.isEnableCustomRomDetection()) {
             detectors.add(new CustomRomDetector(context, signals));
         }
-        detectors.add(new NativeTamperDetector(context, signals, scene));
         // Signature-free checks: these find contradictions rather than known
         // artifacts, so they do not go stale as tools are renamed.
         detectors.add(new ConsistencyDetector(context, signals));
-        detectors.add(new SealedVerdictDetector(context, signals));
     }
 
     public List<BaseDetector> getDetectors() {

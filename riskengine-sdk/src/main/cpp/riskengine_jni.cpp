@@ -1,9 +1,7 @@
 #include "riskengine_jni.h"
 #include "util/crypto_mini.h"
 #include "util/custom_jni_register.h"
-#include "util/maps_parser.h"
 #include "util/obf_str.h"
-#include "util/syscall_wrapper.h"
 #include "collector/drm_collector.h"
 #include "collector/boot_id_collector.h"
 #include "collector/system_property_collector.h"
@@ -14,68 +12,15 @@
 #include "detector/native_hook_detector.h"
 #include "detector/native_emulator_detector.h"
 #include "detector/native_debug_detector.h"
-#include "detector/native_integrity.h"
 #include "detector/runtime_arch_checker.h"
-#include "detector/mount_namespace_diff.h"
 #include "detector/kernel_su_probe.h"
-#include "detector/sealed_verdict.h"
 #include "detector/periodic_monitor.h"
 #include "generated/detection_lists.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
-#include <fcntl.h>
-#include <mutex>
 #include <string>
 #include <vector>
-
-namespace {
-
-constexpr size_t kMaxRegisteredMethods = 32;
-std::mutex g_reg_mutex;
-uintptr_t g_ptr_mask = 0;
-size_t g_registered_count = 0;
-std::array<uintptr_t, kMaxRegisteredMethods> g_masked_ptrs = {};
-std::array<uint64_t, kMaxRegisteredMethods> g_expected_prologues = {};
-
-uintptr_t generate_ptr_mask() {
-    uintptr_t mask = 0;
-    int fd = static_cast<int>(my_openat(AT_FDCWD, OBF("/dev/urandom").c_str(),
-                                        O_RDONLY | O_CLOEXEC, 0));
-    if (fd >= 0) {
-        my_read(fd, &mask, sizeof(mask));
-        my_close(fd);
-    }
-    if (mask == 0) {
-        mask = reinterpret_cast<uintptr_t>(&g_masked_ptrs) ^ static_cast<uintptr_t>(0xA5A55A5Au);
-    }
-    return mask;
-}
-
-void snapshot_registered_table(const std::vector<JNINativeMethod> &table) {
-    std::lock_guard<std::mutex> lock(g_reg_mutex);
-    g_ptr_mask = generate_ptr_mask();
-    g_registered_count = std::min(table.size(), kMaxRegisteredMethods);
-    for (size_t i = 0; i < g_registered_count; ++i) {
-        const auto addr = reinterpret_cast<uintptr_t>(table[i].fnPtr);
-        g_masked_ptrs[i] = addr ^ g_ptr_mask;
-        g_expected_prologues[i] = native_hash_fn_prologue(table[i].fnPtr);
-    }
-}
-
-void copy_registered_table(std::vector<const void *> &ptrs,
-                           std::vector<uint64_t> &prologues) {
-    std::lock_guard<std::mutex> lock(g_reg_mutex);
-    ptrs.resize(g_registered_count);
-    prologues.resize(g_registered_count);
-    for (size_t i = 0; i < g_registered_count; ++i) {
-        ptrs[i] = reinterpret_cast<const void *>(g_masked_ptrs[i] ^ g_ptr_mask);
-        prologues[i] = g_expected_prologues[i];
-    }
-}
-
-}  // namespace
 
 static jstring toJString(JNIEnv *env, const std::string &str) {
     if (env == nullptr || env->ExceptionCheck()) {
@@ -241,14 +186,6 @@ static jstring jni_getProcCmdlineBootProps(JNIEnv *env, jclass) {
     return toJString(env, native_get_proc_cmdline_boot_props());
 }
 
-static jstring jni_scanProcessTokens(JNIEnv *env, jclass) {
-    return toJString(env, native_scan_process_tokens());
-}
-
-static jstring jni_getSoIntegrity(JNIEnv *env, jclass) {
-    return toJString(env, native_get_so_integrity_evidence());
-}
-
 static jstring jni_checkEmulatorFiles(JNIEnv *env, jclass) {
     return toJString(env, check_emulator_files());
 }
@@ -265,66 +202,8 @@ static jint jni_getTracerPid(JNIEnv *, jclass) {
     return (jint) get_tracer_pid();
 }
 
-static jstring jni_getMountNamespaceEvidence(JNIEnv *env, jclass) {
-    return toJString(env, native_get_mount_namespace_evidence());
-}
-
 static jstring jni_getKernelRootEvidence(JNIEnv *env, jclass) {
     return toJString(env, native_get_kernel_root_evidence());
-}
-
-static jstring jni_getSealedVerdict(JNIEnv *env, jclass) {
-    std::vector<const void *> ptrs;
-    std::vector<uint64_t> prologues;
-    copy_registered_table(ptrs, prologues);
-    return toJString(env, native_build_sealed_verdict(
-            env, ptrs.data(), prologues.data(), ptrs.size(), 0));
-}
-
-static jstring jni_getSealedVerdictWithChallenge(JNIEnv *env, jclass, jlong challenge) {
-    std::vector<const void *> ptrs;
-    std::vector<uint64_t> prologues;
-    copy_registered_table(ptrs, prologues);
-    return toJString(env, native_build_sealed_verdict(
-            env, ptrs.data(), prologues.data(), ptrs.size(),
-            static_cast<uint64_t>(challenge)));
-}
-
-static jint jni_verifySealedVerdict(JNIEnv *env, jclass, jstring jblob) {
-    if (jblob == nullptr) return -1;
-    const char *chars = env->GetStringUTFChars(jblob, nullptr);
-    if (chars == nullptr) {
-        clearPendingException(env);
-        return -1;
-    }
-    std::string blob(chars);
-    env->ReleaseStringUTFChars(jblob, chars);
-    return static_cast<jint>(native_verify_sealed_verdict(blob));
-}
-
-static jint jni_verifySealedVerdictFlags(JNIEnv *env, jclass, jstring jblob) {
-    if (jblob == nullptr) return -1;
-    const char *chars = env->GetStringUTFChars(jblob, nullptr);
-    if (chars == nullptr) {
-        clearPendingException(env);
-        return -1;
-    }
-    std::string blob(chars);
-    env->ReleaseStringUTFChars(jblob, chars);
-    return static_cast<jint>(native_verify_sealed_verdict_flags(blob));
-}
-
-static jlong jni_verifySealedVerdictPacked(JNIEnv *env, jclass, jstring jblob, jlong challenge) {
-    if (jblob == nullptr) return static_cast<jlong>(-1);
-    const char *chars = env->GetStringUTFChars(jblob, nullptr);
-    if (chars == nullptr) {
-        clearPendingException(env);
-        return static_cast<jlong>(-1);
-    }
-    std::string blob(chars);
-    env->ReleaseStringUTFChars(jblob, chars);
-    return static_cast<jlong>(native_verify_sealed_verdict_packed(
-            blob, static_cast<uint64_t>(challenge), true));
 }
 
 static jstring jni_getMonitorFindings(JNIEnv *env, jclass) {
@@ -340,15 +219,6 @@ static void jni_startMonitor(JNIEnv *env, jclass) {
 
 static void jni_stopMonitor(JNIEnv *, jclass) {
     native_monitor_stop();
-}
-
-static jstring jni_getJniSelfIntegrity(JNIEnv *env, jclass) {
-    std::vector<const void *> ptrs;
-    std::vector<uint64_t> prologues;
-    copy_registered_table(ptrs, prologues);
-    auto maps = read_self_maps();
-    return toJString(env, native_get_jni_self_table_evidence(
-            env, ptrs.data(), prologues.data(), ptrs.size(), maps));
 }
 
 // ==================== Dynamic Obfuscated Registration ====================
@@ -368,12 +238,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
     const std::string kSigStr = OBF("()Ljava/lang/String;");
     const std::string kSigStrToStr = OBF("(Ljava/lang/String;)Ljava/lang/String;");
     const std::string kSigStrToLong = OBF("(Ljava/lang/String;)J");
-    const std::string kSigStrToInt = OBF("(Ljava/lang/String;)I");
     const std::string kSigBool = OBF("()Z");
     const std::string kSigInt = OBF("()I");
     const std::string kSigVoid = OBF("()V");
-    const std::string kSigLongToStr = OBF("(J)Ljava/lang/String;");
-    const std::string kSigStrLongToLong = OBF("(Ljava/lang/String;J)J");
 
     std::vector<DynamicEntry> entries = {
             // Collectors
@@ -395,16 +262,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
             {OBF("nGetSelinuxEnforceRaw"),            kSigInt,          reinterpret_cast<void *>(jni_getSelinuxEnforce)},
             {OBF("nGetBuildPropFingerprintRaw"),      kSigStr,          reinterpret_cast<void *>(jni_getBuildPropFingerprint)},
             {OBF("nGetProcCmdlineBootPropsRaw"),      kSigStr,          reinterpret_cast<void *>(jni_getProcCmdlineBootProps)},
-            {OBF("nScanProcessTokensRaw"),            kSigStr,          reinterpret_cast<void *>(jni_scanProcessTokens)},
-            {OBF("nGetSoIntegrityRaw"),               kSigStr,          reinterpret_cast<void *>(jni_getSoIntegrity)},
-            {OBF("nGetMountNsEvidenceRaw"),           kSigStr,          reinterpret_cast<void *>(jni_getMountNamespaceEvidence)},
             {OBF("nGetKernelRootEvidenceRaw"),        kSigStr,          reinterpret_cast<void *>(jni_getKernelRootEvidence)},
-            {OBF("nGetSealedVerdictRaw"),             kSigStr,          reinterpret_cast<void *>(jni_getSealedVerdict)},
-            {OBF("nGetSealedVerdictWithChallengeRaw"),kSigLongToStr,    reinterpret_cast<void *>(jni_getSealedVerdictWithChallenge)},
-            {OBF("nVerifySealedVerdictRaw"),          kSigStrToInt,     reinterpret_cast<void *>(jni_verifySealedVerdict)},
-            {OBF("nVerifySealedVerdictFlagsRaw"),     kSigStrToInt,     reinterpret_cast<void *>(jni_verifySealedVerdictFlags)},
-            {OBF("nVerifySealedVerdictPackedRaw"),    kSigStrLongToLong,reinterpret_cast<void *>(jni_verifySealedVerdictPacked)},
-            {OBF("nGetJniSelfIntegrityRaw"),          kSigStr,          reinterpret_cast<void *>(jni_getJniSelfIntegrity)},
             {OBF("nGetMonitorFindingsRaw"),           kSigStr,          reinterpret_cast<void *>(jni_getMonitorFindings)},
             {OBF("nStartMonitorRaw"),                 kSigVoid,         reinterpret_cast<void *>(jni_startMonitor)},
             {OBF("nStopMonitorRaw"),                  kSigVoid,         reinterpret_cast<void *>(jni_stopMonitor)},
@@ -420,9 +278,6 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
             "com/wsttxm/riskenginesdk/collector/native_layer/NativeCollectorBridge");
     bool ok = custom_register_natives(
             env, bridge_class.c_str(), methods.data(), static_cast<int>(methods.size()));
-    if (ok) {
-        snapshot_registered_table(methods);
-    }
 
     // Zero decoded names/signatures on the stack/heap after registration.
     crypto_mini::secure_zero(bridge_class.data(), bridge_class.size());

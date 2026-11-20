@@ -32,8 +32,7 @@ public final class CorrelationEngine {
         boolean makeActionable = false;
         if (scene == CollectScene.DIAGNOSTIC) {
             makeActionable = !"debug".equals(name) || !isDebuggableOnly(detection);
-        } else if ("emulator".equals(name) || "cloud_phone".equals(name)
-                || "sandbox".equals(name)) {
+        } else if ("emulator".equals(name) || "cloud_phone".equals(name)) {
             makeActionable = scene == CollectScene.LOGIN || scene == CollectScene.PAYMENT;
         } else if ("adb".equals(name)) {
             makeActionable = scene == CollectScene.PAYMENT;
@@ -74,8 +73,6 @@ public final class CorrelationEngine {
         DetectionResult hook = find(detections, "hook_framework");
         DetectionResult cloud = find(detections, "cloud_phone");
         DetectionResult rom = find(detections, "custom_rom");
-        DetectionResult sealed = find(detections, "sealed_verdict");
-        DetectionResult nativeTamper = find(detections, "native_tamper");
 
         List<String> details = new ArrayList<>();
         int score = 0;
@@ -117,7 +114,7 @@ public final class CorrelationEngine {
         }
 
         boolean inline = containsPrefix(hook, "inline_hook:") || containsPrefix(hook, "got_hook:");
-        boolean frida = containsFamily(hook, "frida") || containsFamily(find(detections, "process_scan"), "frida");
+        boolean frida = containsFamily(hook, "frida");
         if (inline && frida) {
             details.add("C3:inline_hook_with_frida");
             score = Math.max(score, 10);
@@ -150,34 +147,6 @@ public final class CorrelationEngine {
                 score = 1;
                 level = RiskLevel.LOW;
                 status = DetectionStatus.WARNING;
-            }
-        }
-
-        if (sealed != null) {
-            boolean sealedHook = containsPrefix(sealed, "sealed:hook_inline")
-                    || containsPrefix(sealed, "sealed:hook_framework");
-            if (sealedHook && hook != null && hook.getStatus() == DetectionStatus.NORMAL) {
-                details.add("C6:bridge_tamper:hook_framework");
-                score = Math.max(score, 10);
-                level = RiskLevel.DEADLY;
-                status = DetectionStatus.DANGER;
-            }
-            boolean sealedTamper = containsPrefix(sealed, "sealed:text_mismatch");
-            if (sealedTamper && nativeTamper != null
-                    && nativeTamper.getStatus() == DetectionStatus.NORMAL) {
-                details.add("C6:bridge_tamper:native_tamper");
-                score = Math.max(score, 10);
-                level = RiskLevel.DEADLY;
-                status = DetectionStatus.DANGER;
-            }
-            boolean sealedRoot = containsPrefix(sealed, "sealed:root_strong")
-                    || containsPrefix(sealed, "sealed:root_hidden")
-                    || containsPrefix(sealed, "sealed:kernel_root");
-            if (sealedRoot && root != null && root.getStatus() == DetectionStatus.NORMAL) {
-                details.add("C6:bridge_tamper:root");
-                score = Math.max(score, 10);
-                level = RiskLevel.DEADLY;
-                status = DetectionStatus.DANGER;
             }
         }
 

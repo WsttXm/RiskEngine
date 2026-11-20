@@ -250,10 +250,8 @@ std::string native_get_art_hook_evidence(JNIEnv *env, const std::vector<MapEntry
     const Probe native_probes[] = {
             {bridge_cls, OBF("nativeGetHookEvidenceRaw"), OBF("()Ljava/lang/String;"), true},
             {bridge_cls, OBF("nativeGetRootEvidenceRaw"), OBF("()Ljava/lang/String;"), true},
-            {bridge_cls, OBF("nativeGetSealedVerdictWithChallengeRaw"),
-             OBF("(J)Ljava/lang/String;"), true},
-            {bridge_cls, OBF("nativeVerifySealedVerdictPackedRaw"),
-             OBF("(Ljava/lang/String;J)J"), true},
+            {bridge_cls, OBF("nativeGetTracerPidRaw"), OBF("()I"), true},
+            {bridge_cls, OBF("nativeCheckEmulatorFilesRaw"), OBF("()Ljava/lang/String;"), true},
     };
     for (const auto &probe : native_probes) {
         bool found = false;

@@ -176,7 +176,11 @@ public class DebugDetector extends BaseDetector {
                         || lower.contains("gdbserver")
                         || lower.contains("lldb")
                         || lower.contains("frida")) {
-                    details.add("maps_exec_path:" + matchingTool(lower));
+                    String tool = matchingTool(lower);
+                    String mappedPath = extractMapsPath(line);
+                    details.add(mappedPath.isEmpty()
+                            ? "maps_exec_path:" + tool
+                            : "maps_exec_path:" + tool + ":" + mappedPath);
                     coverage.success();
                     return true;
                 }
@@ -197,5 +201,11 @@ public class DebugDetector extends BaseDetector {
             }
         }
         return "unknown";
+    }
+
+    private static String extractMapsPath(String mapsLine) {
+        if (mapsLine == null) return "";
+        String[] parts = mapsLine.trim().split("\\s+", 6);
+        return parts.length >= 6 ? parts[5].trim() : "";
     }
 }

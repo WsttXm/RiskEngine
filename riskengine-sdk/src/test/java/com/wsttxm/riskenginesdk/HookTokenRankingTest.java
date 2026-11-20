@@ -24,6 +24,8 @@ public class HookTokenRankingTest {
         assertEquals(HookEvidenceClassifier.Rank.IGNORE,
                 HookEvidenceClassifier.rank("passes:2746"));
         assertEquals(HookEvidenceClassifier.Rank.STRONG,
-                HookEvidenceClassifier.rank("late_text_mismatch"));
+                HookEvidenceClassifier.rank("late_wx_self"));
+        assertEquals(HookEvidenceClassifier.Rank.STRONG,
+                HookEvidenceClassifier.rank("late_memfd_elf"));
     }
 }

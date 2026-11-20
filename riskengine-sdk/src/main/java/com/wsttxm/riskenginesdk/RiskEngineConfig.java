@@ -7,7 +7,6 @@ public final class RiskEngineConfig {
     private final boolean enableRoot;
     private final boolean enableHookDetection;
     private final boolean enableEmulatorDetection;
-    private final boolean enableSandboxDetection;
     private final boolean enableDebugDetection;
     private final boolean enableCloudPhoneDetection;
     private final boolean enableCustomRomDetection;
@@ -24,7 +23,6 @@ public final class RiskEngineConfig {
         this.enableRoot = builder.enableRoot;
         this.enableHookDetection = builder.enableHookDetection;
         this.enableEmulatorDetection = builder.enableEmulatorDetection;
-        this.enableSandboxDetection = builder.enableSandboxDetection;
         this.enableDebugDetection = builder.enableDebugDetection;
         this.enableCloudPhoneDetection = builder.enableCloudPhoneDetection;
         this.enableCustomRomDetection = builder.enableCustomRomDetection;
@@ -48,7 +46,6 @@ public final class RiskEngineConfig {
         private boolean enableRoot = true;
         private boolean enableHookDetection = true;
         private boolean enableEmulatorDetection = true;
-        private boolean enableSandboxDetection = true;
         private boolean enableDebugDetection = true;
         private boolean enableCloudPhoneDetection = true;
         private boolean enableCustomRomDetection = true;
@@ -64,7 +61,6 @@ public final class RiskEngineConfig {
         public Builder enableRoot(boolean value) { enableRoot = value; return this; }
         public Builder enableHookDetection(boolean value) { enableHookDetection = value; return this; }
         public Builder enableEmulatorDetection(boolean value) { enableEmulatorDetection = value; return this; }
-        public Builder enableSandboxDetection(boolean value) { enableSandboxDetection = value; return this; }
         public Builder enableDebugDetection(boolean value) { enableDebugDetection = value; return this; }
         public Builder enableCloudPhoneDetection(boolean value) { enableCloudPhoneDetection = value; return this; }
         public Builder enableCustomRomDetection(boolean value) { enableCustomRomDetection = value; return this; }
@@ -102,7 +98,6 @@ public final class RiskEngineConfig {
     public boolean isEnableRoot() { return enableRoot; }
     public boolean isEnableHookDetection() { return enableHookDetection; }
     public boolean isEnableEmulatorDetection() { return enableEmulatorDetection; }
-    public boolean isEnableSandboxDetection() { return enableSandboxDetection; }
     public boolean isEnableDebugDetection() { return enableDebugDetection; }
     public boolean isEnableCloudPhoneDetection() { return enableCloudPhoneDetection; }
     public boolean isEnableCustomRomDetection() { return enableCustomRomDetection; }

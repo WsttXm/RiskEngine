@@ -137,33 +137,48 @@ void append_csv_tokens(const std::string &csv, std::vector<std::string> &evidenc
     }
 }
 
+std::string sanitize_maps_path(const std::string &path) {
+    if (path.empty()) return "";
+    std::string out = path;
+    for (char &c : out) {
+        if (c == ',') c = '_';
+    }
+    return out;
+}
+
 void collect_hook_evidence(JNIEnv *env, const std::vector<MapEntry> &maps,
                            std::vector<std::string> &evidence) {
     bool has_frida_family = false;
     for (const auto &entry : maps) {
         std::string lower = to_lower(entry.raw);
+        std::string clean_path = sanitize_maps_path(entry.path);
         if (contains_any(lower, {OBF("frida"), OBF("libfrida"), OBF("frida-gadget"),
                                  OBF("libgadget.so")})) {
             has_frida_family = true;
             if (lower.find(OBF("frida")) != std::string::npos
                 || lower.find(OBF("libfrida")) != std::string::npos) {
-                add_evidence(evidence, OBF("maps:frida"));
+                add_evidence(evidence, clean_path.empty()
+                        ? OBF("maps:frida") : OBF("maps:frida:") + clean_path);
             }
             if (lower.find(OBF("frida-gadget")) != std::string::npos
                 || lower.find(OBF("libgadget.so")) != std::string::npos) {
-                add_evidence(evidence, OBF("maps:gadget"));
+                add_evidence(evidence, clean_path.empty()
+                        ? OBF("maps:gadget") : OBF("maps:gadget:") + clean_path);
             }
         }
         if (lower.find(OBF("xposed")) != std::string::npos) {
-            add_evidence(evidence, OBF("maps:xposed"));
+            add_evidence(evidence, clean_path.empty()
+                    ? OBF("maps:xposed") : OBF("maps:xposed:") + clean_path);
         }
         if (lower.find(OBF("lsposed")) != std::string::npos
             || lower.find(OBF("liblsposed")) != std::string::npos
             || lower.find(OBF("lspd")) != std::string::npos) {
-            add_evidence(evidence, OBF("maps:lsposed"));
+            add_evidence(evidence, clean_path.empty()
+                    ? OBF("maps:lsposed") : OBF("maps:lsposed:") + clean_path);
         }
         if (lower.find(OBF("substrate")) != std::string::npos) {
-            add_evidence(evidence, OBF("maps:substrate"));
+            add_evidence(evidence, clean_path.empty()
+                    ? OBF("maps:substrate") : OBF("maps:substrate:") + clean_path);
         }
         if (is_suspicious_executable_region(entry)) {
             add_evidence(evidence, OBF("anon_exec:") + entry.perms);

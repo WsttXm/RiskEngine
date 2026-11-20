@@ -18,9 +18,7 @@ add_library(riskengine SHARED
     detector/native_debug_detector.cpp
     detector/native_integrity.cpp
     detector/runtime_arch_checker.cpp
-    detector/mount_namespace_diff.cpp
     detector/kernel_su_probe.cpp
-    detector/sealed_verdict.cpp
     detector/art_hook_detector.cpp
     detector/periodic_monitor.cpp
     util/custom_jni_register.cpp

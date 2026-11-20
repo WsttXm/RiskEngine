@@ -152,13 +152,11 @@ abstract class GenerateDetectionListsTask : DefaultTask() {
             Triple("MODULE_PATHS", "modules", 0x50B),
             Triple("EMULATOR_PACKAGES", "emulator_packages", 0x60D),
             Triple("CLOUD_PACKAGES", "cloud_packages", 0x70F),
-            Triple("SANDBOX_PACKAGES", "sandbox_packages", 0x811),
             Triple("TAMPER_TOOL_PATHS", "tamper_tool_paths", 0x913),
             Triple("ALLOWED_PROPERTIES", "properties", 0xA17),
             Triple("PARTITION_FINGERPRINT_PROPERTIES", "partition_fingerprint_properties", 0xB1D),
             Triple("CLOUD_PHONE_PROPERTIES", "cloud_phone_properties", 0xC1F),
-            Triple("VIRTUAL_GPU_MARKERS", "virtual_gpu_markers", 0xD21),
-            Triple("PROCESS_TOKENS", "process_tokens", 0xE25)
+            Triple("VIRTUAL_GPU_MARKERS", "virtual_gpu_markers", 0xD21)
         )
 
         val javaBuilder = StringBuilder()
@@ -195,7 +193,6 @@ abstract class GenerateDetectionListsTask : DefaultTask() {
             "list_tamper_tool_paths" to "tamper_tool_paths",
             "list_emulator_files" to "emulator_files",
             "list_allowed_properties" to "properties",
-            "list_process_tokens" to "process_tokens",
             "list_monitored_libc_symbols" to "monitored_libc_symbols"
         )
 

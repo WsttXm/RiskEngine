@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [v1.5.0] - 2026-11-21
+
+### 检测项精简与准确性优化（Detector Streamlining & Accuracy）
+- **核心检测项收敛至 9 项**：从 SDK（Java 层、Native C++ 层、JNI 桥接、`RiskEngineConfig`、`artifact_paths.ini` 及 `AndroidManifest.xml`）与 Demo 中彻底移除 **Native 密封校验**（`sealed_verdict`）、**Native 完整性**（`native_tamper`）、**沙箱与虚拟化**（`sandbox`）、**可疑进程**（`process_scan`）4 项冗余/高噪检测器，保留 9 项高价值核心安全检测。
+- **移除无效的 `/proc/1/mountinfo` 挂载命名空间比对**：清理 `mount_namespace_diff` 子检测（Android 7.0+ `/proc` 默认启用 `hidepid=invisible,gid=3009`，普通应用进程访问 `/proc/1/*` 恒返回 `ENOENT`），消除 `ROOT检测` 中固定出现的“未完成子项”告警，使子项覆盖率恢复 100%（`8/8`），并修复 `native_check_root()` 在未 Root 设备上恒返回 `true` 的缺陷。
+- **检测项命名规范化**：统一优化检测项展示名称——`ROOT权限检测` 精简为 **`ROOT检测`**，`调试器连接` 调整为 **`Debug模式`**，`系统一致性` 明确为 **`系统信息防篡改`**（涵盖分区指纹、属性防伪、Verified Boot 启动链与内核篡改校验）。
+- **内存映射路径富化**：增强 `HookFrameworkDetector`、`DebugDetector` 与 `native_hook_detector.cpp`，在扫描 `/proc/self/maps` 检出 Frida / Xposed / LSPosed / Substrate / 调试器特征时附带完整映射文件路径。
+
+### Demo 流体视觉重塑与结构化检出详情（Fluid UI & Structured Findings）
+- **Apple Fluid Design 界面重构**：全新设计 Demo 视觉体系与应用图标，引入自定义圆环风险仪表盘（`RiskGaugeView`）、分段控制器（`SegmentedControlView`）、弹性交互动画（`SpringTouchHelper`）、底部悬浮操作栏与日夜主题一键切换。
+- **结构化检出详情卡片**：重构检测项点击后的详情弹窗（`FluidDetailSheet` / `ReportFormatter`），摒弃原先笼统的“检出证据”列表与晦涩的“原始标识”技术 token，直接按卡片展示每项风险的 **检出位置**（具体文件路径、系统属性名、内核节点或 API）、**检出内容** 与 **风险说明**。
+- **Java + Native 双源同项自动合并**：同一风险路径或特征被 Java 与 Native 双层同时检出时自动合并为一张卡片并标注 `Java + Native`，消除重复条目；同时将诊断类指标独立至“运行环境信息”区块，并修复多卡片场景下底部弹窗高度越界遮挡状态栏的问题。
+
+---
+
 ## [v1.4.0] - 2026-11-20
 
 ### 安全加固与反篡改（Native Hardening & Anti-Tampering）

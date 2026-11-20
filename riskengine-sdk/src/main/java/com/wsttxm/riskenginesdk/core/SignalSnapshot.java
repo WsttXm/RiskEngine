@@ -14,7 +14,6 @@ import com.wsttxm.riskenginesdk.util.ProcfsUtils;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.File;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -47,17 +46,11 @@ public final class SignalSnapshot {
     private volatile SignalResult<String> cpuInfo;
     private volatile SignalResult<Long> diskSizeData;
     private volatile SignalResult<String> kernelInfo;
-    private volatile SignalResult<String> nativeProcessTokens;
-    private volatile SignalResult<String> soIntegrity;
     private volatile SignalResult<ScreenMetrics> screenMetrics;
     private volatile SignalResult<Map<String, String>> gpuAttributes;
     private volatile SignalResult<GpuIdentity> gpuIdentity;
     private volatile SignalResult<List<String>> networkInterfaceNames;
-    private volatile SignalResult<String> mountNamespaceEvidence;
     private volatile SignalResult<String> kernelRootEvidence;
-    private volatile SignalResult<String> jniSelfIntegrity;
-    private volatile SignalResult<String> sealedVerdict;
-    private volatile SignalResult<SealedVerdictSample> sealedVerdictSample;
     private volatile SignalResult<Map<String, String>> procCmdlineBootProps;
     private volatile SignalResult<Integer> possibleCpuCores;
 
@@ -81,29 +74,13 @@ public final class SignalSnapshot {
         cpuInfo = null;
         diskSizeData = null;
         kernelInfo = null;
-        nativeProcessTokens = null;
-        soIntegrity = null;
         screenMetrics = null;
         gpuAttributes = null;
         gpuIdentity = null;
         networkInterfaceNames = null;
-        mountNamespaceEvidence = null;
         kernelRootEvidence = null;
-        jniSelfIntegrity = null;
-        sealedVerdict = null;
-        sealedVerdictSample = null;
         procCmdlineBootProps = null;
         possibleCpuCores = null;
-    }
-
-    public static final class SealedVerdictSample {
-        public final long challenge;
-        public final String blob;
-
-        public SealedVerdictSample(long challenge, String blob) {
-            this.challenge = challenge;
-            this.blob = blob == null ? "" : blob;
-        }
     }
 
     /** GPU identity strings, shared by the fingerprint and cloud detectors. */
@@ -316,16 +293,6 @@ public final class SignalSnapshot {
                 NativeCollectorBridge::getKernelInfoResult);
     }
 
-    public SignalResult<String> getNativeProcessTokens() {
-        return cachedNative(() -> nativeProcessTokens, v -> nativeProcessTokens = v,
-                NativeCollectorBridge::scanProcessTokensResult);
-    }
-
-    public SignalResult<String> getSoIntegrity() {
-        return cachedNative(() -> soIntegrity, v -> soIntegrity = v,
-                NativeCollectorBridge::getSoIntegrityResult);
-    }
-
     public SignalResult<ScreenMetrics> getScreenMetrics() {
         SignalResult<ScreenMetrics> cached = screenMetrics;
         if (cached != null) return cached;
@@ -384,40 +351,9 @@ public final class SignalSnapshot {
         }
     }
 
-    public SignalResult<String> getMountNamespaceEvidence() {
-        return cachedNative(() -> mountNamespaceEvidence, v -> mountNamespaceEvidence = v,
-                NativeCollectorBridge::getMountNamespaceEvidenceResult);
-    }
-
     public SignalResult<String> getKernelRootEvidence() {
         return cachedNative(() -> kernelRootEvidence, v -> kernelRootEvidence = v,
                 NativeCollectorBridge::getKernelRootEvidenceResult);
-    }
-
-    public SignalResult<String> getJniSelfIntegrity() {
-        return cachedNative(() -> jniSelfIntegrity, v -> jniSelfIntegrity = v,
-                NativeCollectorBridge::getJniSelfIntegrityResult);
-    }
-
-    /** The native-sealed verdict for this collection. Issued once per report. */
-    public SignalResult<String> getSealedVerdict() {
-        return cachedNative(() -> sealedVerdict, v -> sealedVerdict = v,
-                NativeCollectorBridge::getSealedVerdictResult);
-    }
-
-    /** Challenge-bound sealed verdict sample issued once per report. */
-    public SignalResult<SealedVerdictSample> getSealedVerdictSample() {
-        return cachedNative(() -> sealedVerdictSample, v -> sealedVerdictSample = v, () -> {
-            long challenge = new SecureRandom().nextLong();
-            if (challenge == 0L) challenge = 1L;
-            SignalResult<String> raw = NativeCollectorBridge.getSealedVerdictResult(challenge);
-            if (!raw.isSuccess() || raw.getValue() == null || raw.getValue().isEmpty()) {
-                return raw.getStatus() == SignalResult.Status.UNAVAILABLE
-                        ? SignalResult.unavailable(raw.getFailureReason())
-                        : SignalResult.error(raw.getFailureReason());
-            }
-            return SignalResult.success(new SealedVerdictSample(challenge, raw.getValue()));
-        });
     }
 
     /** Boot parameters extracted from /proc/cmdline via native raw syscall. */

@@ -108,52 +108,18 @@ public class CorrelationEngineTest {
 
     @Test
     public void dedupeKeepsFirstFamilyScore() {
-        DetectionResult hook = new DetectionResult(
-                "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("maps:frida"), "maps:frida");
-        DetectionResult process = new DetectionResult(
-                "process_scan", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("suspicious_process:frida-server"),
-                "suspicious_process:frida-server");
-        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(hook, process));
-        assertFalse(out.get(0).isInformational());
-        assertTrue(out.get(1).isInformational());
-        assertEquals(RiskLevel.LOW, out.get(1).getRiskLevel());
-        assertEquals(DetectionStatus.WARNING, out.get(1).getStatus());
-        assertTrue(out.get(1).getDetails().contains("deduped:corroborating_evidence"));
-    }
-
-    @Test
-    public void sealedRootEvidenceIsVisibleButNotASecondDanger() {
         DetectionResult root = new DetectionResult(
                 "root", RiskLevel.HIGH, DetectionStatus.DANGER,
                 8, 10, false, List.of("native:mount:ksu"), "native:mount:ksu");
-        DetectionResult sealed = new DetectionResult(
-                "sealed_verdict", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("sealed:root_strong", "native_score:7"),
-                "sealed:root_strong; native_score:7");
-
-        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, sealed));
-
+        DetectionResult mount = new DetectionResult(
+                "mount_analysis", RiskLevel.MEDIUM, DetectionStatus.WARNING,
+                4, 10, false, List.of("mountinfo:ksu"), "mountinfo:ksu");
+        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, mount));
         assertFalse(out.get(0).isInformational());
         assertTrue(out.get(1).isInformational());
         assertEquals(RiskLevel.LOW, out.get(1).getRiskLevel());
         assertEquals(DetectionStatus.WARNING, out.get(1).getStatus());
         assertTrue(out.get(1).getDetails().contains("deduped:corroborating_evidence"));
-    }
-
-    @Test
-    public void sealedEvidenceRemainsActionableWhenItIsTheOnlySource() {
-        DetectionResult sealed = new DetectionResult(
-                "sealed_verdict", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("sealed:root_strong", "native_score:7"),
-                "sealed:root_strong; native_score:7");
-
-        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(sealed));
-
-        assertFalse(out.get(0).isInformational());
-        assertEquals(RiskLevel.HIGH, out.get(0).getRiskLevel());
-        assertEquals(DetectionStatus.DANGER, out.get(0).getStatus());
     }
 
     @Test
@@ -162,8 +128,8 @@ public class CorrelationEngineTest {
                 "hook_hint", RiskLevel.LOW, DetectionStatus.WARNING,
                 1, 10, true, List.of("frida_port_open:27042"), "frida hint");
         DetectionResult confirmed = new DetectionResult(
-                "process_scan", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("suspicious_process:frida-server"), "frida process");
+                "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                8, 10, false, List.of("maps:frida"), "maps:frida");
 
         List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(hint, confirmed));
 
@@ -186,29 +152,6 @@ public class CorrelationEngineTest {
     }
 
     @Test
-    public void dedupeRecognizesSuFoundAndSealedHookAndEmulatorFamilies() {
-        DetectionResult root = new DetectionResult(
-                "root", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("su_found:/system/bin/su"), "su_found");
-        DetectionResult hook = new DetectionResult(
-                "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("maps:frida"), "maps:frida");
-        DetectionResult emulator = new DetectionResult(
-                "emulator", RiskLevel.HIGH, DetectionStatus.DANGER,
-                8, 10, false, List.of("qemu_pipe:/dev/qemu_pipe"), "qemu_pipe");
-        DetectionResult sealed = new DetectionResult(
-                "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
-                10, 10, false,
-                List.of("sealed:root_strong", "sealed:hook_framework", "sealed:emulator"),
-                "sealed");
-
-        List<DetectionResult> out = CorrelationEngine.dedupeFamilies(
-                List.of(root, hook, emulator, sealed));
-        assertTrue(out.get(3).isInformational());
-        assertTrue(out.get(3).getDetails().contains("deduped:corroborating_evidence"));
-    }
-
-    @Test
     public void newFamilyRemainsActionableWhenOnlyPartOfEvidenceIsDuplicated() {
         DetectionResult root = new DetectionResult(
                 "root", RiskLevel.HIGH, DetectionStatus.DANGER,
@@ -216,28 +159,11 @@ public class CorrelationEngineTest {
         DetectionResult combined = new DetectionResult(
                 "combined", RiskLevel.DEADLY, DetectionStatus.DANGER,
                 10, 10, false,
-                List.of("sealed:root_strong", "sealed:hook_framework"), "root and hook");
+                List.of("su_found:/system/bin/su", "maps:frida"), "root and hook");
 
         List<DetectionResult> out = CorrelationEngine.dedupeFamilies(List.of(root, combined));
 
         assertFalse(out.get(1).isInformational());
-    }
-
-    @Test
-    public void c6DetectsJavaBridgeSuppressionWhenSealedVerdictFires() {
-        DetectionResult hookNormal = new DetectionResult(
-                "hook_framework", RiskLevel.SAFE, DetectionStatus.NORMAL,
-                0, 10, false, List.of(), "");
-        DetectionResult sealedHook = new DetectionResult(
-                "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
-                10, 10, false, List.of("sealed:hook_inline", "native_score:9"),
-                "sealed:hook_inline");
-
-        DetectionResult correlated = CorrelationEngine.correlate(
-                List.of(hookNormal, sealedHook), CollectScene.STANDARD);
-        assertNotNull(correlated);
-        assertEquals(RiskLevel.DEADLY, correlated.getRiskLevel());
-        assertTrue(correlated.getDetails().contains("C6:bridge_tamper:hook_framework"));
     }
 
     @Test

@@ -1,6 +1,5 @@
 #include "native_root_detector.h"
 #include "kernel_su_probe.h"
-#include "mount_namespace_diff.h"
 #include "../generated/detection_lists.h"
 #include "../util/obf_str.h"
 #include "../util/raw_dir.h"
@@ -332,18 +331,6 @@ std::string native_get_root_evidence() {
             if (comma == std::string::npos) comma = kernel_evidence.size();
             add_token(tokens, kernel_evidence.substr(start, comma - start));
             if (comma == kernel_evidence.size()) break;
-            start = comma + 1;
-        }
-    }
-
-    const std::string ns_evidence = native_get_mount_namespace_evidence();
-    if (!ns_evidence.empty()) {
-        size_t start = 0;
-        while (start <= ns_evidence.size()) {
-            size_t comma = ns_evidence.find(',', start);
-            if (comma == std::string::npos) comma = ns_evidence.size();
-            add_token(tokens, ns_evidence.substr(start, comma - start));
-            if (comma == ns_evidence.size()) break;
             start = comma + 1;
         }
     }

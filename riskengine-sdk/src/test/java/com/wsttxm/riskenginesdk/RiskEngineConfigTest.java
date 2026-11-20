@@ -86,16 +86,13 @@ public class RiskEngineConfigTest {
                 .enableHookDetection(false)
                 .enableAdbDetection(false)
                 .enableEmulatorDetection(false)
-                .enableSandboxDetection(false)
                 .enableDebugDetection(false)
                 .enableCloudPhoneDetection(false)
                 .enableCustomRomDetection(false)
                 .build();
 
         DetectorRegistry registry = new DetectorRegistry(null, config);
-        assertEquals(3, registry.getDetectors().size());
-        assertEquals("native_tamper", registry.getDetectors().get(0).getName());
-        assertEquals("consistency", registry.getDetectors().get(1).getName());
-        assertEquals("sealed_verdict", registry.getDetectors().get(2).getName());
+        assertEquals(1, registry.getDetectors().size());
+        assertEquals("consistency", registry.getDetectors().get(0).getName());
     }
 }

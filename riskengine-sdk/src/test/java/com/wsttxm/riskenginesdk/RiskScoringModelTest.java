@@ -79,37 +79,30 @@ public class RiskScoringModelTest {
     }
 
     @Test
-    public void sealedTamperAndTextMismatchAreHardTriggers() {
-        RiskReport unverifiable = new RiskReport(
+    public void hookAndMemoryTamperingAreHardTriggers() {
+        RiskReport inlineHook = new RiskReport(
                 new DeviceFingerprint(),
                 List.of(new DetectionResult(
-                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
-                        10, 10, false, List.of("verdict_unverifiable:mac_or_nonce_rejected"),
-                        "verdict_unverifiable")));
-        assertEquals(RiskLevel.DEADLY, unverifiable.getOverallRiskLevel());
+                        "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                        8, 10, false, List.of("inline_hook:openat"),
+                        "inline_hook:openat")));
+        assertEquals(RiskLevel.DEADLY, inlineHook.getOverallRiskLevel());
 
-        RiskReport jniHook = new RiskReport(
+        RiskReport gotHook = new RiskReport(
                 new DeviceFingerprint(),
                 List.of(new DetectionResult(
-                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
-                        10, 10, false, List.of("jni_self_hook:0"), "jni_self_hook:0")));
-        assertEquals(RiskLevel.DEADLY, jniHook.getOverallRiskLevel());
+                        "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                        8, 10, false, List.of("got_hook:__system_property_get"),
+                        "got_hook:__system_property_get")));
+        assertEquals(RiskLevel.DEADLY, gotHook.getOverallRiskLevel());
 
-        RiskReport textTamper = new RiskReport(
+        RiskReport artNativeCleared = new RiskReport(
                 new DeviceFingerprint(),
                 List.of(new DetectionResult(
-                        "native_tamper", RiskLevel.HIGH, DetectionStatus.DANGER,
-                        8, 10, false, List.of("text_mismatch", "text_mismatch_seg:1"),
-                        "text_mismatch")));
-        assertEquals(RiskLevel.DEADLY, textTamper.getOverallRiskLevel());
-
-        RiskReport sealedInline = new RiskReport(
-                new DeviceFingerprint(),
-                List.of(new DetectionResult(
-                        "sealed_verdict", RiskLevel.DEADLY, DetectionStatus.DANGER,
-                        10, 10, false, List.of("sealed:hook_inline", "native_score:9"),
-                        "sealed:hook_inline")));
-        assertEquals(RiskLevel.DEADLY, sealedInline.getOverallRiskLevel());
+                        "hook_framework", RiskLevel.HIGH, DetectionStatus.DANGER,
+                        8, 10, false, List.of("art_native_cleared:nativeGetHookEvidenceRaw"),
+                        "art_native_cleared:nativeGetHookEvidenceRaw")));
+        assertEquals(RiskLevel.DEADLY, artNativeCleared.getOverallRiskLevel());
 
         RiskReport memfdElf = new RiskReport(
                 new DeviceFingerprint(),

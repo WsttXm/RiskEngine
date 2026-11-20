@@ -75,27 +75,6 @@ public final class DetectionLists {
             "6048460b9a33e53484339090111fe2b74e9c28"
     });
 
-    public static final String[] SANDBOX_PACKAGES = ObfuscatedLists.decode(0x811, new String[]{
-            "d92e2f5588ca867726b2518b5bf3df7a",
-            "d73bd5c65815152c2eefcdbb3e9dcf5c36792eb02cb9fc",
-            "8c69f847e4258e8398abb7f45224b06637e2",
-            "c6e56e066cc65e1bd028965ef8003af6",
-            "805c5e8a208b09e7f1cd1eb31d",
-            "0de1968b8ea5a849c9f4aee0156a13",
-            "c0b459f90256b99c05970d62a95e393028262d37dc6a",
-            "0da6f8f1ff30ccf4df5c24110c6aedada0b0348fa8f72877e721b44128",
-            "f5c7ff0b875dfda1ae5f40d8d1686b84b7d0ce8a9cb9640c",
-            "21ae0ba80cb5c2be65c686c7da830d5a2efeff979ef298",
-            "0721a5aaabff901152be0bbe55eb7d4acc80a3e80e",
-            "97adab36708538ccae1939607bb1e9001ef4637d25",
-            "b78d8781c57a82c0cc70c288c70e7964",
-            "5b4f7d3b114eb0c35e8219c927",
-            "7a794e7197fb7e40e0a9237208d00704f06871dd0086",
-            "58903b5997a238b1eaa846e47f91a8bd",
-            "3989fabaf910203c4b71af6b3ee80fd24e0c64b4a6bd737d19a5c68267acda",
-            "f51d1eeffd7a3d7b52688d283c8fc8967269d547b875e5d90971b66516f6d7"
-    });
-
     public static final String[] TAMPER_TOOL_PATHS = ObfuscatedLists.decode(0x913, new String[]{
             "3b75014069f4a0b372f390c8",
             "36af36a77450b77bdaae7ab8f91fa7c220fe7b25a4dff75c3aec",
@@ -190,27 +169,6 @@ public final class DetectionLists {
             "797bb15b82f9a5",
             "cbb50fee5c13",
             "ca52ef94"
-    });
-
-    public static final String[] PROCESS_TOKENS = ObfuscatedLists.decode(0xE25, new String[]{
-            "fce942e9bc",
-            "c09ec5eb0977aeb3c65c1d71",
-            "4dc8466c5f66490c8723bc",
-            "c1e4358920d8041190cbf198",
-            "350a1957f887",
-            "5f8e040fc26783c8",
-            "1043afd75188fe",
-            "fc726b89",
-            "8897c8d2a154",
-            "7b01304d4b9378",
-            "7a56165b",
-            "7e0729",
-            "2d01cc33395e",
-            "158a04",
-            "241ebe5c24e9d39ed6",
-            "46cb1344630ca45e35d267",
-            "9fa304108301544f9d43adb83f99",
-            "fca60da8d010e0484980ce87f83756f6"
     });
 
 }

@@ -167,29 +167,6 @@ inline std::vector<std::string> list_allowed_properties() {
     };
 }
 
-inline std::vector<std::string> list_process_tokens() {
-    return {
-            OBF("frida"),
-            OBF("frida-server"),
-            OBF("frida-agent"),
-            OBF("frida_helper"),
-            OBF("xposed"),
-            OBF("edxposed"),
-            OBF("lsposed"),
-            OBF("lspd"),
-            OBF("magisk"),
-            OBF("magiskd"),
-            OBF("ksud"),
-            OBF("apd"),
-            OBF("zygisk"),
-            OBF("gdb"),
-            OBF("gdbserver"),
-            OBF("lldb-server"),
-            OBF("android_server"),
-            OBF("android_server64")
-    };
-}
-
 inline std::vector<std::string> list_monitored_libc_symbols() {
     return {
             OBF("openat"),

@@ -63,25 +63,13 @@ public class RootDetector extends BaseDetector {
                 for (String token : nativeDetails.getValue().split(",")) {
                     String item = token.trim();
                     if (item.isEmpty()) continue;
-                    if (item.startsWith("ns_restricted:")) {
-                        // Expected SELinux sandbox restriction on /proc/1/mountinfo
-                        // on stock Android 10+; neither risk evidence nor a failure.
-                        continue;
-                    }
-                    if (item.startsWith("ns_unreadable")) {
-                        // Recorded as a coverage gap, never as evidence, so a
-                        // normal device is not penalised for it.
-                        coverage.failure("mount_ns:" + item);
-                    } else if (item.startsWith("ksu_prctl")
-                            || item.startsWith("mount_hidden:")
+                    if (item.startsWith("ksu_prctl")
                             || item.startsWith("listing_mismatch")
                             || item.startsWith("selinux_context:")) {
-                        // Kernel-resident root and per-process mount hiding are
+                        // Kernel-resident root and listing mismatches are
                         // the hardest signals to forge, so they rank strong.
                         strongEvidence.add("native:" + item);
-                    } else if (item.startsWith("syscall_mismatch")
-                            || item.startsWith("ns_differs")
-                            || item.startsWith("mount_hidden_count")) {
+                    } else if (item.startsWith("syscall_mismatch")) {
                         mediumEvidence.add("native:" + item);
                     } else if (item.equals("selinux_permissive")) {
                         if (!weakEvidence.contains(item)) weakEvidence.add(item);

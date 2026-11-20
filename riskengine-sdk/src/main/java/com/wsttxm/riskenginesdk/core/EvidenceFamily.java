@@ -29,7 +29,7 @@ public final class EvidenceFamily {
             return "frida";
         }
         if (value.contains("gdb") || value.contains("android_server") || value.contains("lldb")
-                || value.contains("ida") || value.startsWith("sealed:debugger")
+                || value.contains("ida")
                 || value.startsWith("tracer_pid:") || value.startsWith("debugger_connected")
                 || value.startsWith("late_tracer_attached")) {
             return "debugger";
@@ -39,35 +39,24 @@ public final class EvidenceFamily {
         }
         if (value.startsWith("inline_hook:") || value.startsWith("got_hook:")
                 || value.startsWith("jni_table_hook:") || value.startsWith("jni_slot_hook:")
-                || value.startsWith("jni_self_hook:") || value.startsWith("art_native_flag:")
+                || value.startsWith("art_native_flag:")
                 || value.startsWith("art_native_cleared:")
                 || value.startsWith("memfd_private_elf:") || value.startsWith("late_memfd_elf")
-                || value.startsWith("wx_segment:self") || value.startsWith("late_wx_self")
-                || value.startsWith("sealed:hook_inline")
-                || value.startsWith("sealed:jni_self_hook")) {
+                || value.startsWith("wx_segment:self") || value.startsWith("late_wx_self")) {
             return "hook_integrity";
-        }
-        if (value.startsWith("text_mismatch") || value.startsWith("late_text_mismatch")
-                || value.startsWith("sealed:text_mismatch")) {
-            return "native_integrity";
         }
         if (value.contains("magisk") || value.contains("ksu") || value.contains("apatch")
                 || value.startsWith("su:") || value.startsWith("su_found:")
                 || value.startsWith("path_su:") || value.startsWith("modules_found:")
-                || value.startsWith("modules:") || value.startsWith("mount_hidden")
+                || value.startsWith("modules:")
                 || value.startsWith("system_tmpfs_mount:")
                 || value.startsWith("mount:system_tmpfs:")
-                || value.startsWith("listing_mismatch") || value.startsWith("selinux_context:")
-                || value.startsWith("sealed:root") || value.startsWith("sealed:kernel_root")) {
+                || value.startsWith("listing_mismatch") || value.startsWith("selinux_context:")) {
             return "root_fw";
-        }
-        if (value.startsWith("sealed:hook_framework")) {
-            return "hook_framework";
         }
         if (value.contains("qemu") || value.contains("goldfish") || value.contains("ranchu")
                 || value.startsWith("emu_file:") || value.startsWith("emu_pkg:")
-                || value.startsWith("virtual_gpu:") || value.startsWith("cpu:hypervisor")
-                || value.startsWith("sealed:emulator")) {
+                || value.startsWith("virtual_gpu:") || value.startsWith("cpu:hypervisor")) {
             return "emulator";
         }
         return null;

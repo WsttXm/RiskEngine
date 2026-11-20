@@ -6,7 +6,7 @@ package com.wsttxm.riskenginesdk;
 public enum CollectScene {
     /** Current default informational / actionable split. */
     STANDARD,
-    /** Treat emulator, cloud-phone and sandbox hits as actionable. */
+    /** Treat emulator and cloud-phone hits as actionable. */
     LOGIN,
     /** LOGIN plus actionable ADB / debugger-adjacent signals. */
     PAYMENT,

@@ -350,22 +350,33 @@ public class MainActivity extends AppCompatActivity {
             hudLp.topMargin = statusBarInsetPx + dp(10);
             hudCapsule.setLayoutParams(hudLp);
 
-            // Cap sheet scroll viewport to ~62% of screen height so drag header stays reachable
-            DisplayMetrics dm = getResources().getDisplayMetrics();
-            int maxScrollH = Math.round(dm.heightPixels * 0.62f);
-            sheetScrollView.addOnLayoutChangeListener((sv, l, t, r, b, ol, ot, or, ob) -> {
-                View child = sheetScrollView.getChildAt(0);
-                if (child != null) {
-                    int desired = Math.min(child.getHeight(), maxScrollH);
-                    ViewGroup.LayoutParams lp = sheetScrollView.getLayoutParams();
-                    if (lp.height != desired && desired > 0) {
-                        lp.height = desired;
-                        sheetScrollView.setLayoutParams(lp);
-                    }
-                }
-            });
+            View sheetContainer = findViewById(R.id.sheetContainer);
+            FrameLayout.LayoutParams sheetLp = (FrameLayout.LayoutParams) sheetContainer.getLayoutParams();
+            sheetLp.topMargin = statusBarInsetPx + dp(56);
+            sheetContainer.setLayoutParams(sheetLp);
 
             return windowInsets;
+        });
+    }
+
+    private void showDetailSheetWithCappedHeight() {
+        ViewGroup.LayoutParams lp = sheetScrollView.getLayoutParams();
+        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        sheetScrollView.setLayoutParams(lp);
+        detailSheet.show();
+        sheetScrollView.post(() -> {
+            View child = sheetScrollView.getChildAt(0);
+            if (child == null) return;
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            int maxScrollH = Math.round(dm.heightPixels * 0.65f);
+            int desired = Math.min(child.getHeight(), maxScrollH);
+            if (desired > 0) {
+                ViewGroup.LayoutParams cur = sheetScrollView.getLayoutParams();
+                if (cur.height != desired) {
+                    cur.height = desired;
+                    sheetScrollView.setLayoutParams(cur);
+                }
+            }
         });
     }
 
@@ -1068,41 +1079,166 @@ public class MainActivity extends AppCompatActivity {
         addSheetKeyValue(metaCard, getString(R.string.sheet_meta_score), scoreText, false);
         addSheetKeyValue(metaCard, getString(R.string.sheet_meta_coverage),
                 getString(R.string.sheet_coverage_value, detection.getChecksSucceeded(), detection.getChecksAttempted()), false);
-        addSheetKeyValue(metaCard, getString(R.string.sheet_meta_detector_id), detection.getDetectorName(), true);
         sheetBody.addView(metaCard);
 
-        // 3. Evidence bullets
-        addSheetSectionTitle(getString(R.string.sheet_section_evidence), true);
-        List<String> bullets = formatter.detectionEvidenceBullets(detection);
-        if (bullets.isEmpty()) {
+        // 3. Structured findings (Location + Content + Risk), replacing generic bullets & raw token dump
+        List<ReportFormatter.EvidenceDetail> findings = formatter.detectionRiskFindings(detection);
+        String copyText = formatter.formatFindingsForCopy(detection);
+        if (!copyText.isBlank()) {
+            addSheetSectionTitleWithCopy(getString(R.string.sheet_section_findings), copyText);
+        } else {
+            addSheetSectionTitle(getString(R.string.sheet_section_findings), true);
+        }
+        if (findings.isEmpty()) {
             TextView none = createText(getString(R.string.sheet_no_evidence), 13.5f, R.color.text_secondary, Typeface.NORMAL);
             sheetBody.addView(none);
         } else {
-            for (String item : bullets) {
-                LinearLayout bulletRow = new LinearLayout(this);
-                bulletRow.setOrientation(LinearLayout.HORIZONTAL);
-                bulletRow.setPadding(0, dp(4), 0, dp(4));
-
-                TextView bulletMark = createText("•", 14f, R.color.text_tertiary, Typeface.BOLD);
-                bulletMark.setPadding(0, 0, dp(8), 0);
-                bulletRow.addView(bulletMark);
-
-                TextView bulletText = createText(item, 13.5f, R.color.text_primary, Typeface.NORMAL);
-                bulletText.setLineSpacing(dp(2), 1f);
-                bulletText.setTextIsSelectable(true);
-                bulletRow.addView(bulletText);
-                sheetBody.addView(bulletRow);
+            for (int i = 0; i < findings.size(); i++) {
+                sheetBody.addView(createFindingCard(findings.get(i), statusColor, i > 0));
             }
         }
 
-        // 4. Raw technical evidence block with one-tap Copy
-        String raw = formatter.detectionRawDetails(detection);
-        if (!raw.isBlank()) {
-            addSheetSectionTitleWithCopy(getString(R.string.sheet_section_raw), raw);
-            sheetBody.addView(createMonospaceCodeBlock(raw));
+        // 4. Incomplete sub-checks (if any)
+        List<ReportFormatter.FailureDetail> failures = formatter.detectionFailureDetails(detection);
+        if (!failures.isEmpty()) {
+            addSheetSectionTitle(getString(R.string.sheet_section_failures), true);
+            LinearLayout failWell = createSheetWell();
+            for (int i = 0; i < failures.size(); i++) {
+                ReportFormatter.FailureDetail fd = failures.get(i);
+                if (i > 0) {
+                    View div = createInsetHairline(0);
+                    LinearLayout.LayoutParams dlp = (LinearLayout.LayoutParams) div.getLayoutParams();
+                    dlp.topMargin = dp(10);
+                    dlp.bottomMargin = dp(10);
+                    div.setLayoutParams(dlp);
+                    failWell.addView(div);
+                }
+                TextView tvTarget = createText(fd.target, 13f, R.color.text_primary, Typeface.BOLD);
+                tvTarget.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+                failWell.addView(tvTarget);
+
+                TextView tvReason = createText(fd.reason, 12.5f, R.color.text_secondary, Typeface.NORMAL);
+                tvReason.setLineSpacing(dp(2), 1f);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rlp.topMargin = dp(3);
+                tvReason.setLayoutParams(rlp);
+                failWell.addView(tvReason);
+            }
+            sheetBody.addView(failWell);
         }
 
-        detailSheet.show();
+        // 5. Benign diagnostic / environment context (if any)
+        List<ReportFormatter.EvidenceDetail> diagnostics = formatter.detectionDiagnosticItems(detection);
+        if (!diagnostics.isEmpty()) {
+            addSheetSectionTitle(getString(R.string.sheet_section_diagnostics), true);
+            LinearLayout diagWell = createSheetWell();
+            for (int i = 0; i < diagnostics.size(); i++) {
+                ReportFormatter.EvidenceDetail d = diagnostics.get(i);
+                if (i > 0) {
+                    View div = createInsetHairline(0);
+                    LinearLayout.LayoutParams dlp = (LinearLayout.LayoutParams) div.getLayoutParams();
+                    dlp.topMargin = dp(10);
+                    dlp.bottomMargin = dp(10);
+                    div.setLayoutParams(dlp);
+                    diagWell.addView(div);
+                }
+                TextView tvTitle = createText(d.title, 13f, R.color.text_primary, Typeface.BOLD);
+                tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+                diagWell.addView(tvTitle);
+
+                TextView tvContent = createText(d.content, 12.5f, R.color.text_secondary, Typeface.NORMAL);
+                tvContent.setLineSpacing(dp(2), 1f);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.topMargin = dp(3);
+                tvContent.setLayoutParams(clp);
+                diagWell.addView(tvContent);
+            }
+            sheetBody.addView(diagWell);
+        }
+
+        showDetailSheetWithCappedHeight();
+    }
+
+    private View createFindingCard(ReportFormatter.EvidenceDetail item, @ColorInt int accentColor, boolean topMargin) {
+        LinearLayout card = createSheetWell();
+        if (topMargin) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(10);
+            card.setLayoutParams(lp);
+        }
+
+        // Header row: status dot + finding title + source layer tag
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        View dot = new View(this);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(7), dp(7));
+        dotLp.setMarginEnd(dp(8));
+        dot.setLayoutParams(dotLp);
+        dot.setBackground(createCircleDrawable(accentColor));
+        header.addView(dot);
+
+        TextView tvTitle = createText(item.title, 14f, R.color.text_primary, Typeface.BOLD);
+        tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(tvTitle);
+
+        if (item.sourceTag != null && !item.sourceTag.isEmpty()) {
+            TextView tag = createPill(item.sourceTag, color(R.color.text_secondary), color(R.color.action_secondary_bg));
+            tag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+            tag.setPadding(dp(8), dp(2), dp(8), dp(2));
+            LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tagLp.setMarginStart(dp(8));
+            tag.setLayoutParams(tagLp);
+            header.addView(tag);
+        }
+        card.addView(header);
+
+        View divider = createInsetHairline(0);
+        LinearLayout.LayoutParams divLp = (LinearLayout.LayoutParams) divider.getLayoutParams();
+        divLp.topMargin = dp(10);
+        divLp.bottomMargin = dp(10);
+        divider.setLayoutParams(divLp);
+        card.addView(divider);
+
+        addFindingField(card, getString(R.string.finding_label_location), item.location, true, false);
+        addFindingField(card, getString(R.string.finding_label_content), item.content, false, true);
+        if (item.risk != null && !item.risk.isEmpty()) {
+            addFindingField(card, getString(R.string.finding_label_risk), item.risk, false, true);
+        }
+        return card;
+    }
+
+    private void addFindingField(LinearLayout container, String label, String value,
+                                 boolean mono, boolean topMargin) {
+        TextView tvLabel = createText(label, 11.5f, R.color.text_tertiary, Typeface.BOLD);
+        if (topMargin) {
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            llp.topMargin = dp(9);
+            tvLabel.setLayoutParams(llp);
+        }
+        container.addView(tvLabel);
+
+        TextView tvValue = createText(value, mono ? 12.5f : 13f,
+                label.equals(getString(R.string.finding_label_risk))
+                        ? R.color.text_secondary : R.color.text_primary,
+                Typeface.NORMAL);
+        if (mono) {
+            tvValue.setTypeface(Typeface.MONOSPACE);
+        }
+        tvValue.setTextIsSelectable(true);
+        tvValue.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        vlp.topMargin = dp(3);
+        tvValue.setLayoutParams(vlp);
+        container.addView(tvValue);
     }
 
     private void openCollectorSheet(CollectorResult result) {
@@ -1170,7 +1306,7 @@ public class MainActivity extends AppCompatActivity {
                     13.5f, R.color.text_secondary, Typeface.NORMAL));
         }
 
-        detailSheet.show();
+        showDetailSheetWithCappedHeight();
     }
 
     private void openInconsistentSheet(RiskReport report, List<String> inconsistent) {
@@ -1193,7 +1329,7 @@ public class MainActivity extends AppCompatActivity {
                 sheetBody.addView(createMonospaceCodeBlock(sb.toString()));
             }
         }
-        detailSheet.show();
+        showDetailSheetWithCappedHeight();
     }
 
     // ---- Scroll-Reactive Sticky Verdict Pill ----

@@ -156,7 +156,9 @@ public class HookFrameworkDetector extends BaseDetector {
             for (String line : maps.getValue()) {
                 String lower = line.toLowerCase(Locale.ROOT);
                 if (lower.contains("frida") || lower.contains("libgadget.so")) {
-                    addStrong(details, score, "frida_maps");
+                    String mappedPath = extractMapsPath(line);
+                    addStrong(details, score, mappedPath.isEmpty()
+                            ? "frida_maps" : "frida_maps:" + mappedPath);
                     break;
                 }
             }
@@ -273,6 +275,12 @@ public class HookFrameworkDetector extends BaseDetector {
         if (threadName.contains("gum-js-loop")) return "gum-js-loop";
         if (threadName.contains("frida")) return "frida";
         return "gmain";
+    }
+
+    private static String extractMapsPath(String mapsLine) {
+        if (mapsLine == null) return "";
+        String[] parts = mapsLine.trim().split("\\s+", 6);
+        return parts.length >= 6 ? parts[5].trim() : "";
     }
 
     private void checkNativeHooks(Set<String> details, SignalScore score, CheckCoverage coverage) {
