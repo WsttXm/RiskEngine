@@ -1,31 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#FF0A84FF</color>
-    <color name="primary_pressed">#FF409CFF</color>
+    <!-- Apple OLED neutral surface hierarchy (Dark) -->
+    <color name="canvas">#FF000000</color>
+    <color name="surface">#FF161618</color>
+    <color name="surface_subtle">#FF232326</color>
+    <color name="surface_chrome">#E318181B</color>
+    <color name="surface_chrome_solid">#FF000000</color>
+    <color name="surface_chrome_mid">#F2000000</color>
+    <color name="surface_chrome_fade">#00000000</color>
+    <color name="surface_sheet">#FF1C1C1E</color>
+    <color name="surface_segment_thumb">#FF323236</color>
+
+    <!-- Floating HUD capsule -->
+    <color name="hud_bg">#F2F2F2F7</color>
+    <color name="hud_text">#FF111318</color>
+
+    <!-- Primary & secondary monochrome actions -->
+    <color name="action_primary_bg">#FFF5F5F7</color>
+    <color name="action_primary_fg">#FF111318</color>
+    <color name="action_secondary_bg">#1FFFFFFF</color>
+
+    <!-- Interactive accent -->
     <color name="accent">#FF0A84FF</color>
-    <color name="background">#FF000000</color>
-    <color name="background_top">#FF11141A</color>
-    <color name="surface">#FF1C1C1E</color>
-    <color name="surface_elevated">#F72C2C2E</color>
-    <color name="surface_secondary">#FF2C2C2E</color>
-    <color name="text_primary">#FFF2F2F7</color>
-    <color name="text_secondary">#FFAEAEB2</color>
-    <color name="text_tertiary">#FFA1A1A6</color>
-    <color name="divider">#3D545458</color>
-    <color name="track">#3D787880</color>
-    <color name="chip_bg">#330A84FF</color>
+    <color name="accent_soft">#260A84FF</color>
 
+    <!-- Text hierarchy -->
+    <color name="text_primary">#FFF5F5F7</color>
+    <color name="text_secondary">#FFA1A1A6</color>
+    <color name="text_tertiary">#FF76767B</color>
+
+    <!-- Hairlines, rims & scrim -->
+    <color name="hairline">#1AFFFFFF</color>
+    <color name="stroke_subtle">#1CFFFFFF</color>
+    <color name="scrim">#80000000</color>
+    <color name="track">#2E787880</color>
+    <color name="gauge_idle_ring">#29FFFFFF</color>
+    <color name="gauge_idle_fill">#12FFFFFF</color>
+    <color name="handle_pill">#40FFFFFF</color>
+
+    <!-- Risk semantics (luminous dark variants) -->
     <color name="risk_safe">#FF30D158</color>
+    <color name="risk_safe_bg">#2430D158</color>
     <color name="risk_low">#FF64D2FF</color>
+    <color name="risk_low_bg">#2264D2FF</color>
     <color name="risk_medium">#FFFF9F0A</color>
-    <color name="risk_high">#FFFF8A1F</color>
+    <color name="risk_medium_bg">#24FF9F0A</color>
+    <color name="risk_high">#FFFF7A1F</color>
+    <color name="risk_high_bg">#24FF7A1F</color>
     <color name="risk_deadly">#FFFF453A</color>
+    <color name="risk_deadly_bg">#26FF453A</color>
     <color name="risk_unknown">#FF98989D</color>
+    <color name="risk_unknown_bg">#248E8E93</color>
 
-    <color name="success_bg">#2630D158</color>
-    <color name="warning_bg">#26FF9F0A</color>
-    <color name="danger_bg">#26FF453A</color>
-    <color name="unknown_bg">#26787880</color>
-    <color name="inconsistent_bg">#FF332A18</color>
+    <color name="inconsistent_bg">#FF292012</color>
+    <color name="inconsistent_stroke">#45FF9F0A</color>
     <color name="inconsistent_text">#FFFFC46B</color>
 </resources>

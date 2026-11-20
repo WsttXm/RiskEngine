@@ -1,61 +1,130 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootContainer"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/bg_app"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
+    <!-- Main screen content (scales gently backward when FluidDetailSheet opens) -->
+    <FrameLayout
+        android:id="@+id/mainContentContainer"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:minHeight="58dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp"
-        android:background="@color/surface_elevated"
-        android:elevation="0dp"
-        app:contentInsetEnd="20dp"
-        app:contentInsetStartWithNavigation="20dp"
-        app:subtitle="@string/toolbar_subtitle"
-        app:subtitleTextColor="@color/text_secondary"
-        app:title="@string/app_name"
-        app:titleTextColor="@color/text_primary" />
+        android:layout_height="match_parent">
 
-    <ScrollView
-        android:id="@+id/scrollContent"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:fillViewport="true"
-        android:overScrollMode="ifContentScrolls"
-        android:scrollbars="none">
-
+        <!-- 1. Centered Idle / Scanning / Error Stage -->
         <LinearLayout
+            android:id="@+id/stateStage"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
             android:orientation="vertical"
-            android:paddingStart="20dp"
-            android:paddingTop="16dp"
-            android:paddingEnd="20dp"
-            android:paddingBottom="30dp">
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:paddingBottom="40dp">
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardStatus"
+            <com.wsttxm.riskenginesdk.demo.ui.RiskGaugeView
+                android:id="@+id/stageGauge"
+                android:layout_width="132dp"
+                android:layout_height="132dp"
+                android:clickable="true"
+                android:contentDescription="@string/collect_action"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/tvStageTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:accessibilityHeading="true"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:letterSpacing="-0.025"
+                android:text="@string/idle_title"
+                android:textColor="@color/text_primary"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvStageSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.3"
+                android:maxWidth="280dp"
+                android:text="@string/idle_subtitle"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStartScan"
+                android:layout_width="wrap_content"
+                android:layout_height="52dp"
+                android:layout_marginTop="34dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:letterSpacing="0.01"
+                android:minWidth="196dp"
+                android:paddingStart="28dp"
+                android:paddingEnd="28dp"
+                android:stateListAnimator="@null"
+                android:text="@string/collect_action"
+                android:textAllCaps="false"
+                android:textColor="@color/action_primary_fg"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:backgroundTint="@color/action_primary_bg"
+                app:cornerRadius="999dp"
+                app:elevation="0dp"
+                app:icon="@drawable/ic_scan"
+                app:iconGravity="textStart"
+                app:iconPadding="8dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/action_primary_fg"
+                app:rippleColor="@android:color/transparent" />
+
+            <TextView
+                android:id="@+id/tvPrivacyNote"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:letterSpacing="0.01"
+                android:text="@string/idle_privacy_note"
+                android:textColor="@color/text_tertiary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 2. Edge-to-Edge Scrollable Report Surface -->
+        <ScrollView
+            android:id="@+id/scrollReport"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:overScrollMode="ifContentScrolls"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/reportContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/surface"
-                app:cardCornerRadius="28dp"
-                app:cardElevation="1dp"
-                app:strokeColor="@color/divider"
-                app:strokeWidth="1dp">
+                android:orientation="vertical"
+                android:paddingStart="20dp"
+                android:paddingTop="84dp"
+                android:paddingEnd="20dp"
+                android:paddingBottom="124dp">
 
+                <!-- Hero Verdict Card -->
                 <LinearLayout
+                    android:id="@+id/cardHero"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:background="@drawable/bg_card_surface"
+                    android:elevation="2dp"
                     android:orientation="vertical"
-                    android:padding="18dp">
+                    android:outlineAmbientShadowColor="#14000000"
+                    android:outlineSpotShadowColor="#1A000000"
+                    android:padding="20dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -63,400 +132,659 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
+                        <com.wsttxm.riskenginesdk.demo.ui.RiskGaugeView
+                            android:id="@+id/heroGauge"
+                            android:layout_width="90dp"
+                            android:layout_height="90dp" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="18dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvHeroVerdict"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:accessibilityHeading="true"
+                                android:includeFontPadding="false"
+                                android:letterSpacing="-0.025"
+                                android:textColor="@color/text_primary"
+                                android:textSize="26sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvHeroSummary"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:ellipsize="end"
+                                android:lineSpacingMultiplier="1.25"
+                                android:maxLines="2"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:id="@+id/tvHeroMeta"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:fontFeatureSettings="tnum"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="18dp"
+                        android:layout_marginBottom="14dp"
+                        android:background="@color/hairline" />
+
+                    <!-- Clean 3-column inline metrics (no nested boxes) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvMetricAttention"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_primary"
+                                android:textSize="19sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="@string/metric_attention_label"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="1dp"
+                            android:layout_height="26dp"
+                            android:background="@color/hairline" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvMetricCoverage"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_primary"
+                                android:textSize="19sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="@string/metric_coverage_label"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="1dp"
+                            android:layout_height="26dp"
+                            android:background="@color/hairline" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvMetricFields"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_primary"
+                                android:textSize="19sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="@string/metric_fields_label"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Optional Multi-Source Inconsistency Callout -->
+                <LinearLayout
+                    android:id="@+id/cardInconsistentBanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingTop="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="14dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
                         <TextView
-                            android:id="@+id/tvLocalStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/bg_pill_subtle"
-                            android:paddingStart="10dp"
-                            android:paddingTop="5dp"
-                            android:paddingEnd="10dp"
-                            android:paddingBottom="5dp"
-                            android:text="@string/status_ready_code"
-                            android:textColor="@color/primary"
-                            android:textSize="11sp"
+                            android:text="@string/inconsistent_title"
+                            android:textColor="@color/inconsistent_text"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
-                        <Space
-                            android:layout_width="0dp"
-                            android:layout_height="1dp"
-                            android:layout_weight="1" />
-
-                        <com.google.android.material.progressindicator.CircularProgressIndicator
-                            android:id="@+id/progressCollecting"
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:indeterminate="true"
-                            android:contentDescription="@string/status_analyzing_description"
-                            android:visibility="gone"
-                            app:indicatorColor="@color/primary"
-                            app:indicatorSize="24dp"
-                            app:trackThickness="2dp" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCopyReport"
-                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                        <TextView
+                            android:id="@+id/tvInconsistentBannerSub"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:minHeight="32dp"
-                            android:insetTop="0dp"
-                            android:insetBottom="0dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="0dp"
-                            android:contentDescription="@string/copy_redacted_report"
-                            android:text="@string/copy_report_short"
-                            android:textSize="12sp"
-                            android:visibility="gone"
-                            app:iconTint="@color/primary" />
+                            android:layout_marginTop="3dp"
+                            android:textColor="@color/inconsistent_text"
+                            android:textSize="12sp" />
                     </LinearLayout>
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:letterSpacing="0.04"
-                        android:text="@string/status_label"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_marginStart="8dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_chevron_right"
+                        app:tint="@color/inconsistent_text" />
+                </LinearLayout>
 
-                    <TextView
-                        android:id="@+id/tvRiskLevel"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:accessibilityHeading="true"
-                        android:includeFontPadding="false"
-                        android:letterSpacing="-0.025"
-                        android:text="@string/status_ready"
-                        android:textColor="@color/text_primary"
-                        android:textSize="34sp"
-                        android:textStyle="bold" />
+                <!-- Apple-Style Spring Segmented Control -->
+                <com.wsttxm.riskenginesdk.demo.ui.SegmentedControlView
+                    android:id="@+id/segmentedControl"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="18dp" />
 
-                    <TextView
-                        android:id="@+id/tvStatusInfo"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:lineSpacingExtra="3dp"
-                        android:text="@string/status_ready_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                <!-- Tab 0: Environment & Security Detections -->
+                <LinearLayout
+                    android:id="@+id/panelDetections"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="vertical">
 
-                    <com.google.android.material.progressindicator.LinearProgressIndicator
-                        android:id="@+id/progressRisk"
+                    <HorizontalScrollView
+                        android:id="@+id/scrollFilterChips"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:max="100"
-                        android:progress="0"
-                        app:indicatorColor="@color/primary"
-                        app:trackColor="@color/track"
-                        app:trackCornerRadius="3dp"
-                        app:trackThickness="6dp" />
+                        android:clipToPadding="false"
+                        android:overScrollMode="never"
+                        android:scrollbars="none">
 
-                    <TextView
-                        android:id="@+id/tvScoreCaption"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/score_idle_description"
-                        android:textColor="@color/text_tertiary"
-                        android:textSize="11sp" />
+                        <LinearLayout
+                            android:id="@+id/layoutFilterChips"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="12dp" />
+                    </HorizontalScrollView>
 
                     <LinearLayout
-                        android:id="@+id/layoutStats"
+                        android:id="@+id/cardDetectionsList"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal"
-                        android:visibility="gone"
-                        android:weightSum="3">
+                        android:background="@drawable/bg_card_surface"
+                        android:elevation="1dp"
+                        android:orientation="vertical"
+                        android:outlineAmbientShadowColor="#0E000000"
+                        android:outlineSpotShadowColor="#14000000">
 
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:id="@+id/layoutDetections"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginEnd="5dp"
-                            android:layout_weight="1"
-                            android:background="@drawable/bg_stat_card"
-                            android:gravity="center"
-                            android:orientation="vertical"
-                            android:paddingTop="13dp"
-                            android:paddingBottom="13dp">
-
-                            <TextView
-                                android:id="@+id/tvStatRiskScore"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:includeFontPadding="false"
-                                android:textColor="@color/text_primary"
-                                android:textSize="19sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="3dp"
-                                android:text="@string/score_label"
-                                android:textColor="@color/text_tertiary"
-                                android:textSize="11sp" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="5dp"
-                            android:layout_marginEnd="5dp"
-                            android:layout_weight="1"
-                            android:background="@drawable/bg_stat_card"
-                            android:gravity="center"
-                            android:orientation="vertical"
-                            android:paddingTop="13dp"
-                            android:paddingBottom="13dp">
-
-                            <TextView
-                                android:id="@+id/tvStatFingerprints"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:includeFontPadding="false"
-                                android:textColor="@color/text_primary"
-                                android:textSize="19sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="3dp"
-                                android:text="@string/coverage_label"
-                                android:textColor="@color/text_tertiary"
-                                android:textSize="11sp" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="5dp"
-                            android:layout_weight="1"
-                            android:background="@drawable/bg_stat_card"
-                            android:gravity="center"
-                            android:orientation="vertical"
-                            android:paddingTop="13dp"
-                            android:paddingBottom="13dp">
-
-                            <TextView
-                                android:id="@+id/tvStatElapsed"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:includeFontPadding="false"
-                                android:textColor="@color/text_primary"
-                                android:textSize="19sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="3dp"
-                                android:text="@string/elapsed_label"
-                                android:textColor="@color/text_tertiary"
-                                android:textSize="11sp" />
-                        </LinearLayout>
+                            android:orientation="vertical" />
                     </LinearLayout>
 
                     <TextView
-                        android:id="@+id/tvCoverageSummary"
+                        android:id="@+id/tvCoverageGapsFooter"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="13dp"
-                        android:lineSpacingExtra="2dp"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="11sp"
+                        android:layout_marginTop="12dp"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="11.5sp"
                         android:visibility="gone" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardDetections"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:visibility="gone"
-                app:cardBackgroundColor="@color/surface"
-                app:cardCornerRadius="24dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/divider"
-                app:strokeWidth="1dp">
-
+                <!-- Tab 1: Device Fingerprint & Layered Identity -->
                 <LinearLayout
+                    android:id="@+id/panelFingerprint"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
                     android:orientation="vertical"
-                    android:paddingStart="20dp"
-                    android:paddingTop="20dp"
-                    android:paddingEnd="20dp"
-                    android:paddingBottom="8dp">
+                    android:visibility="gone">
 
-                    <TextView
-                        android:id="@+id/tvDetectionsHeader"
+                    <!-- Layered Device Fingerprint Identity Card -->
+                    <LinearLayout
+                        android:id="@+id/cardIdentity"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:accessibilityHeading="true"
-                        android:text="@string/detections_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="17sp"
-                        android:textStyle="bold" />
+                        android:background="@drawable/bg_card_surface"
+                        android:elevation="1dp"
+                        android:orientation="vertical"
+                        android:outlineAmbientShadowColor="#0E000000"
+                        android:outlineSpotShadowColor="#14000000"
+                        android:padding="18dp"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/identity_card_title"
+                                android:textColor="@color/text_primary"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvIdentityCoverage"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/layoutIdentityRows"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:orientation="vertical" />
+                    </LinearLayout>
 
                     <TextView
+                        android:id="@+id/tvCollectedSectionLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:lineSpacingExtra="2dp"
-                        android:text="@string/detections_subtitle"
+                        android:layout_marginTop="18dp"
+                        android:layout_marginBottom="8dp"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="11sp" />
-
-                    <LinearLayout
-                        android:id="@+id/layoutDetections"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:orientation="vertical" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardInconsistent"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:visibility="gone"
-                app:cardBackgroundColor="@color/inconsistent_bg"
-                app:cardCornerRadius="24dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/risk_medium"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="20dp">
-
-                    <TextView
-                        android:id="@+id/tvInconsistentHeader"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:accessibilityHeading="true"
-                        android:text="@string/inconsistent_title"
-                        android:textColor="@color/inconsistent_text"
-                        android:textSize="16sp"
+                        android:textSize="12.5sp"
                         android:textStyle="bold" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:text="@string/inconsistent_subtitle"
-                        android:textColor="@color/inconsistent_text"
-                        android:textSize="11sp" />
-
                     <LinearLayout
-                        android:id="@+id/layoutInconsistent"
+                        android:id="@+id/cardCollectedList"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:orientation="vertical" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                        android:background="@drawable/bg_card_surface"
+                        android:elevation="1dp"
+                        android:orientation="vertical"
+                        android:outlineAmbientShadowColor="#0E000000"
+                        android:outlineSpotShadowColor="#14000000">
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardFingerprint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:visibility="gone"
-                app:cardBackgroundColor="@color/surface"
-                app:cardCornerRadius="24dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/divider"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="20dp"
-                    android:paddingTop="20dp"
-                    android:paddingEnd="20dp"
-                    android:paddingBottom="8dp">
+                        <LinearLayout
+                            android:id="@+id/layoutCollected"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </LinearLayout>
 
                     <TextView
-                        android:id="@+id/tvFingerprintHeader"
+                        android:id="@+id/tvSyntheticSectionLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:accessibilityHeading="true"
-                        android:text="@string/fingerprint_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="17sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:lineSpacingExtra="2dp"
-                        android:text="@string/fingerprint_subtitle"
+                        android:layout_marginTop="20dp"
+                        android:layout_marginBottom="8dp"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="11sp" />
+                        android:textSize="12.5sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
 
                     <LinearLayout
-                        android:id="@+id/layoutFingerprint"
+                        android:id="@+id/cardSyntheticList"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:orientation="vertical" />
+                        android:background="@drawable/bg_card_surface"
+                        android:elevation="1dp"
+                        android:orientation="vertical"
+                        android:outlineAmbientShadowColor="#0E000000"
+                        android:outlineSpotShadowColor="#14000000"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:id="@+id/layoutSynthetic"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </LinearLayout>
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
-    </ScrollView>
+            </LinearLayout>
+        </ScrollView>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bg_bottom_material"
-        android:orientation="vertical"
-        android:paddingStart="20dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="20dp"
-        android:paddingBottom="14dp">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCollect"
+        <!-- 3. Floating Top Translucent Scroll-Edge Header -->
+        <LinearLayout
+            android:id="@+id/topBarContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="54dp"
-            android:contentDescription="@string/collect_action"
-            android:letterSpacing="0.01"
-            android:text="@string/collect_action"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            app:backgroundTint="@color/primary"
-            app:cornerRadius="18dp"
-            app:elevation="0dp"
-            app:icon="@drawable/ic_scan"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconTint="@color/white"
-            android:insetBottom="0dp"
-            android:insetTop="0dp" />
+            android:layout_gravity="top"
+            android:background="@drawable/bg_top_fade"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="22dp"
+                android:paddingEnd="18dp">
+
+                <TextView
+                    android:id="@+id/tvBrandTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="-0.02"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvStickyVerdict"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:alpha="0"
+                    android:paddingStart="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="4dp"
+                    android:scaleX="0.9"
+                    android:scaleY="0.9"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <ImageButton
+                    android:id="@+id/btnThemeToggle"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:background="@drawable/bg_icon_pill"
+                    android:contentDescription="@string/toggle_theme_desc"
+                    android:padding="9dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_theme" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 4. Floating Bottom Translucent Capsule Action Dock (Report Mode) -->
+        <FrameLayout
+            android:id="@+id/bottomDockWrapper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bg_bottom_fade"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:paddingStart="20dp"
+            android:paddingTop="22dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="14dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/floatingDock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:background="@drawable/bg_floating_dock"
+                android:elevation="10dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:outlineAmbientShadowColor="#24000000"
+                android:outlineSpotShadowColor="#33000000"
+                android:padding="6dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDockRescan"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="22dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/collect_again_action"
+                    android:textAllCaps="false"
+                    android:textColor="@color/action_primary_fg"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    app:backgroundTint="@color/action_primary_bg"
+                    app:cornerRadius="999dp"
+                    app:elevation="0dp"
+                    app:icon="@drawable/ic_refresh"
+                    app:iconGravity="textStart"
+                    app:iconPadding="7dp"
+                    app:iconSize="16dp"
+                    app:iconTint="@color/action_primary_fg"
+                    app:rippleColor="@android:color/transparent" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDockCopy"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="18dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/copy_report_short"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="999dp"
+                    app:icon="@drawable/ic_copy"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp"
+                    app:iconSize="16dp"
+                    app:iconTint="@color/text_primary"
+                    app:rippleColor="@android:color/transparent" />
+            </LinearLayout>
+        </FrameLayout>
+    </FrameLayout>
+
+    <!-- 5. Fluid Gesture-Driven Detail Bottom Sheet Overlay -->
+    <FrameLayout
+        android:id="@+id/sheetOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <View
+            android:id="@+id/sheetScrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0"
+            android:background="@color/scrim" />
+
+        <LinearLayout
+            android:id="@+id/sheetContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bg_sheet_surface"
+            android:clickable="true"
+            android:elevation="20dp"
+            android:focusable="true"
+            android:orientation="vertical">
+
+            <!-- Drag Header Zone -->
+            <LinearLayout
+                android:id="@+id/sheetDragHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="22dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="16dp">
+
+                <View
+                    android:layout_width="38dp"
+                    android:layout_height="5dp"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/bg_sheet_handle" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvSheetBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="9dp"
+                            android:paddingTop="3dp"
+                            android:paddingEnd="9dp"
+                            android:paddingBottom="3dp"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvSheetTitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:letterSpacing="-0.02"
+                            android:textColor="@color/text_primary"
+                            android:textSize="21sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <ImageButton
+                        android:id="@+id/btnSheetClose"
+                        android:layout_width="34dp"
+                        android:layout_height="34dp"
+                        android:layout_gravity="top"
+                        android:background="@drawable/bg_icon_pill"
+                        android:contentDescription="@string/close_sheet_desc"
+                        android:padding="9dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_close" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/hairline" />
+
+            <ScrollView
+                android:id="@+id/sheetScrollView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipToPadding="false"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/sheetBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingStart="22dp"
+                    android:paddingTop="18dp"
+                    android:paddingEnd="22dp"
+                    android:paddingBottom="28dp" />
+            </ScrollView>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 6. Floating Capsule HUD Notification (replaces stock Toast) -->
+    <LinearLayout
+        android:id="@+id/hudCapsule"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:background="@drawable/bg_hud_capsule"
+        android:elevation="16dp"
+        android:gravity="center"
+        android:paddingStart="18dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
 
         <TextView
-            android:layout_width="match_parent"
+            android:id="@+id/tvHudMessage"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:text="@string/bottom_helper"
-            android:textColor="@color/text_tertiary"
-            android:textSize="11sp" />
+            android:textColor="@color/hud_text"
+            android:textSize="13sp"
+            android:textStyle="bold" />
     </LinearLayout>
-</LinearLayout>
+</FrameLayout>

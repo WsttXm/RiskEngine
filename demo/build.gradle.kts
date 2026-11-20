@@ -47,4 +47,5 @@ dependencies {
     implementation(project(":riskengine-sdk"))
     implementation(libs.appcompat)
     implementation(libs.material)
+    implementation(libs.dynamicanimation)
 }

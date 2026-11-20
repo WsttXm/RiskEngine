@@ -1,69 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RiskEngine</string>
-    <string name="toolbar_subtitle">本地安全检测</string>
-    <string name="status_label">综合风险</string>
-    <string name="status_ready">准备就绪</string>
-    <string name="status_ready_code">就绪</string>
-    <string name="status_ready_description">轻触下方按钮，开始一次仅在本机执行的安全检测。本 Demo 为调试签名，“应用允许调试”属于预期提示，不计入风险分。</string>
-    <string name="status_analyzing">检测中</string>
-    <string name="status_analyzing_code">检测中</string>
-    <string name="status_analyzing_description">正在并行检查设备环境与采集覆盖，请稍候。</string>
-    <string name="status_error_code">未完成</string>
-    <string name="score_label">风险分</string>
-    <string name="coverage_label">覆盖率</string>
-    <string name="coverage_percent">%1$d%%</string>
-    <string name="elapsed_label">耗时</string>
-    <string name="score_idle_description">尚未生成检测报告</string>
-    <string name="score_calculating_description">正在计算风险分与检测覆盖率</string>
-    <string name="score_error_description">本次结果未生成，可安全重试</string>
-    <string name="detections_title">环境检测</string>
-    <string name="detections_subtitle">风险项优先；轻触查看说明与原始证据。</string>
-    <string name="fingerprint_title">数据采集</string>
-    <string name="fingerprint_subtitle">仅展示非敏感属性或应用级哈希；轻触查看来源详情。</string>
-    <string name="collect_action">开始安全检测</string>
-    <string name="detector_correlation">交叉规则</string>
-    <string name="detector_native_tamper">Native 完整性</string>
+
+    <!-- Simplified product-grade launch & state copy -->
+    <string name="idle_title">设备安全检测</string>
+    <string name="idle_subtitle">本地实时评估运行环境与设备完整性</string>
+    <string name="idle_privacy_note">本地运行 · 不上传数据</string>
+    <string name="collect_action">开始检测</string>
     <string name="collect_again_action">重新检测</string>
-    <string name="collecting_action">正在检测…</string>
-    <string name="retry_action">重试检测</string>
-    <string name="bottom_helper">本次结果仅用于本机风险判断，不会自动上传。</string>
-    <string name="inconsistent_title">数据一致性提醒</string>
-    <string name="inconsistent_subtitle">同一字段的不同来源返回了不同结果，请结合业务场景复核。</string>
-    <string name="collecting_toast">检测仍在进行，请稍候</string>
+    <string name="collecting_title">正在检测</string>
+    <string name="collecting_subtitle">检查运行环境与设备指纹</string>
+    <string name="collecting_action">检测中…</string>
+    <string name="retry_action">重试</string>
+    <string name="collecting_toast">正在检测，请稍候</string>
+
+    <!-- Error state -->
     <string name="collection_failed">检测未完成</string>
-    <string name="collection_failed_description">发生错误：%1$s</string>
-    <string name="unknown_error">未知错误</string>
-    <string name="expand_details">详情</string>
-    <string name="collapse_details">收起</string>
-    <string name="score_report_description">%1$s · 风险分 %2$d / %3$d</string>
-    <string name="coverage_summary">完成 %1$d / %2$d 项 · 高危 %3$d · 提醒 %4$d · 未完成 %5$d · 数据字段 %6$d</string>
-    <string name="detections_header_summary">环境检测 · %1$d 项 · %2$d 项需关注 · %3$d 项未完成</string>
-    <string name="detections_header_summary_no_risk">环境检测 · %1$d 项 · %2$d 项未完成</string>
-    <string name="detections_header_summary_clear">环境检测 · %1$d 项</string>
-    <string name="coverage_gaps_footer">另有 %1$d 项采集覆盖缺口已计入顶部覆盖率，详见下方数据采集，不在此重复列出。</string>
-    <string name="inconsistent_header_summary">数据一致性提醒 · %1$d 项</string>
-    <string name="fingerprint_header_summary">数据采集 · %1$d 项 · %2$d 项无可用数据</string>
-    <string name="technical_evidence">检测结果与说明</string>
-    <string name="technical_raw_evidence">原始检测标识（供技术排查）</string>
-    <string name="source_values">采集来源与原始值</string>
-    <string name="detection_unavailable_summary">检测%1$s，已计入覆盖不足；这不代表当前环境安全。</string>
-    <string name="detection_unavailable_reason_summary">检测未完成：%1$s。已计入覆盖不足，不能据此判断该项安全。</string>
-    <string name="detection_partial_safe_summary">已执行 %1$d / %2$d 个子检查，已完成部分未发现异常；仍需留意覆盖不足。</string>
-    <string name="detection_normal_summary">已完成检测，未发现异常信号。</string>
-    <string name="detection_informational_summary">提示：%1$s。该信号单独出现时不增加风险分。</string>
-    <string name="detection_duplicate_summary">重复佐证：%1$s。该风险已由前面的检测项计分，本项不重复累计。</string>
-    <string name="detection_danger_summary">高置信度依据：%1$s。建议限制敏感操作并进一步处置。</string>
-    <string name="detection_warning_summary">关注依据：%1$s。建议结合设备和业务场景复核。</string>
-    <string name="no_specific_evidence">未提供具体证据</string>
-    <string name="technical_execution_status">执行状态：%1$s</string>
-    <string name="technical_score">评分：%1$d / %2$d · 仅提示：%3$s</string>
-    <string name="technical_check_coverage">子检查覆盖：%1$d / %2$d</string>
-    <string name="technical_failure_reason">未完成原因：%1$s</string>
-    <string name="no_abnormal_signal">未发现异常信号</string>
-    <string name="primary_reason">主要依据：%1$s · %2$s</string>
-    <string name="yes">是</string>
-    <string name="no">否</string>
+    <string name="collection_failed_description">%1$s</string>
+    <string name="unknown_error">发生未知错误，请重试</string>
+
+    <!-- Header & actions -->
+    <string name="toggle_theme_desc">切换外观主题</string>
+    <string name="copy_report_short">复制报告</string>
+    <string name="copy_redacted_report_success">已复制脱敏报告</string>
+    <string name="copy_redacted_report_label">RiskEngine 脱敏报告</string>
+    <string name="copy_value_short">复制</string>
+    <string name="copy_value_success">已复制到剪贴板</string>
+    <string name="close_sheet_desc">关闭详情</string>
+
+    <!-- Hero & metrics -->
+    <string name="hero_meta">%1$s · %2$s</string>
+    <string name="metric_attention_label">需关注</string>
+    <string name="metric_coverage_label">覆盖率</string>
+    <string name="metric_fields_label">指纹字段</string>
+    <string name="coverage_percent">%1$d%%</string>
+    <string name="risk_progress_value">风险分 %1$d，满分阈值 %2$d</string>
+
+    <!-- Segments & filters -->
+    <string name="segment_detections_count">安全检测 %1$d</string>
+    <string name="segment_fingerprint_count">设备指纹 %1$d</string>
+    <string name="filter_all">全部 %1$d</string>
+    <string name="filter_risk">风险 %1$d</string>
+    <string name="filter_info">提示 %1$d</string>
+    <string name="filter_incomplete">未完成 %1$d</string>
+    <string name="filter_normal">正常 %1$d</string>
+    <string name="filter_empty_state">当前筛选下无匹配项</string>
+
+    <!-- Section labels -->
+    <string name="inconsistent_title">多源数据不一致</string>
+    <string name="inconsistent_banner_subtitle">发现 %1$d 项字段存在来源冲突，点击查看比对详情</string>
+    <string name="identity_card_title">分层设备指纹</string>
+    <string name="identity_hardware_coverage">硬件层覆盖 %1$d%% (%2$d/%3$d)</string>
+    <string name="identity_composite">复合标识</string>
+    <string name="identity_hardware">硬件层</string>
+    <string name="identity_system">系统层</string>
+    <string name="identity_volatile">易变层</string>
+    <string name="fingerprint_section_collected">设备属性 · %1$d 项</string>
+    <string name="fingerprint_section_synthetic">SDK 合成分析 · %1$d 项</string>
+    <string name="coverage_gaps_footer">另有 %1$d 项采集覆盖缺口已计入覆盖率，可在设备指纹中查看</string>
+
+    <!-- Detail sheet labels -->
+    <string name="sheet_section_summary">结论说明</string>
+    <string name="sheet_section_metrics">检测概览</string>
+    <string name="sheet_section_evidence">检出证据</string>
+    <string name="sheet_section_raw">原始标识</string>
+    <string name="sheet_section_sources">来源与取值</string>
+    <string name="sheet_meta_execution">执行状态</string>
+    <string name="sheet_meta_score">单项评分</string>
+    <string name="sheet_meta_coverage">子项覆盖</string>
+    <string name="sheet_meta_detector_id">检测器标识</string>
+    <string name="sheet_meta_field_id">字段标识</string>
+    <string name="sheet_meta_sensitivity">隐私分级</string>
+    <string name="sheet_meta_status">采集状态</string>
+    <string name="sheet_meta_canonical">规范值</string>
+    <string name="sheet_score_value">%1$d / %2$d</string>
+    <string name="sheet_score_informational">仅提示</string>
+    <string name="sheet_coverage_value">%1$d / %2$d</string>
+    <string name="sheet_no_evidence">未检测到异常信号</string>
+    <string name="row_content_description">%1$s，%2$s，轻触查看详情</string>
+
+    <!-- Detection & risk summaries -->
+    <string name="detection_unavailable_summary">检测%1$s，已计入覆盖不足。</string>
+    <string name="detection_unavailable_reason_summary">检测未完成：%1$s。</string>
+    <string name="detection_partial_safe_summary">已完成 %1$d/%2$d 项子检查，未发现异常。</string>
+    <string name="detection_normal_summary">未发现异常</string>
+    <string name="detection_informational_summary">%1$s（仅提示，不计分）</string>
+    <string name="detection_duplicate_summary">%1$s（交叉佐证，不重复计分）</string>
+    <string name="detection_danger_summary">%1$s</string>
+    <string name="detection_warning_summary">%1$s</string>
+    <string name="no_specific_evidence">无附加证据</string>
+
     <string name="execution_complete">已完成</string>
     <string name="execution_partial">部分完成</string>
     <string name="execution_unavailable">不可用</string>
@@ -72,16 +98,26 @@
     <string name="execution_error">执行失败</string>
     <string name="status_normal">正常</string>
     <string name="status_information">提示</string>
+    <string name="yes">是</string>
+    <string name="no">否</string>
+
+    <!-- Risk levels & concise descriptions -->
+    <string name="risk_safe">环境安全</string>
+    <string name="risk_low">低风险</string>
+    <string name="risk_medium">中风险</string>
+    <string name="risk_high">高风险</string>
+    <string name="risk_deadly">严重风险</string>
+    <string name="risk_unknown">覆盖不足</string>
+    <string name="risk_partial">%1$s·部分</string>
+    <string name="risk_description_safe">已完成检测中未发现环境异常。</string>
+    <string name="risk_description_low">检测到少量提示性环境信号。</string>
+    <string name="risk_description_medium">存在需要关注的环境信号，建议复核。</string>
+    <string name="risk_description_high">检测到高置信度风险信号，建议限制敏感操作。</string>
+    <string name="risk_description_deadly">检测到严重运行环境风险，建议立即处置。</string>
+    <string name="risk_description_unknown">部分检测未完成，暂无法确认安全。</string>
+
+    <!-- Evidence humanization -->
     <string name="evidence_check_unavailable">检查不可用：%1$s</string>
-    <string name="copy_redacted_report">复制脱敏报告</string>
-    <string name="copy_report_short">复制报告</string>
-    <string name="copy_redacted_report_success">脱敏报告已复制</string>
-    <string name="copy_redacted_report_label">RiskEngine 脱敏报告</string>
-    <string name="synthetic_analysis_title">SDK 合成分析</string>
-    <string name="risk_progress_idle">尚未生成风险分</string>
-    <string name="risk_progress_value">风险分 %1$d，严重阈值 %2$d</string>
-    <string name="risk_score_fraction">%1$d/%2$d</string>
-    <string name="risk_progress_error">本次检测未完成，没有风险分</string>
     <string name="evidence_adb_wifi">无线 ADB 已开启</string>
     <string name="evidence_adb_usb">USB 调试已开启</string>
     <string name="evidence_adb_tcp">ADB TCP 端口已开启</string>
@@ -105,28 +141,28 @@
     <string name="evidence_magisk_mount">发现 Magisk 相关挂载</string>
     <string name="evidence_module_mount">发现 Root 模块挂载</string>
     <string name="evidence_system_tmpfs_mount">只读系统分区子路径存在异常 tmpfs 挂载</string>
-    <string name="evidence_debug_ramdisk_mount">发现 Root 调试 ramdisk 挂载，但无法确定具体框架</string>
-    <string name="evidence_inline_hook">发现 libc/系统函数被 inline hook</string>
+    <string name="evidence_debug_ramdisk_mount">发现 Root 调试 ramdisk 挂载</string>
+    <string name="evidence_inline_hook">发现系统函数被 inline hook</string>
     <string name="evidence_got_hook">发现动态链接表被篡改</string>
     <string name="evidence_jni_hook">发现 JNI 函数表被替换</string>
     <string name="evidence_jni_slot_hook">JNI 调用入口被替换：%1$s</string>
     <string name="evidence_jni_self_hook">SDK 注册的 JNI 入口已指向其他 Native 模块</string>
-    <string name="failure_jni_self_range">无法确认 SDK JNI 入口所属模块，按覆盖不足处理</string>
+    <string name="failure_jni_self_range">无法确认 SDK JNI 入口所属模块</string>
     <string name="evidence_art_native_flag">Java 方法出现异常 Native 标记：%1$s</string>
     <string name="evidence_art_native_cleared">SDK 原生桥接方法的 Native 标记被篡改：%1$s</string>
     <string name="evidence_memfd_private_elf">发现伪装为 memfd 的私有可执行 ELF 注入</string>
     <string name="evidence_frida_dbus">检测到本地 Frida D-Bus 服务端口响应</string>
     <string name="evidence_kernel_dirty">量产签名系统运行了 -dirty 自定义内核</string>
-    <string name="evidence_art_native_invoke_platform">Method.invoke 使用 Android 系统原生实现（不参与评分）</string>
-    <string name="evidence_loader_depth">类加载器链深度：%1$s 层（环境信息，不参与评分）</string>
+    <string name="evidence_art_native_invoke_platform">Method.invoke 使用系统原生实现（不计分）</string>
+    <string name="evidence_loader_depth">类加载器链深度：%1$s 层（环境信息）</string>
     <string name="evidence_loader_chain_deep">类加载器链异常偏深：%1$s 层</string>
     <string name="evidence_loader_unexpected">发现非预期类加载器：%1$s</string>
-    <string name="evidence_monitor_passes">后台完整性巡检已完成 %1$s 次（不参与评分）</string>
+    <string name="evidence_monitor_passes">后台完整性巡检已完成 %1$s 次</string>
     <string name="evidence_late_text_mismatch">后台巡检确认 SDK 可执行代码与安装文件不一致</string>
-    <string name="evidence_late_tracer">后台巡检发现进程后来被调试器跟踪</string>
+    <string name="evidence_late_tracer">后台巡检发现进程被调试器跟踪</string>
     <string name="evidence_late_wx">后台巡检发现可写且可执行的关键内存区域</string>
     <string name="evidence_native_score">Native 独立校验风险分：%1$s</string>
-    <string name="evidence_sealed_root">Native 密封校验确认 Root 框架痕迹（与 Root 检测去重）</string>
+    <string name="evidence_sealed_root">Native 密封校验确认 Root 框架痕迹（已去重）</string>
     <string name="evidence_sealed_hidden_root">Native 密封校验发现 Root 隐藏行为</string>
     <string name="evidence_sealed_kernel_root">Native 密封校验发现内核级 Root 痕迹</string>
     <string name="evidence_sealed_inline_hook">Native 密封校验发现函数 Hook</string>
@@ -134,14 +170,14 @@
     <string name="evidence_sealed_tamper">Native 密封校验确认 SDK 代码被修改</string>
     <string name="evidence_sealed_emulator">Native 密封校验发现模拟器特征</string>
     <string name="evidence_sealed_debugger">Native 密封校验发现调试器跟踪</string>
-    <string name="evidence_sealed_coverage">Native 密封校验存在覆盖缺口，该项不计风险分</string>
-    <string name="evidence_duplicate_corroboration">该证据与前面的检测项重复，已从总分和高危计数中去重</string>
+    <string name="evidence_sealed_coverage">Native 密封校验存在覆盖缺口</string>
+    <string name="evidence_duplicate_corroboration">该证据与前面的检测项重复，已从总分中去重</string>
     <string name="evidence_gadget">发现 Frida Gadget 映射</string>
-    <string name="evidence_anon_exec">发现匿名可执行内存（仅作相关上下文）</string>
+    <string name="evidence_anon_exec">发现匿名可执行内存（上下文信号）</string>
     <string name="evidence_qemu">发现 QEMU/AVD 虚拟化特征</string>
     <string name="evidence_hypervisor_cpu">CPU 信息具有虚拟化特征</string>
     <string name="evidence_disk_small">数据分区容量异常偏小</string>
-    <string name="evidence_screen_stock">屏幕参数像默认模拟器配置</string>
+    <string name="evidence_screen_stock">屏幕参数接近默认模拟器配置</string>
     <string name="evidence_generic_fingerprint">系统指纹偏通用/模拟器</string>
     <string name="evidence_emu_file">发现模拟器特征文件</string>
     <string name="evidence_emu_pkg">发现模拟器相关应用</string>
@@ -149,34 +185,37 @@
     <string name="evidence_no_thermal">未发现温度传感器节点</string>
     <string name="evidence_cloud_pkg">发现云手机相关应用</string>
     <string name="evidence_battery_anomaly">电池状态异常，常见于云真机</string>
-    <string name="evidence_virtual_env">当前应用更像运行在分身/虚拟容器中</string>
+    <string name="evidence_virtual_env">运行环境疑似分身或虚拟容器</string>
     <string name="evidence_prop_mismatch">系统属性与 build.prop 不一致，可能被 resetprop</string>
     <string name="evidence_native_tamper">Native 库内存与文件不一致</string>
-    <string name="failure_so_missing_map">未能在内存映射中找到 Native 库，可能被隐藏</string>
-    <string name="failure_so_apk_embedded">Native 库直接从 APK 加载，当前无法执行文件级代码对比</string>
+    <string name="failure_so_missing_map">未能在内存映射中找到 Native 库</string>
+    <string name="failure_so_apk_embedded">Native 库直接从 APK 加载，无法执行文件级代码对比</string>
     <string name="failure_so_anonymous_map">Native 库映射到匿名内存，可能被替换</string>
     <string name="failure_so_unreadable">无法读取磁盘上的 Native 库文件</string>
     <string name="failure_so_bad_elf">Native 库文件不是有效 ELF</string>
-    <string name="technical_detector_id">检测器：%1$s</string>
     <string name="evidence_process_mismatch">Java 与 Native 进程扫描结果不一致</string>
     <string name="evidence_suspicious_process">发现可疑进程</string>
     <string name="evidence_verified_boot_state">Verified Boot 状态异常：%1$s</string>
     <string name="evidence_bootloader_unlocked">设备 Bootloader 已解锁</string>
-    <string name="evidence_generic_key_value">检测到环境信号：%1$s = %2$s</string>
-    <string name="evidence_generic_signal">检测到环境信号：%1$s</string>
+    <string name="evidence_generic_key_value">%1$s：%2$s</string>
+    <string name="evidence_generic_signal">%1$s</string>
     <string name="evidence_correlation_c1">弱模拟器信号与虚拟化特征同时出现</string>
     <string name="evidence_correlation_c2">模拟器强信号与虚拟化特征交叉印证</string>
-    <string name="evidence_correlation_c3">函数被 hook，且同时存在 Frida 痕迹</string>
-    <string name="evidence_correlation_c4">Root 路径访问被交叉隐藏</string>
+    <string name="evidence_correlation_c3">函数被 Hook 且存在 Frida 痕迹</string>
+    <string name="evidence_correlation_c4">Root 路径访问存在交叉隐藏</string>
     <string name="evidence_correlation_c5">系统指纹被运行时改写</string>
-    <string name="evidence_correlation_c6">Native 密封校验与 Java 桥接结果矛盾，疑似 Hook 绕过</string>
+    <string name="evidence_correlation_c6">Native 密封校验与 Java 桥接结果矛盾</string>
     <string name="evidence_correlation_c7">多项云真机弱特征同时出现</string>
     <string name="evidence_low_sensor">传感器数量异常偏少</string>
+
     <string name="failure_timeout">执行超时</string>
     <string name="failure_access_denied">系统拒绝访问</string>
     <string name="failure_native_unavailable">Native 能力不可用</string>
     <string name="failure_unsupported">当前环境不支持</string>
     <string name="failure_disabled">已由配置关闭</string>
+    <string name="failure_mount_ns_unreadable">无法读取 init 进程挂载命名空间</string>
+
+    <!-- Detector titles -->
     <string name="detector_root">Root 权限风险</string>
     <string name="detector_mount">系统挂载完整性</string>
     <string name="detector_hook">注入与 Hook</string>
@@ -188,10 +227,14 @@
     <string name="detector_cloud_phone">云手机特征</string>
     <string name="detector_custom_rom">第三方 ROM</string>
     <string name="detector_multi_source">多源一致性</string>
+    <string name="detector_correlation">交叉规则</string>
+    <string name="detector_native_tamper">Native 完整性</string>
     <string name="detector_consistency">系统一致性</string>
     <string name="detector_sealed_verdict">Native 密封校验</string>
     <string name="detector_collector_coverage">采集覆盖 · %1$s</string>
     <string name="detector_other">其他检测</string>
+
+    <!-- Collector titles -->
     <string name="collector_android_id">Android 标识哈希</string>
     <string name="collector_build_props">系统构建信息</string>
     <string name="collector_screen">屏幕特征</string>
@@ -217,22 +260,23 @@
     <string name="collector_hook_memory">Hook 内存信号</string>
     <string name="collector_score_inputs">风险评分输入</string>
     <string name="collector_other">其他采集项</string>
-    <string name="collector_empty">当前环境未返回可展示数据。</string>
+
+    <!-- Collector summaries & localized keys -->
+    <string name="collector_empty">无可用数据</string>
     <string name="collector_failed">采集失败 · %1$s</string>
-    <string name="collector_unsupported">当前设备或运行环境不支持此采集项。</string>
-    <string name="collector_sources_consistent">%1$d 个来源结果一致</string>
-    <string name="collector_sources_inconsistent">%1$d 个来源结果不一致</string>
-    <string name="collector_no_display_data">采集完成，未返回可展示数据。</string>
-    <string name="collector_status_prefix">状态：%1$s</string>
-    <string name="collector_failure_prefix">失败原因：%1$s</string>
+    <string name="collector_unsupported">当前环境不支持</string>
+    <string name="collector_sources_consistent">%1$d 个来源一致</string>
+    <string name="collector_sources_inconsistent">%1$d 个来源不一致</string>
+    <string name="collector_no_display_data">已采集</string>
+
     <string name="value_none">无数据</string>
     <string name="value_summary">摘要</string>
     <string name="value_status">状态</string>
-    <string name="value_supported">是否支持</string>
+    <string name="value_supported">支持</string>
     <string name="value_bluetooth_le">低功耗蓝牙</string>
     <string name="value_wifi_direct">Wi-Fi Direct</string>
     <string name="value_developer_options">开发者选项</string>
-    <string name="value_checks_completed">检查完成</string>
+    <string name="value_checks_completed">完成检查</string>
     <string name="value_check_failures">检查失败</string>
     <string name="value_adb_wifi_on">无线 ADB 已开启</string>
     <string name="value_adb_on">ADB 已开启</string>
@@ -242,6 +286,44 @@
     <string name="value_native_source">Native</string>
     <string name="value_present">存在</string>
     <string name="value_mount_overlay">overlay 挂载</string>
+    <string name="value_tcp_port">TCP 端口</string>
+    <string name="value_signals">相关信号</string>
+    <string name="value_count">数量</string>
+    <string name="value_width">屏幕宽度</string>
+    <string name="value_height">屏幕高度</string>
+    <string name="value_density">屏幕密度</string>
+    <string name="value_xdpi">物理 X DPI</string>
+    <string name="value_ydpi">物理 Y DPI</string>
+    <string name="value_data_capacity">数据分区</string>
+    <string name="value_storage_capacity">共享存储</string>
+    <string name="value_settings_api">系统设置 API</string>
+    <string name="value_content_resolver">内容解析器</string>
+    <string name="value_content_query">系统查询命令</string>
+    <string name="value_system_property">%1$s</string>
+    <!-- Newly localized keys identified from Pixel 6 ADB inspection -->
+    <string name="value_egl_version">EGL 版本</string>
+    <string name="value_gpu_vendor">渲染厂商</string>
+    <string name="value_gpu_renderer">渲染器</string>
+    <string name="value_gpu_extensions">扩展摘要</string>
+    <string name="value_sensor_tuple_hash">组合哈希</string>
+    <string name="value_runtime_processors">逻辑核心</string>
+    <string name="value_sysfs_cores">物理核心</string>
+    <string name="value_cpu_clusters">核心簇分布</string>
+    <string name="value_ram_bucket">内存容量档</string>
+    <string name="value_low_ram">低内存设备</string>
+    <string name="value_abis">支持架构</string>
+    <string name="value_composite_id">复合标识</string>
+    <string name="value_hardware_id">硬件层标识</string>
+    <string name="value_system_id">系统层标识</string>
+    <string name="value_volatile_id">易变层标识</string>
+    <string name="value_brand">品牌</string>
+    <string name="value_model">型号</string>
+    <string name="value_device">设备代号</string>
+    <string name="value_manufacturer">制造商</string>
+    <string name="value_hardware">硬件平台</string>
+    <string name="value_board">主板</string>
+    <string name="value_fingerprint">构建指纹</string>
+
     <string name="phone_type_none">无</string>
     <string name="phone_type_gsm">GSM</string>
     <string name="phone_type_cdma">CDMA</string>
@@ -257,46 +339,20 @@
     <string name="sim_state_card_io_error">读卡错误</string>
     <string name="sim_state_card_restricted">受限</string>
     <string name="sim_state_loaded">已加载</string>
-    <string name="value_tcp_port">TCP 端口</string>
-    <string name="value_signals">相关信号</string>
-    <string name="value_count">数量</string>
-    <string name="value_width">屏幕宽度</string>
-    <string name="value_height">屏幕高度</string>
-    <string name="value_density">屏幕密度</string>
-    <string name="value_xdpi">物理 X DPI</string>
-    <string name="value_ydpi">物理 Y DPI</string>
-    <string name="value_data_capacity">数据分区容量</string>
-    <string name="value_storage_capacity">共享存储容量</string>
-    <string name="value_settings_api">系统设置 API</string>
-    <string name="value_content_resolver">内容解析器</string>
-    <string name="value_content_query">系统查询命令</string>
-    <string name="value_system_property">系统属性 %1$s</string>
+
     <string name="collector_status_success">已采集</string>
     <string name="collector_status_empty">无数据</string>
     <string name="collector_status_error">失败</string>
     <string name="collector_status_unsupported">不支持</string>
     <string name="status_unknown">未知</string>
-    <string name="risk_safe">安全</string>
-    <string name="risk_low">低风险</string>
-    <string name="risk_medium">中风险</string>
-    <string name="risk_high">高风险</string>
-    <string name="risk_deadly">严重风险</string>
-    <string name="risk_unknown">覆盖不足</string>
-    <string name="risk_description_safe">已完成的检测中未发现需要处置的环境风险。</string>
-    <string name="risk_description_low">发现少量提示性信号，建议结合当前设备与业务场景判断。</string>
-    <string name="risk_description_medium">发现需要关注的环境信号，建议查看检测详情后复核。</string>
-    <string name="risk_description_high">发现高置信度风险信号，建议限制敏感操作。</string>
-    <string name="risk_description_deadly">发现严重运行环境风险，建议立即停止敏感流程并处置。</string>
-    <string name="risk_description_unknown">部分检测未完成，当前结果不能被解释为安全。</string>
+
+    <string name="sensitivity_pseudonymous">应用范围假名</string>
+    <string name="sensitivity_technical">技术诊断数据</string>
+    <string name="sensitivity_non_sensitive">非敏感属性</string>
+
+    <!-- Redacted report export -->
     <string name="redacted_report_header">RiskEngine SDK %1$s\n风险等级：%2$s\n风险分：%3$d / %4$d\n覆盖：%5$d / %6$d\n高危/提醒/未完成：%7$d/%8$d/%9$d\n检测结果：</string>
     <string name="redacted_report_item">\n- %1$s：%2$s</string>
     <string name="redacted_report_reason"> · %1$s</string>
     <string name="redacted_report_footer">\n\n已脱敏：未包含设备标识哈希、原始系统属性、文件路径或进程 PID。</string>
-    <string name="row_content_description">%1$s，%2$s，轻触查看详情</string>
-    <string name="field_meta">%1$s · %2$s</string>
-    <string name="sensitivity_pseudonymous">应用范围假名</string>
-    <string name="sensitivity_technical">技术诊断数据</string>
-    <string name="sensitivity_non_sensitive">非敏感属性</string>
-    <string name="canonical_value_prefix">规范值：%1$s</string>
-    <string name="risk_partial">%1$s · 部分</string>
 </resources>
