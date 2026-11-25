@@ -103,7 +103,10 @@ TASKS+=(
   :riskengine-sdk:assembleRelease
   :riskengine-sdk:sourceReleaseJar
   :riskengine-sdk:generatePomFileForReleasePublication
+  :riskengine-sdk:apiCheck
   :integration-test:assembleDebug
+  :integration-test:assembleDebugAndroidTest
+  :integration-test:lintDebug
   :demo:lintDebug
   :demo:assembleDebug
 )
@@ -134,9 +137,29 @@ test -s riskengine-sdk/build/intermediates/source_jar/release/release-sources.ja
 test -s riskengine-sdk/build/publications/release/pom-default.xml
 test -s demo/build/outputs/apk/debug/demo-debug.apk
 test -s integration-test/build/outputs/apk/debug/integration-test-debug.apk
+test -s integration-test/build/outputs/apk/androidTest/debug/integration-test-debug-androidTest.apk
 
 unzip -tq riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar
 unzip -tq demo/build/outputs/apk/debug/demo-debug.apk
 unzip -tq integration-test/build/outputs/apk/debug/integration-test-debug.apk
+unzip -tq integration-test/build/outputs/apk/androidTest/debug/integration-test-debug-androidTest.apk
+
+# 6. Run CI Static Governance Gates 1–6 & Python gate self-tests
+echo "==> Running CI Static Governance Gates 1–6"
+python3 -B scripts/check-evidence-records.py
+CHECK_JNI_DEX=1 ./scripts/check-elf-hardening.sh riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar
+python3 -B scripts/check-single-source-sync.py
+python3 -B scripts/check-public-api.py --mode check \
+  --aar riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar \
+  --pom riskengine-sdk/build/publications/release/pom-default.xml \
+  --api-file riskengine-sdk/api/riskengine-sdk.api
+python3 -B scripts/check-boundary-guards.py
+python3 -B scripts/refresh_google_attestation_roots.py --dry-run
+python3 -B scripts/test_static_gates.py
+python3 -B scripts/test_api_and_boundary_gates.py
+
+# 7. Run L2 Offline C++ Host Unit Test Suite
+echo "==> Running L2 Offline C++ Host Unit Tests"
+./scripts/run-cpp-tests.sh
 
 echo "==> All CI verification checks passed."

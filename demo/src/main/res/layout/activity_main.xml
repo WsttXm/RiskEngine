@@ -152,8 +152,44 @@
                                 android:includeFontPadding="false"
                                 android:letterSpacing="-0.025"
                                 android:textColor="@color/text_primary"
-                                android:textSize="26sp"
+                                android:textSize="25sp"
                                 android:textStyle="bold" />
+
+                            <LinearLayout
+                                android:id="@+id/layoutHeroBadges"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="7dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:id="@+id/tvHeroActionBadge"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:includeFontPadding="false"
+                                    android:paddingStart="9dp"
+                                    android:paddingTop="4dp"
+                                    android:paddingEnd="9dp"
+                                    android:paddingBottom="4dp"
+                                    android:textSize="11.5sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvHeroHardTriggerBadge"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="6dp"
+                                    android:fontFeatureSettings="tnum"
+                                    android:includeFontPadding="false"
+                                    android:paddingStart="8dp"
+                                    android:paddingTop="4dp"
+                                    android:paddingEnd="8dp"
+                                    android:paddingBottom="4dp"
+                                    android:textSize="11sp"
+                                    android:textStyle="bold"
+                                    android:visibility="gone" />
+                            </LinearLayout>
 
                             <TextView
                                 android:id="@+id/tvHeroSummary"
@@ -170,7 +206,7 @@
                                 android:id="@+id/tvHeroMeta"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
+                                android:layout_marginTop="6dp"
                                 android:fontFeatureSettings="tnum"
                                 android:textColor="@color/text_tertiary"
                                 android:textSize="11.5sp" />
@@ -180,11 +216,11 @@
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
-                        android:layout_marginTop="18dp"
-                        android:layout_marginBottom="14dp"
+                        android:layout_marginTop="16dp"
+                        android:layout_marginBottom="13dp"
                         android:background="@color/hairline" />
 
-                    <!-- Clean 3-column inline metrics (no nested boxes) -->
+                    <!-- Clean 4-column inline metrics (Attention / Confidence / Coverage / Fields) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -206,7 +242,7 @@
                                 android:fontFeatureSettings="tnum"
                                 android:includeFontPadding="false"
                                 android:textColor="@color/text_primary"
-                                android:textSize="19sp"
+                                android:textSize="18sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -215,12 +251,43 @@
                                 android:layout_marginTop="4dp"
                                 android:text="@string/metric_attention_label"
                                 android:textColor="@color/text_tertiary"
-                                android:textSize="11.5sp" />
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="1dp"
-                            android:layout_height="26dp"
+                            android:layout_height="24dp"
+                            android:background="@color/hairline" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvMetricConfidence"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_primary"
+                                android:textSize="18sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="@string/metric_confidence_label"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="1dp"
+                            android:layout_height="24dp"
                             android:background="@color/hairline" />
 
                         <LinearLayout
@@ -237,7 +304,7 @@
                                 android:fontFeatureSettings="tnum"
                                 android:includeFontPadding="false"
                                 android:textColor="@color/text_primary"
-                                android:textSize="19sp"
+                                android:textSize="18sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -246,12 +313,12 @@
                                 android:layout_marginTop="4dp"
                                 android:text="@string/metric_coverage_label"
                                 android:textColor="@color/text_tertiary"
-                                android:textSize="11.5sp" />
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="1dp"
-                            android:layout_height="26dp"
+                            android:layout_height="24dp"
                             android:background="@color/hairline" />
 
                         <LinearLayout
@@ -268,7 +335,7 @@
                                 android:fontFeatureSettings="tnum"
                                 android:includeFontPadding="false"
                                 android:textColor="@color/text_primary"
-                                android:textSize="19sp"
+                                android:textSize="18sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -277,7 +344,94 @@
                                 android:layout_marginTop="4dp"
                                 android:text="@string/metric_fields_label"
                                 android:textColor="@color/text_tertiary"
-                                android:textSize="11.5sp" />
+                                android:textSize="11sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="14dp"
+                        android:layout_marginBottom="14dp"
+                        android:background="@color/hairline" />
+
+                    <!-- Four-Dimension Risk Sub-Scores & Expandable Score Breakdown -->
+                    <LinearLayout
+                        android:id="@+id/layoutDimensionsSection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/hero_dimensions_title"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/btnScoreBreakdown"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:paddingStart="10dp"
+                                android:paddingTop="4dp"
+                                android:paddingEnd="10dp"
+                                android:paddingBottom="4dp"
+                                android:text="@string/hero_breakdown_action"
+                                android:textColor="@color/accent"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/layoutDimensionBars"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:orientation="vertical" />
+
+                        <LinearLayout
+                            android:id="@+id/rowBreakdownPreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:background="@drawable/bg_code_block"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="12dp"
+                            android:paddingTop="9dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="9dp">
+
+                            <TextView
+                                android:id="@+id/tvBreakdownPreview"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:ellipsize="end"
+                                android:fontFeatureSettings="tnum"
+                                android:maxLines="1"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <ImageView
+                                android:layout_width="13dp"
+                                android:layout_height="13dp"
+                                android:layout_marginStart="6dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
@@ -443,6 +597,77 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="12dp"
                             android:orientation="vertical" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="12dp"
+                            android:layout_marginBottom="12dp"
+                            android:background="@color/hairline" />
+
+                        <!-- Fingerprint Continuity & Keystore Device-Binding Summary -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/identity_continuity_section"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/btnResetBaseline"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:paddingStart="10dp"
+                                android:paddingTop="4dp"
+                                android:paddingEnd="10dp"
+                                android:paddingBottom="4dp"
+                                android:text="@string/identity_reset_baseline_action"
+                                android:textColor="@color/accent"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/layoutContinuityMeta"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_code_block"
+                            android:orientation="vertical"
+                            android:paddingStart="12dp"
+                            android:paddingTop="8dp"
+                            android:paddingEnd="12dp"
+                            android:paddingBottom="8dp" />
+
+                        <!-- Physical Hardware Bucket Digests -->
+                        <TextView
+                            android:id="@+id/tvIdentityBucketsLabel"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="@string/identity_buckets_section"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12.5sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <LinearLayout
+                            android:id="@+id/layoutIdentityBuckets"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="vertical"
+                            android:visibility="gone" />
                     </LinearLayout>
 
                     <TextView
@@ -556,6 +781,38 @@
                     android:layout_width="0dp"
                     android:layout_height="1dp"
                     android:layout_weight="1" />
+
+                <LinearLayout
+                    android:id="@+id/btnThreatStream"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_icon_pill"
+                    android:clickable="true"
+                    android:contentDescription="@string/threat_stream_button_desc"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="11dp"
+                    android:paddingEnd="11dp">
+
+                    <View
+                        android:id="@+id/viewThreatStreamDot"
+                        android:layout_width="7dp"
+                        android:layout_height="7dp"
+                        android:layout_marginEnd="6dp" />
+
+                    <TextView
+                        android:id="@+id/tvThreatStreamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFeatureSettings="tnum"
+                        android:includeFontPadding="false"
+                        android:text="@string/threat_stream_pill_label"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <ImageButton
                     android:id="@+id/btnThemeToggle"
@@ -753,6 +1010,139 @@
 
                 <LinearLayout
                     android:id="@+id/sheetBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingStart="22dp"
+                    android:paddingTop="18dp"
+                    android:paddingEnd="22dp"
+                    android:paddingBottom="28dp" />
+            </ScrollView>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 5b. Live Threat & Device Posture Stream Drawer Overlay -->
+    <FrameLayout
+        android:id="@+id/threatDrawerOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <View
+            android:id="@+id/threatDrawerScrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0"
+            android:background="@color/scrim" />
+
+        <LinearLayout
+            android:id="@+id/threatDrawerContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bg_sheet_surface"
+            android:clickable="true"
+            android:elevation="20dp"
+            android:focusable="true"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/threatDrawerHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="22dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="16dp">
+
+                <View
+                    android:layout_width="38dp"
+                    android:layout_height="5dp"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/bg_sheet_handle" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvThreatDrawerBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="9dp"
+                            android:paddingTop="3dp"
+                            android:paddingEnd="9dp"
+                            android:paddingBottom="3dp"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:letterSpacing="-0.02"
+                            android:text="@string/threat_stream_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="21sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/btnThreatDrawerClear"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top"
+                        android:layout_marginEnd="8dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:paddingStart="10dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="6dp"
+                        android:text="@string/threat_stream_clear_action"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <ImageButton
+                        android:id="@+id/btnThreatDrawerClose"
+                        android:layout_width="34dp"
+                        android:layout_height="34dp"
+                        android:layout_gravity="top"
+                        android:background="@drawable/bg_icon_pill"
+                        android:contentDescription="@string/close_sheet_desc"
+                        android:padding="9dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_close" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/hairline" />
+
+            <ScrollView
+                android:id="@+id/threatDrawerScrollView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipToPadding="false"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/threatDrawerBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"

@@ -8,10 +8,14 @@
         <package android:name="com.bignox.app" />
         <package android:name="com.ldmnq.launcher3" />
         <package android:name="com.ldmnq" />
+        <package android:name="com.ldmnq.ld9" />
         <package android:name="com.mumu.launcher" />
         <package android:name="com.netease.mumu" />
+        <package android:name="com.netease.mumu.store" />
         <package android:name="com.microvirt.launcher" />
         <package android:name="com.tencent.tinput" />
+        <package android:name="id.waydroid.app" />
+        <package android:name="com.microsoft.windows.subsystem.android" />
 
         <!-- Cloud phone packages -->
         <package android:name="com.redfinger.app" />
@@ -22,6 +26,49 @@
         <package android:name="com.armcloud.sdk" />
         <package android:name="com.baidu.cloudphone" />
         <package android:name="com.huaweicloud.cph" />
+
+        <!-- Proxy tool packages checked via official release cert SHA-256 -->
+        <package android:name="com.github.metacubex.clash.meta" />
+        <package android:name="com.github.kr328.clash" />
+        <package android:name="com.github.kr328.clash.foss" />
+        <package android:name="com.v2ray.ang" />
+        <package android:name="io.nekohasekai.sfa" />
+        <package android:name="com.getsurfboard" />
+        <package android:name="moe.nb4a" />
+        <package android:name="com.reqable.android" />
+
+        <!-- Curated threat app packages synced with artifact_paths.ini [threat_app_packages] -->
+        <package android:name="me.weishu.kernelsu" />
+        <package android:name="io.github.a13e300.mksu" />
+        <package android:name="com.rifsxd.ksunext" />
+        <package android:name="com.sukisu.ultra" />
+        <package android:name="com.resukisu.resukisu" />
+        <package android:name="com.topjohnwu.magisk" />
+        <package android:name="io.github.vvb2060.magisk" />
+        <package android:name="me.bmax.apatch" />
+        <package android:name="com.linux.permissionmanager" />
+        <package android:name="eu.chainfire.supersu" />
+        <package android:name="com.tsng.hidemyapplist" />
+        <package android:name="org.frknkrc44.hma_oss" />
+        <package android:name="com.tsng.pzyhrx.hma" />
+        <package android:name="org.lsposed.manager" />
+        <package android:name="org.lsposed.lspatch" />
+        <package android:name="de.robv.android.xposed.installer" />
+        <package android:name="catch_.me_.if_.you_.can_" />
+        <package android:name="com.chelpus.lackypatch" />
+        <package android:name="com.android.vending.billing.InAppBillingService.LUCK" />
+        <package android:name="com.forpda.lp" />
+        <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="github.tornaco.android.thanos" />
+        <package android:name="com.lerist.fakelocation" />
     </queries>
+
+    <application>
+        <!-- On-demand isolated helper service for cross-process mount diff (host may strip via tools:node="remove"). -->
+        <service
+            android:name=".process.RiskIsolatedProbeService"
+            android:exported="false"
+            android:isolatedProcess="true" />
+    </application>
 
 </manifest>

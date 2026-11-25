@@ -44,6 +44,9 @@ public class CollectorRegistry {
         collectors.add(new CpuTopologyCollector(context));
         collectors.add(new HardwareProfileCollector(context));
         collectors.add(new PartitionFingerprintCollector(context, signals));
+        collectors.add(new MediaCodecCollector(context));
+        collectors.add(new InputDeviceCollector(context));
+        collectors.add(new SecurityPostureCollector(context));
 
         // Native layer collectors (via JNI bridge)
         NativeCollectorBridge nativeBridge = new NativeCollectorBridge(context, signals);

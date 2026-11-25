@@ -1,5 +1,8 @@
 package com.wsttxm.riskenginesdk.model;
 
+import com.wsttxm.riskenginesdk.FingerprintStability;
+import com.wsttxm.riskenginesdk.FingerprintVersion;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +17,8 @@ import java.util.Map;
  * trigger false hardware-change detections.
  */
 public final class FingerprintId {
+    private static final String[] CORE_PHYSICAL_BUCKETS = {"gpu", "cpu", "sensor"};
+
     private final String compositeId;
     private final String hardwareId;
     private final String systemId;
@@ -24,6 +29,8 @@ public final class FingerprintId {
     private final int systemFieldsTotal;
     private final List<String> contributingFields;
     private final Map<String, String> hardwareBucketDigests;
+    private final FingerprintVersion version;
+    private final FingerprintStability stability;
 
     public FingerprintId(String compositeId, String hardwareId, String systemId,
                          String volatileId, int hardwareFieldsPresent,
@@ -32,7 +39,8 @@ public final class FingerprintId {
         this(compositeId, hardwareId, systemId, volatileId,
                 hardwareFieldsPresent, hardwareFieldsTotal,
                 systemFieldsPresent, systemFieldsTotal,
-                contributingFields, Collections.emptyMap());
+                contributingFields, Collections.emptyMap(),
+                FingerprintVersion.V1, FingerprintStability.OPTIMAL);
     }
 
     public FingerprintId(String compositeId, String hardwareId, String systemId,
@@ -40,6 +48,20 @@ public final class FingerprintId {
                          int hardwareFieldsTotal, int systemFieldsPresent,
                          int systemFieldsTotal, List<String> contributingFields,
                          Map<String, String> hardwareBucketDigests) {
+        this(compositeId, hardwareId, systemId, volatileId,
+                hardwareFieldsPresent, hardwareFieldsTotal,
+                systemFieldsPresent, systemFieldsTotal,
+                contributingFields, hardwareBucketDigests,
+                FingerprintVersion.V1, FingerprintStability.OPTIMAL);
+    }
+
+    public FingerprintId(String compositeId, String hardwareId, String systemId,
+                         String volatileId, int hardwareFieldsPresent,
+                         int hardwareFieldsTotal, int systemFieldsPresent,
+                         int systemFieldsTotal, List<String> contributingFields,
+                         Map<String, String> hardwareBucketDigests,
+                         FingerprintVersion version,
+                         FingerprintStability stability) {
         this.compositeId = compositeId == null ? "" : compositeId;
         this.hardwareId = hardwareId == null ? "" : hardwareId;
         this.systemId = systemId == null ? "" : systemId;
@@ -54,6 +76,8 @@ public final class FingerprintId {
         this.hardwareBucketDigests = hardwareBucketDigests == null || hardwareBucketDigests.isEmpty()
                 ? Collections.emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(hardwareBucketDigests));
+        this.version = version == null ? FingerprintVersion.V1 : version.resolve();
+        this.stability = stability == null ? FingerprintStability.OPTIMAL : stability;
     }
 
     public String getCompositeId() { return compositeId; }
@@ -66,6 +90,8 @@ public final class FingerprintId {
     public int getSystemFieldsTotal() { return systemFieldsTotal; }
     public List<String> getContributingFields() { return contributingFields; }
     public Map<String, String> getHardwareBucketDigests() { return hardwareBucketDigests; }
+    public FingerprintVersion getVersion() { return version; }
+    public FingerprintStability getStability() { return stability; }
 
     /** Percentage of hardware-layer inputs that were actually collected. */
     public int getHardwareCoveragePercent() {
@@ -73,11 +99,27 @@ public final class FingerprintId {
                 ? 0 : (hardwareFieldsPresent * 100) / hardwareFieldsTotal;
     }
 
+    /** Counts present core physical hardware buckets among {@code gpu}, {@code cpu}, {@code sensor}. */
+    public int getCorePhysicalBucketCount() {
+        int count = 0;
+        for (String bucket : CORE_PHYSICAL_BUCKETS) {
+            String digest = hardwareBucketDigests.get(bucket);
+            if (digest != null && !digest.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     /**
      * True when enough hardware inputs were collected for the hardware layer to
-     * be worth persisting or comparing. Below this a match means little.
+     * be worth persisting or comparing: requires non-empty {@code hardwareId},
+     * coverage &gt;= 50%, AND at least 2 of the 3 core physical buckets
+     * ({@code gpu}, {@code cpu}, {@code sensor}).
      */
     public boolean isHardwareLayerReliable() {
-        return !hardwareId.isEmpty() && getHardwareCoveragePercent() >= 50;
+        return !hardwareId.isEmpty()
+                && getHardwareCoveragePercent() >= 50
+                && getCorePhysicalBucketCount() >= 2;
     }
 }

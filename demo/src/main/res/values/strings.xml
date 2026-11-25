@@ -6,6 +6,8 @@
     <string name="idle_title">设备安全检测</string>
     <string name="idle_subtitle">本地实时评估运行环境与设备完整性</string>
     <string name="idle_privacy_note">本地运行 · 不上传数据</string>
+    <string name="idle_privacy_note_pending">需同意隐私说明后初始化 SDK</string>
+    <string name="idle_privacy_note_consented">本地运行 · 不上传数据 · 已授权初始化</string>
     <string name="collect_action">开始检测</string>
     <string name="collect_again_action">重新检测</string>
     <string name="collecting_title">正在检测</string>
@@ -13,6 +15,23 @@
     <string name="collecting_action">检测中…</string>
     <string name="retry_action">重试</string>
     <string name="collecting_toast">正在检测，请稍候</string>
+
+    <!-- Privacy consent gate -->
+    <string name="privacy_consent_title">隐私与本地检测说明</string>
+    <string name="privacy_consent_message">RiskEngine Demo 仅在本地评估设备运行环境、硬件安全态势与分层设备指纹，不声明敏感权限，不采集原始 IMEI / MAC / 精确位置，也不向任何外部服务器上传数据。\n\n请先确认同意后再初始化 SDK 并开始检测。</string>
+    <string name="privacy_consent_accept">同意并初始化</string>
+    <string name="privacy_consent_decline">暂不同意</string>
+    <string name="privacy_consent_declined_hud">未同意隐私说明，SDK 保持未初始化</string>
+
+    <!-- Progressive 3-tier scan labels -->
+    <string name="tier_stage_critical_running">阶段 1/3 · CRITICAL 核心完整性检测…</string>
+    <string name="tier_stage_fast_running">阶段 1/3 CRITICAL 完成（%1$d ms）· 进入 FAST 快速评估…</string>
+    <string name="tier_stage_postponed_running">阶段 2/3 FAST 完成（%1$d ms）· 进入 POSTPONED 深度与指纹聚合…</string>
+    <string name="tier_stage_complete">阶段 3/3 全部检测完成</string>
+    <string name="tier_badge_critical">1/3 CRIT</string>
+    <string name="tier_badge_fast">2/3 FAST</string>
+    <string name="tier_badge_postponed">3/3 DEEP</string>
+    <string name="tier_badge_done">3/3 DONE</string>
 
     <!-- Error state -->
     <string name="collection_failed">检测未完成</string>
@@ -31,10 +50,42 @@
     <!-- Hero & metrics -->
     <string name="hero_meta">%1$s · %2$s</string>
     <string name="metric_attention_label">需关注</string>
+    <string name="metric_confidence_label">置信度</string>
     <string name="metric_coverage_label">覆盖率</string>
-    <string name="metric_fields_label">指纹字段</string>
+    <string name="metric_fields_label">指纹项</string>
     <string name="coverage_percent">%1$d%%</string>
-    <string name="risk_progress_value">风险分 %1$d，满分阈值 %2$d</string>
+    <string name="risk_progress_value">风险分 %1$d，满分 %2$d</string>
+    <string name="hero_dimensions_title">四维风险评估</string>
+    <string name="hero_breakdown_action">评分归因</string>
+    <string name="hero_hard_trigger_badge">Hard Trigger ×%1$d</string>
+
+    <!-- RiskAction dispositions -->
+    <string name="action_allow">建议放行</string>
+    <string name="action_challenge">建议二次验证</string>
+    <string name="action_restrict">建议限制权限</string>
+    <string name="action_block">建议拦截处置</string>
+    <string name="action_review">建议人工复核</string>
+    <string name="action_desc_allow">当前环境安全或仅存在提示性信号，可正常放行业务流程。</string>
+    <string name="action_desc_challenge">存在中度风险信号，建议触发增强校验（如人脸/短信/人机验证）。</string>
+    <string name="action_desc_restrict">检出高置信度风险，建议限制敏感操作或降级核心权限。</string>
+    <string name="action_desc_block">检出严重风险或命中 Hard Trigger，建议立即阻断当前操作。</string>
+    <string name="action_desc_review">评估置信度不足或关键检测域未完成，建议转人工/二次复核。</string>
+
+    <!-- RiskDimension labels & scopes -->
+    <string name="dimension_tampering">运行时篡改</string>
+    <string name="dimension_privilege">特权与完整性</string>
+    <string name="dimension_environment">虚拟与高危环境</string>
+    <string name="dimension_fraud_context">欺诈与交互风险</string>
+    <string name="dimension_desc_tampering">代码注入、Hook 框架、调试器、应用防篡改与 TEE 信任根</string>
+    <string name="dimension_desc_privilege">Root 框架、启动链校验、属性/硬件伪造、隐藏对抗、第三方 ROM 与 ADB</string>
+    <string name="dimension_desc_environment">模拟器、云手机、多开虚拟容器与高危工具应用</string>
+    <string name="dimension_desc_fraud_context">网络抓包代理、定位模拟、屏幕远控与电诈通话场景</string>
+
+    <!-- CollectScene labels -->
+    <string name="scene_standard">标准场景</string>
+    <string name="scene_login">登录场景</string>
+    <string name="scene_payment">支付场景</string>
+    <string name="scene_diagnostic">诊断场景</string>
 
     <!-- Segments & filters -->
     <string name="segment_detections_count">安全检测 %1$d</string>
@@ -49,12 +100,50 @@
     <!-- Section labels -->
     <string name="inconsistent_title">多源数据不一致</string>
     <string name="inconsistent_banner_subtitle">发现 %1$d 项字段存在来源冲突，点击查看比对详情</string>
-    <string name="identity_card_title">分层设备指纹</string>
+    <string name="identity_card_title">分层设备指纹与连续性</string>
     <string name="identity_hardware_coverage">硬件层覆盖 %1$d%% (%2$d/%3$d)</string>
     <string name="identity_composite">复合标识</string>
     <string name="identity_hardware">硬件层</string>
     <string name="identity_system">系统层</string>
     <string name="identity_volatile">易变层</string>
+    <string name="identity_continuity_section">连续性与硬件绑定</string>
+    <string name="identity_buckets_section">物理硬件分桶摘要</string>
+    <string name="identity_meta_version">指纹版本</string>
+    <string name="identity_meta_stability">稳定档位</string>
+    <string name="identity_meta_drift">硬件锚点漂移</string>
+    <string name="identity_meta_drift_value">%1$d 次</string>
+    <string name="identity_meta_binding">密钥绑定状态</string>
+    <string name="identity_binding_ok">正常（%1$s）</string>
+    <string name="identity_binding_ok_generic">正常</string>
+    <string name="identity_binding_broken">绑定校验失效（device_binding_broken）</string>
+    <string name="identity_binding_reset">锁屏/生物识别已重置</string>
+    <string name="identity_reset_baseline_action">重置基线</string>
+    <string name="identity_reset_dialog_title">重置设备指纹基线？</string>
+    <string name="identity_reset_dialog_message">将清除当前锚定的硬件基线与漂移计数（保留本地随机盐），下次检测将重新建立锚点基线。</string>
+    <string name="identity_reset_dialog_confirm">确认重置</string>
+    <string name="identity_reset_dialog_cancel">取消</string>
+    <string name="identity_reset_success_hud">已重置设备指纹基线，下次检测将重建锚点</string>
+    <string name="bucket_gpu">GPU 渲染桶</string>
+    <string name="bucket_cpu">CPU 拓扑桶</string>
+    <string name="bucket_sensor">传感器桶</string>
+    <string name="bucket_camera">摄像头桶</string>
+    <string name="bucket_memory_battery">内存与电池桶</string>
+
+    <!-- Live threat & device posture stream drawer -->
+    <string name="threat_stream_pill_label">推送流</string>
+    <string name="threat_stream_pill_count">推送流 %1$d</string>
+    <string name="threat_stream_button_desc">打开实时威胁与设备态势流</string>
+    <string name="threat_stream_title">实时威胁与态势流</string>
+    <string name="threat_stream_badge_live">实时推送 · %1$d 条</string>
+    <string name="threat_stream_badge_idle">实时推送 · 监听中</string>
+    <string name="threat_stream_section_posture">最新设备态势（DeviceStateListener）</string>
+    <string name="threat_stream_section_events">威胁与运行时篡改事件（ThreatListener）</string>
+    <string name="threat_stream_empty_events">暂无威胁推送事件，分层扫描与后台周期监控命中后将实时追加至此。</string>
+    <string name="threat_stream_empty_posture">尚未收到设备安全态势回调。</string>
+    <string name="threat_stream_runtime_tamper_tag">运行时篡改</string>
+    <string name="threat_stream_clear_action">清空记录</string>
+    <string name="threat_stream_cleared_hud">已清空实时推送流</string>
+    <string name="threat_stream_live_alert_hud">实时篡改告警：%1$s</string>
     <string name="fingerprint_section_collected">设备属性 · %1$d 项</string>
     <string name="fingerprint_section_synthetic">SDK 合成分析 · %1$d 项</string>
     <string name="coverage_gaps_footer">另有 %1$d 项采集覆盖缺口已计入覆盖率，可在设备指纹中查看</string>
@@ -66,11 +155,12 @@
     <string name="sheet_section_diagnostics">运行环境信息</string>
     <string name="sheet_section_failures">未完成子项</string>
     <string name="sheet_section_sources">来源与取值</string>
+    <string name="sheet_section_detector_breakdown">关联评分归因</string>
     <string name="finding_label_location">检出位置</string>
     <string name="finding_label_content">检出内容</string>
     <string name="finding_label_risk">风险说明</string>
     <string name="sheet_meta_execution">执行状态</string>
-    <string name="sheet_meta_score">单项评分</string>
+    <string name="sheet_meta_score">单项强度</string>
     <string name="sheet_meta_coverage">子项覆盖</string>
     <string name="sheet_meta_field_id">字段标识</string>
     <string name="sheet_meta_sensitivity">隐私分级</string>
@@ -81,6 +171,35 @@
     <string name="sheet_coverage_value">%1$d / %2$d</string>
     <string name="sheet_no_evidence">未检出异常风险项</string>
     <string name="row_content_description">%1$s，%2$s，轻触查看详情</string>
+
+    <!-- Score breakdown detail sheet -->
+    <string name="breakdown_sheet_title">评分归因与决策详情</string>
+    <string name="breakdown_section_overview">综合评分与决策</string>
+    <string name="breakdown_section_dimensions">四维风险子分（0–100）</string>
+    <string name="breakdown_section_hard_triggers">Hard Trigger 强触发规则</string>
+    <string name="breakdown_section_entries">Score Breakdown 逐项归因</string>
+    <string name="breakdown_meta_score">综合风险分</string>
+    <string name="breakdown_meta_action">推荐处置动作</string>
+    <string name="breakdown_meta_confidence">评估置信度</string>
+    <string name="breakdown_meta_coverage">检测覆盖率</string>
+    <string name="breakdown_meta_scene">评估场景</string>
+    <string name="breakdown_meta_prefloor">保底前综合分</string>
+    <string name="breakdown_score_with_level">%1$d / %2$d · %3$s</string>
+    <string name="breakdown_coverage_detail">%1$d%%（%2$d / %3$d）</string>
+    <string name="breakdown_cat_family">证据家族</string>
+    <string name="breakdown_cat_corroboration">印证加权</string>
+    <string name="breakdown_cat_correlation">关联规则</string>
+    <string name="breakdown_cat_hard_trigger">Hard Trigger 保底</string>
+    <string name="breakdown_cross_dimension">全局裁决</string>
+    <string name="breakdown_empty_safe">未命中可计分风险项，四维风险子分均为 0 / 100。</string>
+    <string name="breakdown_empty_info">仅存在提示性信号（不计分），综合风险分保持 0 / 100。</string>
+    <string name="breakdown_empty_unknown">评估置信度不足或关键检测域未完成，暂无法确认环境安全。</string>
+    <string name="breakdown_summary_clean">未命中可计分项 · 点击查看四维与决策说明</string>
+    <string name="breakdown_summary_info">仅提示性信号（0 分）· 点击查看决策说明</string>
+    <string name="breakdown_summary_unknown">关键探针未完成 · 点击查看置信度与覆盖详情</string>
+    <string name="breakdown_summary_entries">%1$d 项归因参与评分 · 点击展开逐项明细</string>
+    <string name="breakdown_summary_hard_trigger">命中 %1$d 项 Hard Trigger（保底 %2$d 分）· 点击查看</string>
+    <string name="breakdown_hard_trigger_hint">命中不可抵赖高危特征，自动锁定严重风险并保底 95–100 分。</string>
 
     <!-- Detection & risk summaries -->
     <string name="detection_unavailable_summary">检测%1$s，已计入覆盖不足。</string>
@@ -141,6 +260,13 @@
     <string name="detector_correlation">交叉规则</string>
     <string name="detector_consistency">系统信息防篡改</string>
     <string name="detector_fingerprint_continuity">设备指纹连续性</string>
+    <string name="detector_app_integrity">应用防篡改</string>
+    <string name="detector_multi_instance">多开与虚拟容器</string>
+    <string name="detector_network_risk">网络与中间人</string>
+    <string name="detector_location_risk">位置模拟</string>
+    <string name="detector_screen_and_fraud">屏幕远控与防电诈</string>
+    <string name="detector_tee_integrity">TEE 硬件信任根</string>
+    <string name="detector_threat_apps">高危应用与隐藏对抗</string>
     <string name="detector_collector_coverage">采集覆盖 · %1$s</string>
     <string name="detector_other">其他检测</string>
 
@@ -160,6 +286,9 @@
     <string name="collector_cpu_topology">CPU 拓扑结构</string>
     <string name="collector_hardware_profile">硬件配置画像</string>
     <string name="collector_partition_fingerprints">系统分区指纹</string>
+    <string name="collector_codec_info">媒体编解码器</string>
+    <string name="collector_input_devices">输入设备拓扑</string>
+    <string name="collector_security_posture">安全卫生态势</string>
     <string name="collector_drm">DRM 标识哈希</string>
     <string name="collector_boot">启动标识哈希</string>
     <string name="collector_properties">系统属性</string>
@@ -261,7 +390,7 @@
     <string name="sensitivity_non_sensitive">非敏感属性</string>
 
     <!-- Redacted report export -->
-    <string name="redacted_report_header">RiskEngine SDK %1$s\n风险等级：%2$s\n风险分：%3$d / %4$d\n覆盖：%5$d / %6$d\n高危/提醒/未完成：%7$d/%8$d/%9$d\n检测结果：</string>
+    <string name="redacted_report_header">RiskEngine SDK %1$s\n风险等级：%2$s\n风险分：%3$d / %4$d\n推荐动作：%5$s\n评估置信度：%6$d%% · 覆盖：%7$d / %8$d\n高危/提醒/未完成：%9$d/%10$d/%11$d</string>
     <string name="redacted_report_item">\n- %1$s：%2$s</string>
     <string name="redacted_report_reason"> · %1$s</string>
     <string name="redacted_report_footer">\n\n已脱敏：未包含设备标识哈希、原始系统属性、文件路径或进程 PID。</string>

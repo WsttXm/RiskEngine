@@ -87,6 +87,12 @@ public class RootPathListConsistencyTest {
         for (String pkg : DetectionLists.CLOUD_PACKAGES) {
             assertTrue("Missing <queries> for cloud pkg: " + pkg, declared.contains(pkg));
         }
+        for (String pkg : com.wsttxm.riskenginesdk.detector.NetworkRiskDetector
+                .KNOWN_PROXY_TOOL_CERT_SHA256.keySet()) {
+            assertTrue("Missing <queries> for proxy pkg: " + pkg, declared.contains(pkg));
+        }
+        assertFalse("SDK manifest must not declare <uses-permission>",
+                manifest.contains("<uses-permission"));
     }
 
     private static String readUtf8(Path path) throws IOException {

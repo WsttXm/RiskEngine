@@ -1,10 +1,10 @@
 #include "syscall_wrapper.h"
+#include "mylibc.h"
 #include "raw_syscall.h"
 
 #include <algorithm>
 #include <errno.h>
 #include <fcntl.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -31,15 +31,6 @@ constexpr long kFstatatNr = __NR_fstatat64;
 #else
 constexpr long kFstatatNr = __NR_fstatat;
 #endif
-
-// armeabi routes through __NR_statfs64 below and never reads this constant.
-#if defined(__NR_statfs)
-[[maybe_unused]] constexpr long kStatfsNr = __NR_statfs;
-#elif defined(__NR_statfs64)
-[[maybe_unused]] constexpr long kStatfsNr = __NR_statfs64;
-#else
-#error "statfs syscall number missing"
-#endif
 }  // namespace
 
 int raw_last_error() {
@@ -51,8 +42,12 @@ long my_openat(int dirfd, const char *path, int flags, mode_t mode) {
         g_raw_errno = EFAULT;
         return -1;
     }
-    return normalize(raw_syscall4(__NR_openat, dirfd, reinterpret_cast<long>(path),
-                                  flags, static_cast<long>(mode)));
+    long ret;
+    do {
+        ret = raw_syscall4(__NR_openat, dirfd, reinterpret_cast<long>(path),
+                           flags, static_cast<long>(mode));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
 }
 
 long my_read(int fd, void *buf, size_t count) {
@@ -124,8 +119,17 @@ long my_faccessat(int dirfd, const char *path, int mode, int flags) {
         g_raw_errno = EFAULT;
         return -1;
     }
-    return normalize(raw_syscall4(__NR_faccessat, dirfd, reinterpret_cast<long>(path),
-                                  mode, flags));
+    if (flags == 0) {
+        return normalize(raw_syscall3(__NR_faccessat, dirfd,
+                                      reinterpret_cast<long>(path), mode));
+    }
+#if defined(__NR_faccessat2)
+    return normalize(raw_syscall4(__NR_faccessat2, dirfd,
+                                  reinterpret_cast<long>(path), mode, flags));
+#else
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
 }
 
 long my_access(const char *path, int mode) {
@@ -168,12 +172,15 @@ long my_statfs(const char *path, struct statfs *buf) {
         g_raw_errno = EFAULT;
         return -1;
     }
-#if defined(__NR_statfs64) && defined(__arm__)
+#if defined(__NR_statfs64) && (defined(__arm__) || defined(__i386__))
     return normalize(raw_syscall3(__NR_statfs64, reinterpret_cast<long>(path),
-                                  sizeof(*buf), reinterpret_cast<long>(buf)));
-#else
-    return normalize(raw_syscall2(kStatfsNr, reinterpret_cast<long>(path),
+                                  static_cast<long>(sizeof(*buf)),
                                   reinterpret_cast<long>(buf)));
+#elif defined(__NR_statfs)
+    return normalize(raw_syscall2(__NR_statfs, reinterpret_cast<long>(path),
+                                  reinterpret_cast<long>(buf)));
+#else
+#error "statfs syscall number missing"
 #endif
 }
 
@@ -186,17 +193,17 @@ long my_uname(struct utsname *buf) {
 }
 
 long my_mmap(void *addr, size_t length, int prot, int flags, int fd, long offset) {
-#if defined(__i386__)
-    (void) addr; (void) length; (void) prot; (void) flags; (void) fd; (void) offset;
-    g_raw_errno = ENOSYS;
-    return -1;
-#elif defined(__NR_mmap)
+#if defined(__NR_mmap) && !defined(__i386__)
     return normalize(raw_syscall6(__NR_mmap, reinterpret_cast<long>(addr),
                                   static_cast<long>(length), prot, flags, fd, offset));
 #elif defined(__NR_mmap2)
+    if ((offset & 4095L) != 0) {
+        g_raw_errno = EINVAL;
+        return -1;
+    }
     return normalize(raw_syscall6(__NR_mmap2, reinterpret_cast<long>(addr),
                                   static_cast<long>(length), prot, flags, fd,
-                                  offset / 4096));
+                                  static_cast<long>(static_cast<unsigned long>(offset) >> 12)));
 #else
 #error "mmap syscall number missing"
 #endif
@@ -220,6 +227,335 @@ long my_getppid(void) {
 
 long my_gettid(void) {
     return normalize(raw_syscall0(__NR_gettid));
+}
+
+long my_getcpu(unsigned *cpu, unsigned *node) {
+#if defined(__NR_getcpu)
+    return normalize(raw_syscall3(__NR_getcpu,
+                                  reinterpret_cast<long>(cpu),
+                                  reinterpret_cast<long>(node), 0));
+#else
+    (void) cpu;
+    (void) node;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_statx(int dirfd, const char *path, int flags, unsigned int mask, void *stx_buf) {
+    if (path == nullptr || stx_buf == nullptr) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_statx)
+    long ret;
+    do {
+        ret = raw_syscall5(__NR_statx, dirfd, reinterpret_cast<long>(path),
+                           flags, static_cast<long>(mask),
+                           reinterpret_cast<long>(stx_buf));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) dirfd;
+    (void) flags;
+    (void) mask;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_getxattr(const char *path, const char *name, void *value, size_t size) {
+    if (path == nullptr || name == nullptr || (value == nullptr && size > 0)) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_getxattr)
+    long ret;
+    do {
+        ret = raw_syscall4(__NR_getxattr, reinterpret_cast<long>(path),
+                           reinterpret_cast<long>(name),
+                           reinterpret_cast<long>(value),
+                           static_cast<long>(size));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_lgetxattr(const char *path, const char *name, void *value, size_t size) {
+    if (path == nullptr || name == nullptr || (value == nullptr && size > 0)) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_lgetxattr)
+    long ret;
+    do {
+        ret = raw_syscall4(__NR_lgetxattr, reinterpret_cast<long>(path),
+                           reinterpret_cast<long>(name),
+                           reinterpret_cast<long>(value),
+                           static_cast<long>(size));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_truncate(const char *path, off_t length) {
+    if (path == nullptr) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_truncate)
+    long ret;
+    do {
+        ret = raw_syscall2(__NR_truncate, reinterpret_cast<long>(path),
+                           static_cast<long>(length));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) length;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_mincore(void *addr, size_t length, unsigned char *vec) {
+    if (vec == nullptr && length > 0) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_mincore)
+    long ret;
+    do {
+        ret = raw_syscall3(__NR_mincore, reinterpret_cast<long>(addr),
+                           static_cast<long>(length),
+                           reinterpret_cast<long>(vec));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) addr;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_setresuid(uid_t ruid, uid_t euid, uid_t suid) {
+#if defined(__NR_setresuid32)
+    return normalize(raw_syscall3(__NR_setresuid32,
+                                  static_cast<long>(ruid),
+                                  static_cast<long>(euid),
+                                  static_cast<long>(suid)));
+#elif defined(__NR_setresuid)
+    return normalize(raw_syscall3(__NR_setresuid,
+                                  static_cast<long>(ruid),
+                                  static_cast<long>(euid),
+                                  static_cast<long>(suid)));
+#else
+    (void) ruid;
+    (void) euid;
+    (void) suid;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_reboot(unsigned int magic1, unsigned int magic2, unsigned int cmd, void *arg) {
+#if defined(__NR_reboot)
+    return normalize(raw_syscall4(__NR_reboot,
+                                  static_cast<long>(magic1),
+                                  static_cast<long>(magic2),
+                                  static_cast<long>(cmd),
+                                  reinterpret_cast<long>(arg)));
+#else
+    (void) magic1;
+    (void) magic2;
+    (void) cmd;
+    (void) arg;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_ioctl(int fd, unsigned long request, unsigned long arg) {
+#if defined(__NR_ioctl)
+    long ret;
+    do {
+        ret = raw_syscall3(__NR_ioctl, fd,
+                           static_cast<long>(request),
+                           static_cast<long>(arg));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) fd;
+    (void) request;
+    (void) arg;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_socket(int domain, int type, int protocol) {
+#if defined(__NR_socket)
+    return normalize(raw_syscall3(__NR_socket, domain, type, protocol));
+#else
+    (void) domain;
+    (void) type;
+    (void) protocol;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (addr == nullptr && addrlen > 0) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_bind)
+    long ret;
+    do {
+        ret = raw_syscall3(__NR_bind, sockfd,
+                           reinterpret_cast<long>(addr),
+                           static_cast<long>(addrlen));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) sockfd;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_sendto(int sockfd, const void *buf, size_t len, int flags,
+               const struct sockaddr *dest_addr, socklen_t addrlen) {
+    if ((buf == nullptr && len > 0) || (dest_addr == nullptr && addrlen > 0)) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_sendto)
+    long ret;
+    do {
+        ret = raw_syscall6(__NR_sendto, sockfd,
+                           reinterpret_cast<long>(buf),
+                           static_cast<long>(len),
+                           flags,
+                           reinterpret_cast<long>(dest_addr),
+                           static_cast<long>(addrlen));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) sockfd;
+    (void) flags;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_recvfrom(int sockfd, void *buf, size_t len, int flags,
+                 struct sockaddr *src_addr, socklen_t *addrlen) {
+    if (buf == nullptr && len > 0) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_recvfrom)
+    long ret;
+    do {
+        ret = raw_syscall6(__NR_recvfrom, sockfd,
+                           reinterpret_cast<long>(buf),
+                           static_cast<long>(len),
+                           flags,
+                           reinterpret_cast<long>(src_addr),
+                           reinterpret_cast<long>(addrlen));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) sockfd;
+    (void) flags;
+    (void) src_addr;
+    (void) addrlen;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_openat2(int dirfd, const char *path, const void *how, size_t size) {
+    if (path == nullptr || how == nullptr) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_openat2)
+    long ret;
+    do {
+        ret = raw_syscall4(__NR_openat2, dirfd,
+                           reinterpret_cast<long>(path),
+                           reinterpret_cast<long>(how),
+                           static_cast<long>(size));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) dirfd;
+    (void) size;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_memfd_create(const char *name, unsigned int flags) {
+    if (name == nullptr) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_memfd_create)
+    return normalize(raw_syscall2(__NR_memfd_create,
+                                  reinterpret_cast<long>(name),
+                                  static_cast<long>(flags)));
+#else
+    (void) flags;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_pidfd_open(pid_t pid, unsigned int flags) {
+#if defined(__NR_pidfd_open)
+    return normalize(raw_syscall2(__NR_pidfd_open,
+                                  static_cast<long>(pid),
+                                  static_cast<long>(flags)));
+#else
+    (void) pid;
+    (void) flags;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
+}
+
+long my_renameat2(int olddirfd, const char *oldpath,
+                  int newdirfd, const char *newpath, unsigned int flags) {
+    if (oldpath == nullptr || newpath == nullptr) {
+        g_raw_errno = EFAULT;
+        return -1;
+    }
+#if defined(__NR_renameat2)
+    long ret;
+    do {
+        ret = raw_syscall5(__NR_renameat2, olddirfd,
+                           reinterpret_cast<long>(oldpath),
+                           newdirfd,
+                           reinterpret_cast<long>(newpath),
+                           static_cast<long>(flags));
+    } while (is_error(ret) && (-ret) == EINTR);
+    return normalize(ret);
+#else
+    (void) olddirfd;
+    (void) newdirfd;
+    (void) flags;
+    g_raw_errno = ENOSYS;
+    return -1;
+#endif
 }
 
 std::string read_file_string(const char *path, size_t max_bytes) {
@@ -247,7 +583,7 @@ int read_file_content(const char *path, char *buf, size_t bufsize) {
     int fd = (int) my_openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC, 0);
     if (fd < 0) return -1;
 
-    memset(buf, 0, bufsize);
+    my_memset(buf, 0, bufsize);
     ssize_t total = 0;
     while (total < (ssize_t) (bufsize - 1)) {
         long n = my_read(fd, buf + total, bufsize - 1 - total);

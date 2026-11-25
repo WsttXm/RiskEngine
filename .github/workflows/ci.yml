@@ -23,7 +23,7 @@ jobs:
       - name: Set up Android build environment
         uses: ./.github/actions/setup-android-env
 
-      - name: Test, lint, build, and verify artifacts
+      - name: Run full CI verification (Gates 1-6, L1 JVM, L2 C++ tests, L3 APK assembly)
         run: ./scripts/ci-verify.sh
 
       - name: Upload CI artifacts
@@ -35,4 +35,50 @@ jobs:
             riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar
             riskengine-sdk/build/publications/release/pom-default.xml
             demo/build/outputs/apk/debug/demo-debug.apk
+            integration-test/build/outputs/apk/debug/integration-test-debug.apk
+            integration-test/build/outputs/apk/androidTest/debug/integration-test-debug-androidTest.apk
           if-no-files-found: error
+
+  instrumented-matrix:
+    name: L3 Instrumented (API ${{ matrix.api-level }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [30, 34, 36]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Android build environment
+        uses: ./.github/actions/setup-android-env
+
+      - name: Pre-build release AAR and L3 instrumentation APKs
+        run: ./gradlew :integration-test:assembleDebug :integration-test:assembleDebugAndroidTest --no-daemon
+
+      - name: Run L3 integration-test instrumentation on API ${{ matrix.api-level }} KVM emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: ./gradlew :integration-test:connectedDebugAndroidTest --no-daemon
+
+      - name: Upload L3 instrumentation test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: l3-androidTest-api${{ matrix.api-level }}-${{ github.sha }}
+          path: integration-test/build/reports/androidTests/connected/
+          if-no-files-found: ignore
