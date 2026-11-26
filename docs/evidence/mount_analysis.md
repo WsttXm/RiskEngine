@@ -28,7 +28,7 @@
 
 ## Applicable API Range
 
-- **Java mount tables & native `statfs`/`rw`/`st_mtime`**: Android 11–17 (API 30–37), all 4 ABIs.
+- **Java mount tables & native `statfs`/`rw`/`st_mtime`**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **`statx(STATX_MNT_ID)`**: Linux kernel `>= 5.8` (gracefully skipped when kernel does not set `STATX_MNT_ID` in `stx_mask`).
 - **`RiskIsolatedProbeService`**: Android 11–17 (API 30–37) when `config.isEnableIsolatedProcessProbe()` is `true` and service is present in host manifest.
 

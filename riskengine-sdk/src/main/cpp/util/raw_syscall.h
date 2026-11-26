@@ -3,7 +3,11 @@
 
 #include <sys/syscall.h>
 
-// Direct SVC/syscall instructions. Do not call libc syscall().
+// Direct SVC/syscall instructions for 64-bit ABIs (arm64-v8a, x86_64). Do not call libc syscall().
+#if !defined(__LP64__)
+#error "RiskEngine requires a 64-bit ABI (arm64-v8a or x86_64)"
+#endif
+
 #if defined(__aarch64__)
 static inline long raw_syscall6(long n, long a0, long a1, long a2,
                                 long a3, long a4, long a5) {
@@ -19,26 +23,6 @@ static inline long raw_syscall6(long n, long a0, long a1, long a2,
                      : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5)
                      : "memory", "cc");
     return x0;
-}
-#elif defined(__arm__)
-static inline long raw_syscall6(long n, long a0, long a1, long a2,
-                                long a3, long a4, long a5) {
-    register long r0 __asm__("r0") = a0;
-    register long r1 __asm__("r1") = a1;
-    register long r2 __asm__("r2") = a2;
-    register long r3 __asm__("r3") = a3;
-    register long r4 __asm__("r4") = a4;
-    register long r5 __asm__("r5") = a5;
-    register long nr __asm__("r6") = n;
-    __asm__ volatile(
-            "push {r7}\n\t"
-            "mov r7, r6\n\t"
-            "svc #0\n\t"
-            "pop {r7}\n\t"
-            : "+r"(r0)
-            : "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5), "r"(nr)
-            : "memory", "cc");
-    return r0;
 }
 #elif defined(__x86_64__)
 static inline long raw_syscall6(long n, long a0, long a1, long a2,
@@ -56,31 +40,8 @@ static inline long raw_syscall6(long n, long a0, long a1, long a2,
                      : "rcx", "r11", "memory", "cc");
     return rax;
 }
-#elif defined(__i386__)
-static inline long raw_syscall6(long n, long a0, long a1, long a2,
-                                long a3, long a4, long a5) {
-    long args[7] = {n, a0, a1, a2, a3, a4, a5};
-    long ret;
-    __asm__ volatile(
-            "pushl %%ebx\n\t"
-            "pushl %%ebp\n\t"
-            "movl 4(%%eax), %%ebx\n\t"
-            "movl 8(%%eax), %%ecx\n\t"
-            "movl 12(%%eax), %%edx\n\t"
-            "movl 16(%%eax), %%esi\n\t"
-            "movl 20(%%eax), %%edi\n\t"
-            "movl 24(%%eax), %%ebp\n\t"
-            "movl 0(%%eax), %%eax\n\t"
-            "int $0x80\n\t"
-            "popl %%ebp\n\t"
-            "popl %%ebx"
-            : "=a"(ret)
-            : "a"(args), "m"(args)
-            : "ecx", "edx", "esi", "edi", "memory", "cc");
-    return ret;
-}
 #else
-#error "unsupported ABI for raw_syscall"
+#error "unsupported 64-bit ABI for raw_syscall"
 #endif
 
 static inline long raw_syscall0(long n) {

@@ -31,7 +31,7 @@
 
 ## Applicable API Range
 
-- **Core path, SELinux enforce, `Build.TAGS`**: Android 11–17 (API 30–37), all 4 ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
+- **Core path, SELinux enforce, `Build.TAGS`**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **KernelPatch `sys_truncate` & KernelSU `prctl` timing**: ARM64 only; negative residency trust scope restricted to Linux kernels `<= 6.6`.
 - **Netlink `RTM_GETLINK` boundary**: `(sdk >= 30 && targetSdk >= 30) || sdk >= 33`.
 - **Netlink `RTM_GETNEIGH` boundary**: `sdk >= 33 && targetSdk >= 32`.

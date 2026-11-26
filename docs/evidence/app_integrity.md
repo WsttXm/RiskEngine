@@ -29,7 +29,7 @@
 
 ## Applicable API Range
 
-- Android 11–17 (API 30–37), all 4 ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`). `v3.1` (`0x1b93ad61`) precedence applies on API `>= 33`.
+- Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`). `v3.1` (`0x1b93ad61`) precedence applies on API `>= 33`.
 
 ## Visibility Boundaries
 

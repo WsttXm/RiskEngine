@@ -52,12 +52,8 @@ constexpr int kQueryTrapExitStatus = 126;
 
 #if defined(__aarch64__)
 constexpr uint32_t kAuditArch = AUDIT_ARCH_AARCH64;
-#elif defined(__arm__)
-constexpr uint32_t kAuditArch = AUDIT_ARCH_ARM;
 #elif defined(__x86_64__)
 constexpr uint32_t kAuditArch = AUDIT_ARCH_X86_64;
-#elif defined(__i386__)
-constexpr uint32_t kAuditArch = AUDIT_ARCH_I386;
 #else
 constexpr uint32_t kAuditArch = 0;
 #endif

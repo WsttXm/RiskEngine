@@ -4,11 +4,10 @@
 #include <cstddef>
 #include <elf.h>
 
-#if defined(__LP64__)
-#define ElfW(type) Elf64_##type
-#else
-#define ElfW(type) Elf32_##type
+#if !defined(__LP64__)
+#error "RiskEngine host tests require a 64-bit host"
 #endif
+#define ElfW(type) Elf64_##type
 
 struct dl_phdr_info {
     ElfW(Addr) dlpi_addr;

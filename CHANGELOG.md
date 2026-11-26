@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [v2.0.1] - 2026-11-26
+
+### 移除 32 位 Native ABI 支持（Drop 32-Bit Native ABIs — ADR-0003）
+- **仅保留 64 位 Native ABI（`arm64-v8a`、`x86_64`）**：从 `:riskengine-sdk` 的 `abiFilters` 中移除 `armeabi-v7a` 与 `x86`，并在 `CMakeLists.txt` 与核心原生头文件加入编译期 64 位断言（`!defined(__LP64__)` 快速失败）。
+- **彻底清理 C++ 32 位死代码与宿主单测**：移除 `raw_syscall.h`、`syscall_wrapper.cpp`、`native_integrity.cpp`、`tee_binder_probe.cpp`、`zygisk_atexit_probe.cpp`、`custom_rom_probe.cpp`、`hma_uid_probe.cpp` 与 `runtime_arch_checker.cpp` 中的 ARM32/i386 内联汇编、32 位系统调用适配、ARM32/x86-32 跳板解码器及 `Elf32_*` 路径，同步精简 L2 C++ 宿主测试与 macOS `host_shims`。外部伪造/转译环境检测（如 `i386`/`i686` 属性一致性与 Houdini 检测）完整保留。
+- **收紧 ELF 门禁与文档防漂移校验**：`scripts/check-elf-hardening.sh` 更新为严格校验 2 个 64 位 ABI 并将 Release AAR 体积上限从 `8 MiB` 收紧至 `4 MiB`；新增 [`ADR-0003`](https://github.com/WsttXm/RiskEngine/blob/v2.0.1/docs/adr/0003-drop-32bit-abi-support.md) 记录架构决策与宿主 64 位集成约束，并在 `scripts/test_static_gates.py` 中增加活跃文档防回流断言。
+
+### Android CI 稳定性修复（L3 KVM Emulator Hardening）
+- **修复 API 30 L3 模拟器启动 `DeadSystemException` 偶发失败**：新增可控仓库内脚本 `scripts/ci-run-emulator.sh` 替代 `.github/workflows/ci.yml` 中的 `reactivecircus/android-emulator-runner@v2`，显式配置 `-memory 4096 -cores 2 -no-snapshot-load -no-snapshot-save`，在 `sys.boot_completed=1` 之后继续校验 `dev.bootcomplete=1` 与 `input`/`package` 系统服务真正就绪并支持瞬态异常退避重试与整机重启自愈（最多重试 1 次），失败时自动归档 `emulator.log` 与 `logcat` 以便排障。
+
+---
+
 ## [v2.0.0] - 2026-11-26
 
 ### 单核三模块收敛与 16 大检测域（Single-Core Consolidation & 16 Converged Domains）

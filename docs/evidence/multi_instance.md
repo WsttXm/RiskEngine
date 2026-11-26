@@ -30,7 +30,7 @@
 
 ## Applicable API Range
 
-- **FAST path & Child 1A (`statx`/`memfd_create`/`renameat2`)**: Android 11–17 (API 30–37), all 4 ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
+- **FAST path & Child 1A (`statx`/`memfd_create`/`renameat2`)**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **Child 1B (`openat2`/`pidfd_open`)**: Supported kernels/seccomp policies (gracefully skipped on Android 11 seccomp `SIGSYS`).
 
 ## Visibility Boundaries

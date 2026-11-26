@@ -6,7 +6,7 @@ Android 本地设备指纹采集、硬件信任根证明与运行环境风险检
 
 核心 `:riskengine-sdk` **没有服务端、没有上报通道、不依赖 Play Integrity 或 SafetyNet**。结果只在本机产出（可选通过 `SignedRiskEnvelope` `v=2` 由宿主服务端执行 6 步离线验签）。本仓库收敛为精简的 3 模块单核布局：`:riskengine-sdk`、`:demo` 与 `:integration-test`。
 
-当前开发版本为 `2.0.0-SNAPSHOT`（v2.0.0 终态版）。
+当前开发版本为 `2.0.1-SNAPSHOT`（仅保留 64 位 Native ABI，详见 [ADR-0003](./docs/adr/0003-drop-32bit-abi-support.md)）。
 
 ## 它做什么，不做什么
 
@@ -51,7 +51,7 @@ SDK **零声明 `<uses-permission>`** 且**零第三方运行时依赖**。Manif
 - Android Gradle Plugin 8.13.1
 - Compile SDK 36 / Target SDK 36 / Min SDK 30
 - NDK `27.0.12077973`，CMake `3.22.1+`，C++17（`-fno-exceptions -fno-rtti`）
-- Native ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`（16KB ELF `LOAD` 对齐）
+- Native ABI：`arm64-v8a`、`x86_64`（仅 64 位，16KB ELF `LOAD` 对齐，详见 [ADR-0003](./docs/adr/0003-drop-32bit-abi-support.md)；若宿主同时集成其他含 `.so` 的 SDK，请在宿主配置 `ndk { abiFilters += listOf("arm64-v8a") }` 或 `listOf("arm64-v8a", "x86_64")`，避免进程以 32 位模式运行导致 Native 探针降级）
 
 ## 快速开始
 
@@ -77,7 +77,7 @@ python3 -B scripts/test_verify_risk_envelope.py -v # SignedRiskEnvelope v=2 跨�
 
 | 产物 | 路径 | 说明 |
 | --- | --- | --- |
-| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | 宿主集成（4 ABI 全部 strip、无 `.comment`、仅导出 2 个 JNI 符号、16KB 对齐、单 ABI `.so <= 2000 KiB`、AAR `<= 8 MiB`、R8 Dex `< 2,500` 方法） |
+| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | 宿主集成（2 个 64 位 ABI 全部 strip、无 `.comment`、仅导出 2 个 JNI 符号、16KB 对齐、单 ABI `.so <= 2000 KiB`、AAR `<= 4 MiB`、R8 Dex `< 2,500` 方法） |
 | SDK Sources | `riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar` | 发布用源码包 |
 | Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | 临时 Debug 证书，仅供侧载 |
 | Demo Release APK | `demo/build/outputs/apk/release/demo-release-unsigned.apk` | 已混淆；分发前需正式证书签名 |
@@ -428,14 +428,14 @@ RiskEngine v2.0.0 收敛为单一零依赖核心 SDK（详见 [ADR-0001](./docs/
 
 - **6 大自动化 CI 静态治理门禁**（集成于 `scripts/ci-verify.sh` 与 `.github/workflows/ci.yml`）：
   1. **Gate 1（`scripts/check-evidence-records.py`）**：动态解析 `DetectorRegistry` 校验 `docs/evidence/*.md` 1:1 完整覆盖（16/16 检测域，每份均含 7 项必填契约章节）。
-  2. **Gate 2（`scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`）**：4-ABI ELF 加固校验（仅 2 个 JNI 导出符号、16KB `LOAD` 对齐、strip 无 `.comment`、`.so <= 2000 KiB`、AAR `<= 8 MiB`）、41/41 JNI 名称+签名精确 1:1 对齐及 Release R8 Dex `< 2,500` 方法数上限。
+  2. **Gate 2（`scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`）**：64 位双 ABI（`arm64-v8a`、`x86_64`）ELF 加固校验（仅 2 个 JNI 导出符号、16KB `LOAD` 对齐、strip 无 `.comment`、`.so <= 2000 KiB`、AAR `<= 4 MiB`）、41/41 JNI 名称+签名精确 1:1 对齐及 Release R8 Dex `< 2,500` 方法数上限。
   3. **Gate 3（`scripts/check-single-source-sync.py`）**：零 `<uses-permission>`、52 项 `<queries>` 与 `artifact_paths.ini` + `NetworkRiskDetector` 精确 1:1、`DetectionLists.java` xorshift32 字节级反解码比对与文档版本一致。
   4. **Gate 4（`scripts/check-public-api.py` / `:riskengine-sdk:apiCheck`）**：零插件 JDK 17 `javap` Public ABI 锁（`riskengine-sdk/api/riskengine-sdk.api`）、AAR `classes.jar` 纯度与零依赖 POM 校验。
   5. **Gate 5（`scripts/check-boundary-guards.py`）**：核心 Java/C++ 反射白名单与降级说明审计（封禁 D66 受限隐藏 API 反射）及禁止按 UI 展示文案分支判定。
   6. **Gate 6（`.github/workflows/refresh-attestation-roots.yml`）**：每周定时 + 手动 dry-run 核验 Google Hardware Attestation Root 与单调 CRL 底线漂移。
 - **L1 + L2 + L3 三层测试金字塔**：
   - **L1（JVM）**：核心 `:riskengine-sdk`（全部 16 检测域 fast+postponed、`0–100` 四维评分与 `RiskPolicy`、全部 24 Collector `CrashFreedomMockTest`、Java↔Python 6 步 `v=2` 离线验签黄金向量、V1/V2 指纹黄金向量）+ `:demo` 评分与格式化单元测试。
-  - **L2（离线 Native C++ 宿主机测试）**：`riskengine-sdk/src/test/cpp/`（`./scripts/run-cpp-tests.sh`）100% 离线运行 CMake/CTest，实测 `maps_parser`（>4 MiB）、`raw_dir` 畸形 fuzz、`DiskElf` 16KB/PT_LOAD、`bionic_prop_area`、`payload_codec`、4-ABI `looks_like_trampoline` 与 `crypto_mini`。
+  - **L2（离线 Native C++ 宿主机测试）**：`riskengine-sdk/src/test/cpp/`（`./scripts/run-cpp-tests.sh`）100% 离线运行 CMake/CTest，实测 `maps_parser`（>4 MiB）、`raw_dir` 畸形 fuzz、`DiskElf` 16KB/PT_LOAD、`bionic_prop_area`、`payload_codec`、64 位 `looks_like_trampoline` 与 `crypto_mini`。
   - **L3（二进制 AAR 仪器测试）**：`:integration-test` 独立消费 `riskengine-sdk-release.aar`，在 GitHub Actions Linux KVM API 30 / 34 / 36 模拟器矩阵执行端到端验证。
 - Native I/O 采用各 ABI 内联 syscall、`getdents64`、流式 `/proc/self/maps`、`pipe2(O_CLOEXEC)` `safe_mem_read`、`disposable_child` 高危系统调用隔离、`-fno-exceptions -fno-rtti`、ThinLTO 与多态 `ScopedObfString` + `secure_zero`。
 

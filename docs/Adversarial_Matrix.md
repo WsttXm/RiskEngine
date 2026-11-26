@@ -55,7 +55,7 @@ Visibility loss (`SELinux` denial, missing runtime permissions, `UNSUPPORTED`, `
 | `FAST` tier P95 latency | **< 100 ms** (Release) | Real-device & L3 instrumentation |
 | `SignedRiskEnvelope` (`PERSISTENT_KEY`) P95 | **< 10 ms** (on-SoC TEE) | `SignedEnvelopeTest` + real-device |
 | Single-ABI `libriskengine.so` size | **<= 2,000 KiB** (`2,048,000 B`) per ABI | Gate 2 (`scripts/check-elf-hardening.sh`) |
-| 4-ABI release AAR size | **<= 8 MiB** (`8,388,608 B`) | Gate 2 (`scripts/check-elf-hardening.sh`) |
+| 64-bit 2-ABI release AAR size | **<= 4 MiB** (`4,194,304 B`) | Gate 2 (`scripts/check-elf-hardening.sh`) |
 | Core Release R8 Dex method count | **< 2,500 methods** | Gate 2 (`scripts/check-jni-and-dex.py`) |
 | `libriskengine.so` ELF hardening | **2 JNI exports only** (`JNI_OnLoad`/`JNI_OnUnload`), 16KB `LOAD` align (`0x4000`), stripped, no `.comment` | Gate 2 (`scripts/check-elf-hardening.sh`) |
 | Core `:riskengine-sdk` purity | **0** third-party runtime deps, **0** `<uses-permission>`, **16/16** `docs/evidence/*.md`, **41/41** JNI 1:1, Public ABI locked | Gates 1, 3, 4, 5 (`scripts/ci-verify.sh`) |

@@ -19,15 +19,12 @@
 
 namespace {
 
-#if defined(__LP64__)
+#if !defined(__LP64__)
+#error "RiskEngine custom_rom_probe requires a 64-bit ABI (arm64-v8a or x86_64)"
+#endif
 using ElfHeader = Elf64_Ehdr;
 using ElfSection = Elf64_Shdr;
 using ElfSymbol = Elf64_Sym;
-#else
-using ElfHeader = Elf32_Ehdr;
-using ElfSection = Elf32_Shdr;
-using ElfSymbol = Elf32_Sym;
-#endif
 
 constexpr uint64_t kMaxStagefrightMapBytes = 64ULL * 1024ULL * 1024ULL;
 

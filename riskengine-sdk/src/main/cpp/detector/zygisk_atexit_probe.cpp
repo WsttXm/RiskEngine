@@ -35,26 +35,18 @@ namespace zygisk_atexit {
 
 namespace {
 
-#if UINTPTR_MAX == UINT64_MAX
+#if UINTPTR_MAX != UINT64_MAX
+#error "RiskEngine zygisk_atexit_probe requires a 64-bit ABI (arm64-v8a or x86_64)"
+#endif
 using ElfHeader = Elf64_Ehdr;
 using ElfSection = Elf64_Shdr;
 using ElfSymbol = Elf64_Sym;
 constexpr uint8_t kElfClass = ELFCLASS64;
-#else
-using ElfHeader = Elf32_Ehdr;
-using ElfSection = Elf32_Shdr;
-using ElfSymbol = Elf32_Sym;
-constexpr uint8_t kElfClass = ELFCLASS32;
-#endif
 
 #if defined(__aarch64__)
 constexpr uint16_t kElfMachine = EM_AARCH64;
-#elif defined(__arm__)
-constexpr uint16_t kElfMachine = EM_ARM;
 #elif defined(__x86_64__)
 constexpr uint16_t kElfMachine = EM_X86_64;
-#elif defined(__i386__)
-constexpr uint16_t kElfMachine = EM_386;
 #else
 constexpr uint16_t kElfMachine = EM_NONE;
 #endif
@@ -262,7 +254,7 @@ LibcObjects locate_libc_objects(const uint8_t *image, size_t image_size, uintptr
         for (size_t pos = 0; pos < table.sh_size; pos += sizeof(ElfSymbol)) {
             ElfSymbol sym {};
             read_struct(image, image_size, table.sh_offset + pos, sym);
-            if (ELF32_ST_TYPE(sym.st_info) != STT_OBJECT
+            if (ELF64_ST_TYPE(sym.st_info) != STT_OBJECT
                 || sym.st_shndx == SHN_UNDEF
                 || sym.st_shndx >= hdr.e_shnum) {
                 continue;

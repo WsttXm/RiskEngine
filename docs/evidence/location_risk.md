@@ -25,7 +25,7 @@
 
 ## Applicable API Range
 
-- **Contract canary (`lat`/`lon`/`alt`/`acc`/`time`/`reset`) & `AppOpsManager` / cached `isMock()`**: Android 11–17 (API 30–37), all 4 ABIs.
+- **Contract canary (`lat`/`lon`/`alt`/`acc`/`time`/`reset`) & `AppOpsManager` / cached `isMock()`**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **`setMock(true/false)` <-> `isMock()` canary round-trip**: Android 12–17 (API 31–37; `Location.setMock` introduced in API 31).
 
 ## Visibility Boundaries

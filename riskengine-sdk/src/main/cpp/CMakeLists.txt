@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("riskengine")
 
+if(ANDROID AND NOT ANDROID_ABI STREQUAL "arm64-v8a" AND NOT ANDROID_ABI STREQUAL "x86_64")
+    message(FATAL_ERROR "RiskEngine only supports 64-bit ABIs (arm64-v8a, x86_64); unsupported ANDROID_ABI='${ANDROID_ABI}'")
+endif()
+
 add_library(riskengine SHARED
     riskengine_jni.cpp
     util/syscall_wrapper.cpp

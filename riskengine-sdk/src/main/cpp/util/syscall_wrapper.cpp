@@ -26,10 +26,10 @@ long normalize(long ret) {
 
 #if defined(__NR_newfstatat)
 constexpr long kFstatatNr = __NR_newfstatat;
-#elif defined(__NR_fstatat64)
-constexpr long kFstatatNr = __NR_fstatat64;
-#else
+#elif defined(__NR_fstatat)
 constexpr long kFstatatNr = __NR_fstatat;
+#else
+#error "fstatat syscall number missing"
 #endif
 }  // namespace
 
@@ -73,19 +73,8 @@ long my_pread64(int fd, void *buf, size_t count, uint64_t offset) {
 #if defined(__LP64__)
         ret = raw_syscall4(__NR_pread64, fd, reinterpret_cast<long>(buf),
                            static_cast<long>(count), static_cast<long>(offset));
-#elif defined(__arm__)
-        // ARM EABI aligns 64-bit syscall arguments to an even register pair (r4, r5).
-        ret = raw_syscall6(__NR_pread64, fd, reinterpret_cast<long>(buf),
-                           static_cast<long>(count), 0,
-                           static_cast<long>(offset & 0xffffffffull),
-                           static_cast<long>(offset >> 32));
-#elif defined(__i386__)
-        ret = raw_syscall5(__NR_pread64, fd, reinterpret_cast<long>(buf),
-                           static_cast<long>(count),
-                           static_cast<long>(offset & 0xffffffffull),
-                           static_cast<long>(offset >> 32));
 #else
-        ret = -ENOSYS;
+#error "RiskEngine requires a 64-bit ABI (arm64-v8a or x86_64)"
 #endif
     } while (is_error(ret) && (-ret) == EINTR);
     return normalize(ret);
@@ -98,17 +87,6 @@ long my_close(int fd) {
 long my_lseek(int fd, long offset, int whence) {
 #if defined(__NR_lseek)
     return normalize(raw_syscall3(__NR_lseek, fd, offset, whence));
-#elif defined(__NR__llseek)
-    unsigned long result[2] = {0, 0};
-    const uint64_t off64 = static_cast<uint64_t>(offset);
-    long ret = raw_syscall5(__NR__llseek, fd,
-                            static_cast<long>(off64 >> 32),
-                            static_cast<long>(off64 & 0xffffffffull),
-                            reinterpret_cast<long>(result), whence);
-    if (normalize(ret) < 0) {
-        return -1;
-    }
-    return static_cast<long>(result[0]);
 #else
 #error "lseek syscall number missing"
 #endif
@@ -172,11 +150,7 @@ long my_statfs(const char *path, struct statfs *buf) {
         g_raw_errno = EFAULT;
         return -1;
     }
-#if defined(__NR_statfs64) && (defined(__arm__) || defined(__i386__))
-    return normalize(raw_syscall3(__NR_statfs64, reinterpret_cast<long>(path),
-                                  static_cast<long>(sizeof(*buf)),
-                                  reinterpret_cast<long>(buf)));
-#elif defined(__NR_statfs)
+#if defined(__NR_statfs)
     return normalize(raw_syscall2(__NR_statfs, reinterpret_cast<long>(path),
                                   reinterpret_cast<long>(buf)));
 #else
@@ -193,17 +167,9 @@ long my_uname(struct utsname *buf) {
 }
 
 long my_mmap(void *addr, size_t length, int prot, int flags, int fd, long offset) {
-#if defined(__NR_mmap) && !defined(__i386__)
+#if defined(__NR_mmap)
     return normalize(raw_syscall6(__NR_mmap, reinterpret_cast<long>(addr),
                                   static_cast<long>(length), prot, flags, fd, offset));
-#elif defined(__NR_mmap2)
-    if ((offset & 4095L) != 0) {
-        g_raw_errno = EINVAL;
-        return -1;
-    }
-    return normalize(raw_syscall6(__NR_mmap2, reinterpret_cast<long>(addr),
-                                  static_cast<long>(length), prot, flags, fd,
-                                  static_cast<long>(static_cast<unsigned long>(offset) >> 12)));
 #else
 #error "mmap syscall number missing"
 #endif
@@ -344,12 +310,7 @@ long my_mincore(void *addr, size_t length, unsigned char *vec) {
 }
 
 long my_setresuid(uid_t ruid, uid_t euid, uid_t suid) {
-#if defined(__NR_setresuid32)
-    return normalize(raw_syscall3(__NR_setresuid32,
-                                  static_cast<long>(ruid),
-                                  static_cast<long>(euid),
-                                  static_cast<long>(suid)));
-#elif defined(__NR_setresuid)
+#if defined(__NR_setresuid)
     return normalize(raw_syscall3(__NR_setresuid,
                                   static_cast<long>(ruid),
                                   static_cast<long>(euid),

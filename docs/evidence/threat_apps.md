@@ -30,7 +30,7 @@
 
 ## Applicable API Range
 
-- **`ThreatAppPackageProbe`, `HmaCrossUserProbe`, `HmaOrderedBroadcastProbe`, `ThanoxIpcProbe`**: Android 11–17 (API 30–37), all 4 ABIs.
+- **`ThreatAppPackageProbe`, `HmaCrossUserProbe`, `HmaOrderedBroadcastProbe`, `ThanoxIpcProbe`**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **`HmaUidVisibilityProbe`**: `seccomp-notif` requires Linux kernel `>= 5.0` (cleanly `UNSUPPORTED` on older kernels); foreign-UID vs `getPackagesForUid` cross-check runs only when the host holds `QUERY_ALL_PACKAGES`.
 - **`HmaPermissionServiceProbe`**: Strictly gated to Android 15–17 (API `>= 35`) and host `QUERY_ALL_PACKAGES` (returns `UNSUPPORTED`/`UNAVAILABLE` cleanly otherwise).
 

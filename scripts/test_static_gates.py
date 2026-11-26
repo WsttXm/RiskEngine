@@ -276,6 +276,11 @@ class StaticGatesTest(unittest.TestCase):
             "Fifteen Converged Core Detectors",
             "fixed at 18",
             "固定 18",
+            "armeabi-v7a",
+            "all 4 ABIs",
+            "4 ABIs",
+            "4 ABI",
+            "4-ABI",
         ]
         violations = []
         for rel_path in active_docs:

@@ -28,7 +28,7 @@
 
 ## Applicable API Range
 
-- Android 11–17 (API 30–37), all 4 ABIs.
+- Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 
 ## Visibility Boundaries
 

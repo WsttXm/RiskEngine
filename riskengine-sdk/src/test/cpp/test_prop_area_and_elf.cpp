@@ -197,7 +197,7 @@ std::vector<uint8_t> build_synthetic_elf(uint64_t base_offset,
     ehdr.e_ident[EI_MAG1] = ELFMAG1;
     ehdr.e_ident[EI_MAG2] = ELFMAG2;
     ehdr.e_ident[EI_MAG3] = ELFMAG3;
-    ehdr.e_ident[EI_CLASS] = kElf64 ? ELFCLASS64 : ELFCLASS32;
+    ehdr.e_ident[EI_CLASS] = ELFCLASS64;
     ehdr.e_ident[EI_DATA] = ELFDATA2LSB;
     ehdr.e_ident[EI_VERSION] = EV_CURRENT;
     ehdr.e_ehsize = sizeof(Ehdr);

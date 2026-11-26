@@ -32,9 +32,9 @@
 
 ## Applicable API Range
 
-- **Core Build/QEMU/Files/Packages/GPU/MediaCodec/Native Bridge/AVF/SensorNoise**: Android 11–17 (API 30–37), all 4 ABIs.
+- **Core Build/QEMU/Files/Packages/GPU/MediaCodec/Native Bridge/AVF/SensorNoise**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **`ro.hardware.virtual`**: Gated to `SDK_INT < 33` (denied by `default_prop` SELinux on API 33+).
-- **`arm64_clock_drift`**: `arm64-v8a` only; `sched_yield_low_cv` runs on all 4 ABIs inside `disposable_child`.
+- **`arm64_clock_drift`**: `arm64-v8a` only; `sched_yield_low_cv` runs on both 64-bit ABIs inside `disposable_child`.
 
 ## Visibility Boundaries
 

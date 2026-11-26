@@ -6,7 +6,7 @@ An Android SDK for local device fingerprinting, hardware-rooted attestation, and
 
 Core `:riskengine-sdk` has **no server, no reporting channel, and no Play Integrity or SafetyNet dependency**. Results stay on the device (with optional offline 6-step server verification via `SignedRiskEnvelope` `v=2`). The repository ships a clean 3-module single-core layout: `:riskengine-sdk`, `:demo`, and `:integration-test`.
 
-The current development version is `2.0.0-SNAPSHOT` (v2.0.0 Finalization).
+The current development version is `2.0.1-SNAPSHOT` (64-bit native ABIs only; see [ADR-0003](./docs/adr/0003-drop-32bit-abi-support.md)).
 
 ## What it does and does not do
 
@@ -51,7 +51,7 @@ The SDK declares **zero** `<uses-permission>` entries and **zero** third-party r
 - Android Gradle Plugin 8.13.1
 - Compile SDK 36 / Target SDK 36 / Min SDK 30
 - NDK `27.0.12077973`, CMake `3.22.1+`, C++17 (`-fno-exceptions -fno-rtti`)
-- Native ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86` (16KB ELF `LOAD` alignment)
+- Native ABIs: `arm64-v8a`, `x86_64` (64-bit only, 16KB ELF `LOAD` alignment; see [ADR-0003](./docs/adr/0003-drop-32bit-abi-support.md). Host apps bundling other native SDKs should configure `ndk { abiFilters += listOf("arm64-v8a") }` or `listOf("arm64-v8a", "x86_64")` so Android does not launch the app in 32-bit mode)
 
 ## Quick start
 
@@ -77,7 +77,7 @@ python3 -B scripts/test_verify_risk_envelope.py -v # Cross-language SignedRiskEn
 
 | Artifact | Path | Notes |
 | --- | --- | --- |
-| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | Host-app integration (4 ABIs stripped, no `.comment`, 2 exported JNI symbols, 16KB aligned, single-ABI `.so <= 2000 KiB`, AAR `<= 8 MiB`, R8 Dex `< 2,500` methods) |
+| SDK AAR | `riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar` | Host-app integration (2 64-bit ABIs stripped, no `.comment`, 2 exported JNI symbols, 16KB aligned, single-ABI `.so <= 2000 KiB`, AAR `<= 4 MiB`, R8 Dex `< 2,500` methods) |
 | SDK sources | `riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar` | Source archive for distribution |
 | Demo Debug APK | `demo/build/outputs/apk/debug/demo-debug.apk` | Temporarily debug-signed; sideload only |
 | Demo Release APK | `demo/build/outputs/apk/release/demo-release-unsigned.apk` | Minified; sign with a release key before distribution |
@@ -429,14 +429,14 @@ RiskEngine v2.0.0 consolidates around a single zero-dependency core SDK (see [AD
 
 - **6 Automated CI Static Governance Gates** (enforced by `scripts/ci-verify.sh` and `.github/workflows/ci.yml`):
   1. **Gate 1 (`scripts/check-evidence-records.py`)**: Dynamic `DetectorRegistry` 1:1 parity against `docs/evidence/*.md` (16/16 domains, 7 mandatory headings each).
-  2. **Gate 2 (`scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`)**: 4-ABI ELF hardening (2 JNI exports only, 16KB `LOAD` align, stripped, no `.comment`, `.so <= 2000 KiB`, AAR `<= 8 MiB`), exact 41/41 JNI name+signature parity, and Release R8 Dex `< 2,500` methods.
+  2. **Gate 2 (`scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`)**: 64-bit 2-ABI (`arm64-v8a`, `x86_64`) ELF hardening (2 JNI exports only, 16KB `LOAD` align, stripped, no `.comment`, `.so <= 2000 KiB`, AAR `<= 4 MiB`), exact 41/41 JNI name+signature parity, and Release R8 Dex `< 2,500` methods.
   3. **Gate 3 (`scripts/check-single-source-sync.py`)**: Zero `<uses-permission>`, exact 52-entry `<queries>` parity with `artifact_paths.ini` + `NetworkRiskDetector`, xorshift32 byte-exact `DetectionLists.java` verification, and version sync.
   4. **Gate 4 (`scripts/check-public-api.py` / `:riskengine-sdk:apiCheck`)**: Zero-plugin JDK 17 `javap` Public ABI lock (`riskengine-sdk/api/riskengine-sdk.api`), AAR `classes.jar` purity, and 0-dependency POM check.
   5. **Gate 5 (`scripts/check-boundary-guards.py`)**: Reflection allowlist audit (every reflection site documented with degradation strategy, zero D66 blocked hidden-API reflection) and ban on UI display-text branching in core SDK.
   6. **Gate 6 (`.github/workflows/refresh-attestation-roots.yml`)**: Scheduled weekly + manual dry-run drift check for Google Hardware Attestation Roots & monotonic CRL floor.
 - **L1 + L2 + L3 Testing Pyramid**:
   - **L1 (JVM)**: Core `:riskengine-sdk` (all 16 domains fast+postponed, `0–100` scoring & `RiskPolicy`, all 24 collectors in `CrashFreedomMockTest`, Java↔Python 6-step `v=2` offline envelope parity, V1/V2 golden vectors) + `:demo` scoring & formatter unit tests.
-  - **L2 (Offline Native C++ Host)**: CMake/CTest suite under `riskengine-sdk/src/test/cpp/` (`./scripts/run-cpp-tests.sh`) testing production `maps_parser` (>4 MiB), `raw_dir` fuzzing, `DiskElf` 16KB/PT_LOAD, `bionic_prop_area`, `payload_codec`, 4-ABI `looks_like_trampoline`, and `crypto_mini` 100% offline.
+  - **L2 (Offline Native C++ Host)**: CMake/CTest suite under `riskengine-sdk/src/test/cpp/` (`./scripts/run-cpp-tests.sh`) testing production `maps_parser` (>4 MiB), `raw_dir` fuzzing, `DiskElf` 16KB/PT_LOAD, `bionic_prop_area`, `payload_codec`, 64-bit `looks_like_trampoline`, and `crypto_mini` 100% offline.
   - **L3 (Binary-AAR Instrumentation)**: `:integration-test` consumes standalone `riskengine-sdk-release.aar` and runs on GitHub Actions Linux KVM emulators across API 30, 34, and 36.
 - Native I/O uses per-ABI inline syscalls, `getdents64`, streaming `/proc/self/maps`, `pipe2(O_CLOEXEC)` `safe_mem_read`, `disposable_child` isolation for hazardous syscalls, `-fno-exceptions -fno-rtti`, ThinLTO, and polymorphic `ScopedObfString` + `secure_zero`.
 

@@ -115,7 +115,7 @@ RiskEngine 是本地 Android 风险信号、硬件信任根认证与设备指纹
 | `boot_id` | `/proc/sys/kernel/random/boot_id` 应用范围哈希 | 仅 `DIAGNOSTIC` 或 `collectBootId(true)` |
 | `system_properties_native` | 白名单属性，见 ini `[properties]`；部分 SELinux 受限时记录 `partial_errors` 且 `>= 1` 成功即保持 `SUCCESS` | 始终 |
 | `cpu_info` | 结构化 `CpuInfoParser` 解析 `/proc/cpuinfo`（`commonInfo` + `perCoreInfo`；保留 `flags` `hypervisor`/`vmx`/`svm` 与 `model name`；指纹哈希自动剔除易变 `BogoMIPS` 与 `cpu MHz`） | 始终 |
-| `disk_size` | 数据分区大小（32 位 ARM/i386 使用 `__NR_statfs64`） | 始终 |
+| `disk_size` | 数据分区大小（64 位 ABI 使用 `__NR_statfs`） | 始终 |
 | `kernel_info` | `uname` 等 | 始终 |
 
 系统属性查询经编译期排序的 64 位 FNV-1a 常量表 `kAllowedPropertyHashes` 校验（零运行期字符串解码与堆分配）。
@@ -247,14 +247,14 @@ Native `OBF` 保护的 `nGetDebugEvidenceRaw()`（走 `NativePayloadCodec`，同
 
 共享库 `libriskengine.so`，CMake 3.22.1，C++17，`-fno-exceptions -fno-rtti`，静态 libc++，符号隐藏（`exports.map` 仅导出 `JNI_OnLoad` 与 `JNI_OnUnload`）。
 
-- **内联 syscall 与流式解析**：按 ABI 直接内联 syscall（`raw_syscall.h`、`syscall_wrapper.cpp` 带 `-EINTR` 重试、32 位 `__NR_statfs64`、3 参 `__NR_faccessat` / 4 参 `__NR_faccessat2`），`getdents64`（`raw_dir.cpp`），流式 `maps_parser.cpp`（无 2 MiB 截断）。
+- **内联 syscall 与流式解析**：64 位直接内联 syscall（`raw_syscall.h`、`syscall_wrapper.cpp` 带 `-EINTR` 重试、`__NR_statfs`、3 参 `__NR_faccessat` / 4 参 `__NR_faccessat2`），`getdents64`（`raw_dir.cpp`），流式 `maps_parser.cpp`（无 2 MiB 截断）。
 - **COW 安全读内存、`disposable_child` 与线协议**：`util/safe_mem_read.{h,cpp}`（`pipe2(O_CLOEXEC|O_NONBLOCK)` 4 KiB 内核 `copy_from_user` + `PagemapReader`）；`util/disposable_child.{h,cpp}`（`fork()` 前预解析原始 Bionic `sigaction`/`sigprocmask`、原始 `__NR_exit_group`、并发=1 互斥与双截断超时，安全隔离 `SIGSYS`/`SIGILL` 与内核侧信道）；`util/payload_codec.{h,cpp}` ↔ `NativePayloadCodec`。
 - **多态 OBF 与编译期白名单**：`util/obf_str.h`（`ScopedObfString<N>` + `secure_zero`）；编译期 FNV-1a 哈希表 `kAllowedPropertyHashes`。
 - **Phase 2–4 Native 深度取证模块**：`bionic_prop_forensics.cpp`、`hardware_consistency_probe.cpp`、`custom_rom_probe.cpp`、`kernel_sidechannel_probe.cpp`、`selinux_audit_probe.cpp`、`mount_forensics.cpp`、`zygisk_atexit_probe.cpp`、`virtualization_traps.cpp`、`widevine_ndk_probe.cpp`（`dlopen` 加载 `AMediaDrm` 一致性探测）、`tee_binder_probe.cpp`（Binder `ioctl` 与 `libkeystore2`/`libbinder` hook 审计）、`hma_uid_probe.cpp`（`disposable_child` 内 `getpriority(PRIO_USER)` + `SECCOMP_FILTER_FLAG_NEW_LISTENER`），以及升级后的 `native_debug_detector.cpp`（ADB 协议取证）与 `native_hook_detector.cpp`（FD/线程/匿名 ELF/链接器差集/sigaction）。所有原生代码均内聚于核心 `libriskengine.so`。
 - **APK 签名解析（`apk_sig_verifier.cpp`）**：原始 syscall 解析 ZIP EOCD 与 APK Signing Block v2/v3/v3.1 证书 SHA-256（回退 v1 JAR），由 `nVerifyApkSigningCertRaw` 暴露。
-- **COW 安全自完整性（`native_integrity.cpp`）**：64 KiB 分窗 SHA-256（`dl_iterate_phdr` + `SHF_EXECINSTR`/`PT_LOAD`，支持 `extractNativeLibs=false` 与 16KB 页）、4 ABI trampoline（含 ARM32 Thumb-2 与 `branch_stays_in_image`）、XOR 掩码 JNI 表与核心序言基线、PLT + RELA/REL `STT_FUNC` GOT 与 `JNIEnv` 校验。
+- **COW 安全自完整性（`native_integrity.cpp`）**：64 KiB 分窗 SHA-256（`dl_iterate_phdr` + `SHF_EXECINSTR`/`PT_LOAD`，支持 `extractNativeLibs=false` 与 16KB 页）、64 位双 ABI（`arm64-v8a`、`x86_64`）trampoline（含 `branch_stays_in_image`）、XOR 掩码 JNI 表与核心序言基线、PLT + RELA/REL `STT_FUNC` GOT 与 `JNIEnv` 校验。
 - **事件驱动周期监控（`periodic_monitor.cpp`）**：由 `RiskEngine.init()` 在 `enablePeriodicMonitor(true)` 时异步启动（**不再**在 `JNI_OnLoad` 中启动）。调度策略：2–4s 首轮复检、前台 20–26s 抖动轮询、后台 120s 退避、后台切前台超 10s 立即复检。复检项含双路径 `TracerPid`、W+X、`memfd`、`/proc/self/fd`（`late_frida_fd`）及 COW 安全 `.text`/序言（`late_text_mismatch`），新命中通过无锁 JNI 回调推送至 `JNI_OnLoad` 预缓存的 `NativeMonitorDispatcher.onNativeThreatDetected`（`NewGlobalRef`）。零依赖 `AppLifecycleObserver` 驱动前后台切换与权限守卫的 API 34/35 截录屏回调。
-- **构建加固与 ELF 门禁**：`IS_RELEASE_LIKE`（`Release` 与 `RelWithDebInfo`）启用 `-Os`、`-fstack-protector-strong`、`-D_FORTIFY_SOURCE=2`、ThinLTO、`--gc-sections`、`--icf=safe`、`--wrap=__cxa_demangle`、`--strip-all`、`llvm-strip -R .comment`、`max-page-size=16384`。`scripts/check-elf-hardening.sh` 校验 4 ABI 全部满足 2 导出符号、已 strip、无 `.comment`、16KB `LOAD` 对齐、单 ABI `.so <= 2000 KiB`、AAR `<= 8 MiB`。
+- **构建加固与 ELF 门禁**：`IS_RELEASE_LIKE`（`Release` 与 `RelWithDebInfo`）启用 `-Os`、`-fstack-protector-strong`、`-D_FORTIFY_SOURCE=2`、ThinLTO、`--gc-sections`、`--icf=safe`、`--wrap=__cxa_demangle`、`--strip-all`、`llvm-strip -R .comment`、`max-page-size=16384`。`scripts/check-elf-hardening.sh` 校验 2 个 64 位 ABI（`arm64-v8a`、`x86_64`）全部满足 2 导出符号、已 strip、无 `.comment`、16KB `LOAD` 对齐、单 ABI `.so <= 2000 KiB`、AAR `<= 4 MiB`。
 
 ## 7. 共享信号（`SignalSnapshot`）
 
@@ -317,11 +317,11 @@ Native `OBF` 保护的 `nGetDebugEvidenceRaw()`（走 `NativePayloadCodec`，同
 - 单源清单：`riskengine-sdk/src/main/resources/lists/artifact_paths.ini` -> `:riskengine-sdk:generateDetectionLists` -> `DetectionLists.java`（混淆零明文）与 `detection_lists.h`（含 `kAllowedPropertyHashes`），并与 `AndroidManifest.xml` `<queries>`（52 项）精确 1:1 同步。
 - **6 大 CI 静态治理门禁**（集成于 `scripts/ci-verify.sh` 与 `.github/workflows/ci.yml`）：
   1. `scripts/check-evidence-records.py`：`DetectorRegistry` ↔ `docs/evidence/*.md` 1:1 校验（16/16 检测域，每份均含 7 项必填契约章节）。
-  2. `scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`：4-ABI ELF 加固（仅 2 个 JNI 导出符号、16KB 对齐、strip 无 `.comment`、`.so <= 2000 KiB`、AAR `<= 8 MiB`）、41/41 JNI 1:1 对齐及 Release R8 Dex `< 2,500` 方法数上限。
+  2. `scripts/check-elf-hardening.sh` + `scripts/check-jni-and-dex.py`：64 位双 ABI ELF 加固（仅 2 个 JNI 导出符号、16KB 对齐、strip 无 `.comment`、`.so <= 2000 KiB`、AAR `<= 4 MiB`）、41/41 JNI 1:1 对齐及 Release R8 Dex `< 2,500` 方法数上限。
   3. `scripts/check-single-source-sync.py`：零 `<uses-permission>`、精确 `<queries>` 1:1、xorshift32 字节级反解码 `DetectionLists.java` 与文档版本一致。
   4. `scripts/check-public-api.py`（`:riskengine-sdk:apiCheck` / `apiDump`）：零插件 JDK 17 `javap` Public ABI 锁（`riskengine-sdk/api/riskengine-sdk.api`）、AAR `classes.jar` 纯度与零依赖 POM 校验。
   5. `scripts/check-boundary-guards.py`：核心 Java/C++ 反射白名单与降级策略审计（封禁 D66 受限隐藏 API 反射）及禁止按 UI 展示文案分支判定。
   6. `.github/workflows/refresh-attestation-roots.yml`（`scripts/refresh_google_attestation_roots.py`）：每周定时 + 手动核验 Google Hardware Attestation Root 与单调 CRL 底线漂移。
 - **L1 纯 JVM 单元测试**：核心 `:riskengine-sdk` 完整覆盖全部 16 个收敛检测域（含 fast + postponed、`ThreatAppDetector`、`HmaUidVisibilityProbe`、`HmaBehaviorProbesTest`、`tee_integrity`、`SignedRiskEnvelope` `v=2`）、`0–100` 四维 `RiskScoringEngine` 与本地 `RiskPolicy` 策略引擎、全部 24 个 Collector（`CrashFreedomMockTest`）、跨语言黄金向量（`EnvelopeOfflineVerifierTest` 驱动 `scripts/verify_risk_envelope.py`）、V1/V2 黄金向量、硬件 GCM 绑定与 DirectBoot 迁移、三阶段推拉编排、`NativePayloadCodec`、`EvidenceItem` 合并与增量 JSON v2。`:demo` 同步运行 JVM 单元测试（`ReportFormatterScoringTest`）校验 `0–100` 格式化、四维展示、`RiskAction`、`ScoreBreakdown` 与 16 域标题。
-- **L2 离线 C++ 宿主机单元测试**：`riskengine-sdk/src/test/cpp/`（`./scripts/run-cpp-tests.sh`，基于 CMake + CTest 与离线 `mini_gtest.h`/可选系统 GTest）实测生产 `maps_parser`（>4 MiB）、`raw_dir` 畸形 fuzz、`DiskElf` 16KB/PT_LOAD、`bionic_prop_area`、`payload_codec`、4-ABI `looks_like_trampoline` 与 `crypto_mini`。
+- **L2 离线 C++ 宿主机单元测试**：`riskengine-sdk/src/test/cpp/`（`./scripts/run-cpp-tests.sh`，基于 CMake + CTest 与离线 `mini_gtest.h`/可选系统 GTest）实测生产 `maps_parser`（>4 MiB）、`raw_dir` 畸形 fuzz、`DiskElf` 16KB/PT_LOAD、`bionic_prop_area`、`payload_codec`、64 位 `looks_like_trampoline` 与 `crypto_mini`。
 - **L3 二进制 AAR 仪器测试**：`:integration-test` 严格消费独立 `riskengine-sdk-release.aar`，在 GitHub Actions Linux KVM API 30 / 34 / 36 模拟器矩阵运行 `SmokeActivity` 与 `RiskEngineInstrumentationTest`。

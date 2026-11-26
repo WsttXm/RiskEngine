@@ -33,8 +33,8 @@
 
 ## Applicable API Range
 
-- **Treble, Build/Prop parity, 3-Source Kernel, `BionicPropProbe`, `PlayIntegrityFixProbe`, `BootloaderProbe`**: Android 11–17 (API 30–37), all 4 ABIs (`dirty_backup_area` gated to `sdk >= 30`).
-- **ARM64 `MIDR_EL1`**: `arm64-v8a` with `HWCAP_CPUID` (cleanly `UNSUPPORTED` on 32-bit/x86).
+- **Treble, Build/Prop parity, 3-Source Kernel, `BionicPropProbe`, `PlayIntegrityFixProbe`, `BootloaderProbe`**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`; `dirty_backup_area` gated to `sdk >= 30`).
+- **ARM64 `MIDR_EL1`**: `arm64-v8a` with `HWCAP_CPUID` (cleanly `UNSUPPORTED` on `x86_64`).
 - **Hardware `RootOfTrust`**: API 30–37 when `enableTeeAttestation` is enabled and hardware attestation is available.
 - **Widevine Parity**: API 30–37 on devices shipping `libmediandk.so` and Widevine CDM (`UNAVAILABLE` cleanly otherwise).
 

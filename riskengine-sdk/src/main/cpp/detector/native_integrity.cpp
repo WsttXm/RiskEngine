@@ -62,18 +62,9 @@ uintptr_t get_or_init_ptr_mask() noexcept {
     return expected;
 }
 
-inline uintptr_t strip_code_thumb_bit(uintptr_t addr) noexcept {
-#if defined(__arm__)
-    return addr & ~static_cast<uintptr_t>(1u);
-#else
-    return addr;
-#endif
-}
-
 bool compute_mem_prologue_sha256(safe_mem::PipeMemoryReader &mem,
-                                 uintptr_t raw_addr,
+                                 uintptr_t code_addr,
                                  uint8_t out[crypto_mini::kSha256DigestSize]) noexcept {
-    const uintptr_t code_addr = strip_code_thumb_bit(raw_addr);
     if (code_addr == 0) return false;
     uint8_t buf[kPrologueBytes] = {};
     if (!mem.read(code_addr, buf, sizeof(buf))) {
@@ -242,99 +233,17 @@ bool looks_like_trampoline_arm64(const uint8_t *p, size_t len, uintptr_t addr,
 }
 #endif
 
-#if defined(__arm__) || defined(RISKENGINE_HOST_TEST)
-bool looks_like_trampoline_arm32(const uint8_t *p, size_t len, uintptr_t raw_addr,
-                                 const std::vector<MapEntry> &maps,
-                                 uintptr_t range_start, uintptr_t range_end) {
-    if (len < 4) return false;
-    const bool is_thumb = (raw_addr & 1u) != 0;
-    const uintptr_t addr = raw_addr & ~static_cast<uintptr_t>(1u);
-
-    if (is_thumb) {
-        uint16_t hw0 = 0;
-        uint16_t hw1 = 0;
-        std::memcpy(&hw0, p, sizeof(hw0));
-        std::memcpy(&hw1, p + 2, sizeof(hw1));
-
-        // 16-bit Thumb BKPT #imm8
-        if ((hw0 & 0xFF00u) == 0xBE00u) return true;
-
-        // 32-bit Thumb-2 LDR.W PC, [PC, #+/-imm12] (F8DF Fxxx or F85F Fxxx)
-        if ((hw0 == 0xF8DFu || hw0 == 0xF85Fu) && (hw1 & 0xF000u) == 0xF000u) {
-            return true;
-        }
-
-        // 32-bit Thumb-2 unconditional B.W #imm24 (encoding T4)
-        if ((hw0 & 0xF800u) == 0xF000u && (hw1 & 0xD000u) == 0x9000u) {
-            const uint32_t S = (hw0 >> 10) & 1u;
-            const uint32_t J1 = (hw1 >> 13) & 1u;
-            const uint32_t J2 = (hw1 >> 11) & 1u;
-            const uint32_t I1 = ~(J1 ^ S) & 1u;
-            const uint32_t I2 = ~(J2 ^ S) & 1u;
-            const uint32_t imm10 = hw0 & 0x03FFu;
-            const uint32_t imm11 = hw1 & 0x07FFu;
-            uint32_t raw_off = (S << 24) | (I1 << 23) | (I2 << 22)
-                    | (imm10 << 12) | (imm11 << 1);
-            if (S != 0) raw_off |= 0xFE000000u;
-            const int32_t signed_off = static_cast<int32_t>(raw_off);
-            const uintptr_t target = addr + 4u + static_cast<uintptr_t>(signed_off);
-            if (branch_stays_in_image(maps, addr, target)) {
-                return false;
-            }
-            if (range_start < range_end && (target < range_start || target >= range_end)) {
-                return true;
-            }
-        }
-
-        // 16-bit BX r12 (0x4760)
-        if (hw0 == 0x4760u) return true;
-        return false;
-    }
-
-    // ARM32 (A32) state
-    uint32_t insn = 0;
-    std::memcpy(&insn, p, sizeof(insn));
-    if ((insn & 0x0FF000F0u) == 0x01200070u) return true;               // BKPT
-    if ((insn & 0x0F7FF000u) == 0x051FF000u) return true;               // LDR PC, [PC, #imm]
-    if ((insn & 0x0FFFFFF0u) == 0x012FFF10u && (insn & 0xFu) != 14u) {  // BX rN (rN != LR)
-        return true;
-    }
-    // ARM B #imm24 — guarded by branch_stays_in_image.
-    if ((insn & 0x0F000000u) == 0x0A000000u) {
-        uint32_t raw24 = insn & 0x00FFFFFFu;
-        if ((raw24 & 0x00800000u) != 0) raw24 |= 0xFF000000u;
-        const uintptr_t signed_disp = static_cast<uintptr_t>(
-                static_cast<intptr_t>(static_cast<int32_t>(raw24))) << 2;
-        const uintptr_t target = addr + 8u + signed_disp;
-        if (branch_stays_in_image(maps, addr, target)) {
-            return false;
-        }
-        if (range_start < range_end && (target < range_start || target >= range_end)) {
-            return true;
-        }
-    }
-    return false;
-}
-#endif
-
-#if defined(__x86_64__) || defined(__i386__) || defined(RISKENGINE_HOST_TEST)
-bool looks_like_trampoline_x86_common(const uint8_t *p, size_t len, uintptr_t addr,
-                                      const std::vector<MapEntry> &maps,
-                                      uintptr_t range_start, uintptr_t range_end,
-                                      bool is_64bit) {
+#if defined(__x86_64__) || defined(RISKENGINE_HOST_TEST)
+bool looks_like_trampoline_x86_64(const uint8_t *p, size_t len, uintptr_t addr,
+                                  const std::vector<MapEntry> &maps,
+                                  uintptr_t range_start, uintptr_t range_end) {
     if (len < 6) return false;
     if (p[0] == 0xCCu) return true;                                  // INT3
-    if (p[0] == 0xFFu && p[1] == 0x25u) return true;                 // JMP [rip+disp32] / [imm32]
+    if (p[0] == 0xFFu && p[1] == 0x25u) return true;                 // JMP [rip+disp32]
     if (p[0] == 0x68u && p[5] == 0xC3u) return true;                 // PUSH imm32 ; RET
-    if (is_64bit) {
-        if (len >= 12 && p[0] == 0x48u && p[1] == 0xB8u
-            && p[10] == 0xFFu && p[11] == 0xE0u) {                   // MOVABS RAX, imm64; JMP RAX
-            return true;
-        }
-    } else {
-        if (len >= 7 && p[0] == 0xB8u && p[5] == 0xFFu && p[6] == 0xE0u) {  // MOV EAX, imm32; JMP EAX
-            return true;
-        }
+    if (len >= 12 && p[0] == 0x48u && p[1] == 0xB8u
+        && p[10] == 0xFFu && p[11] == 0xE0u) {                       // MOVABS RAX, imm64; JMP RAX
+        return true;
     }
     // JMP rel32 — guarded by branch_stays_in_image for libdl extern_weak tail calls.
     if (p[0] == 0xE9u) {
@@ -358,12 +267,8 @@ bool looks_like_trampoline(const uint8_t *p, size_t len, uintptr_t addr,
                            uintptr_t range_start, uintptr_t range_end) {
 #if defined(__aarch64__)
     return looks_like_trampoline_arm64(p, len, addr, maps, range_start, range_end);
-#elif defined(__arm__)
-    return looks_like_trampoline_arm32(p, len, addr, maps, range_start, range_end);
 #elif defined(__x86_64__)
-    return looks_like_trampoline_x86_common(p, len, addr, maps, range_start, range_end, true);
-#elif defined(__i386__)
-    return looks_like_trampoline_x86_common(p, len, addr, maps, range_start, range_end, false);
+    return looks_like_trampoline_x86_64(p, len, addr, maps, range_start, range_end);
 #else
     (void) p; (void) len; (void) addr; (void) maps; (void) range_start; (void) range_end;
     return false;
@@ -391,7 +296,9 @@ bool pread_exact(int fd, void *buf, size_t len, uint64_t offset) {
     return true;
 }
 
-#if defined(__LP64__)
+#if !defined(__LP64__)
+#error "RiskEngine native_integrity requires a 64-bit ABI (arm64-v8a or x86_64)"
+#endif
 using Ehdr = Elf64_Ehdr;
 using Phdr = Elf64_Phdr;
 using Shdr = Elf64_Shdr;
@@ -400,18 +307,6 @@ using Sym = Elf64_Sym;
 using Rela = Elf64_Rela;
 using Rel = Elf64_Rel;
 using ElfAddr = Elf64_Addr;
-constexpr bool kElf64 = true;
-#else
-using Ehdr = Elf32_Ehdr;
-using Phdr = Elf32_Phdr;
-using Shdr = Elf32_Shdr;
-using Dyn = Elf32_Dyn;
-using Sym = Elf32_Sym;
-using Rela = Elf32_Rela;
-using Rel = Elf32_Rel;
-using ElfAddr = Elf32_Addr;
-constexpr bool kElf64 = false;
-#endif
 
 struct DiskElf {
     int fd = -1;
@@ -450,7 +345,7 @@ struct DiskElf {
                 || ehdr.e_ident[EI_MAG2] != ELFMAG2 || ehdr.e_ident[EI_MAG3] != ELFMAG3
                 || ehdr.e_ident[EI_DATA] != ELFDATA2LSB
                 || ehdr.e_ident[EI_VERSION] != EV_CURRENT
-                || ehdr.e_ident[EI_CLASS] != (kElf64 ? ELFCLASS64 : ELFCLASS32)) {
+                || ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
             return false;
         }
         if (ehdr.e_phoff == 0 || ehdr.e_phentsize != sizeof(Phdr)
@@ -894,7 +789,7 @@ void inspect_library_exports(const std::vector<MapEntry> &maps,
         }
         if (!found || sym.st_shndx == SHN_UNDEF || sym.st_value == 0) continue;
 
-        const uint64_t sym_code_va = strip_code_thumb_bit(static_cast<uintptr_t>(sym.st_value));
+        const uint64_t sym_code_va = static_cast<uint64_t>(sym.st_value);
         uint64_t func_file_off = 0;
         if (!elf.vaddr_to_offset(sym_code_va, func_file_off)) continue;
 
@@ -910,11 +805,10 @@ void inspect_library_exports(const std::vector<MapEntry> &maps,
         }
         if (!range_within_u64(func_file_off, check_len, elf.file_size)) continue;
 
-        uintptr_t raw_mem_addr = 0;
-        if (!add_address(elf.load_bias, static_cast<uintptr_t>(sym.st_value), raw_mem_addr)) {
+        uintptr_t mem_code_addr = 0;
+        if (!add_address(elf.load_bias, static_cast<uintptr_t>(sym.st_value), mem_code_addr)) {
             continue;
         }
-        const uintptr_t mem_code_addr = strip_code_thumb_bit(raw_mem_addr);
 
         uint8_t mem_bytes[kMaxProbe] = {};
         if (!mem.read(mem_code_addr, mem_bytes, check_len)) continue;
@@ -928,7 +822,7 @@ void inspect_library_exports(const std::vector<MapEntry> &maps,
                         OBF("inline_hook"),
                         so_name + ":" + name,
                         OBF("disk_memory_prologue_mismatch"));
-        } else if (looks_like_trampoline(mem_bytes, check_len, raw_mem_addr,
+        } else if (looks_like_trampoline(mem_bytes, check_len, mem_code_addr,
                                          maps, rx_start, rx_end)) {
             add_finding(findings,
                         OBF("inline_hook:") + name,
@@ -945,7 +839,7 @@ bool is_trusted_got_target(const std::vector<MapEntry> &maps,
                            uint64_t self_inode,
                            const std::string_view *trusted_libs,
                            size_t trusted_lib_count) {
-    const uintptr_t code_target = strip_code_thumb_bit(target);
+    const uintptr_t code_target = target;
     const MapEntry *m = find_map_containing(maps, code_target);
     if (m == nullptr || !is_rx(*m)) return false;
     if (m->path.empty()) return false;
@@ -1015,7 +909,7 @@ bool is_trusted_sigchain_target(const std::vector<MapEntry> &maps,
             || sym_name == sym_sigwait64.view();
     if (!is_sigchain_sym) return false;
 
-    const uintptr_t code_target = strip_code_thumb_bit(target);
+    const uintptr_t code_target = target;
     const MapEntry *m = find_map_containing(maps, code_target);
     if (m == nullptr || !is_rx(*m) || m->path.empty()) return false;
 
@@ -1080,8 +974,7 @@ bool resolve_self_elf(const std::vector<MapEntry> &maps,
     // 1. Prefer dl_iterate_phdr: accurately resolves load_bias & base offset even
     //    under extractNativeLibs=false (APK-embedded .so) and 16KB page alignment.
     SelfElfLocateCtx phdr_ctx;
-    phdr_ctx.anchor_addr = strip_code_thumb_bit(
-            reinterpret_cast<uintptr_t>(&resolve_self_elf));
+    phdr_ctx.anchor_addr = reinterpret_cast<uintptr_t>(&resolve_self_elf);
     dl_iterate_phdr(find_self_phdr_cb, &phdr_ctx);
 
     if (phdr_ctx.found) {
@@ -1131,15 +1024,9 @@ bool is_candidate_func_reloc_type(uint32_t r_type, bool is_plt_table) noexcept {
 #if defined(__aarch64__)
     return r_type == R_AARCH64_JUMP_SLOT || r_type == R_AARCH64_GLOB_DAT
             || r_type == R_AARCH64_ABS64;
-#elif defined(__arm__)
-    return r_type == R_ARM_JUMP_SLOT || r_type == R_ARM_GLOB_DAT
-            || r_type == R_ARM_ABS32;
 #elif defined(__x86_64__)
     return r_type == R_X86_64_JUMP_SLOT || r_type == R_X86_64_GLOB_DAT
             || r_type == R_X86_64_64;
-#elif defined(__i386__)
-    return r_type == R_386_JMP_SLOT || r_type == R_386_GLOB_DAT
-            || r_type == R_386_32;
 #else
     (void) r_type;
     return true;
@@ -1202,34 +1089,18 @@ void inspect_reloc_table(const DiskElf &elf,
             uint64_t r_offset = 0;
             size_t sym_index = 0;
             uint32_t r_type = 0;
-            if constexpr (kElf64) {
-                if (is_rela) {
-                    Rela rela {};
-                    std::memcpy(&rela, raw_ent, sizeof(rela));
-                    r_offset = rela.r_offset;
-                    sym_index = ELF64_R_SYM(rela.r_info);
-                    r_type = static_cast<uint32_t>(ELF64_R_TYPE(rela.r_info));
-                } else {
-                    Rel rel {};
-                    std::memcpy(&rel, raw_ent, sizeof(rel));
-                    r_offset = rel.r_offset;
-                    sym_index = ELF64_R_SYM(rel.r_info);
-                    r_type = static_cast<uint32_t>(ELF64_R_TYPE(rel.r_info));
-                }
+            if (is_rela) {
+                Rela rela {};
+                std::memcpy(&rela, raw_ent, sizeof(rela));
+                r_offset = rela.r_offset;
+                sym_index = ELF64_R_SYM(rela.r_info);
+                r_type = static_cast<uint32_t>(ELF64_R_TYPE(rela.r_info));
             } else {
-                if (is_rela) {
-                    Rela rela {};
-                    std::memcpy(&rela, raw_ent, sizeof(rela));
-                    r_offset = rela.r_offset;
-                    sym_index = ELF32_R_SYM(rela.r_info);
-                    r_type = static_cast<uint32_t>(ELF32_R_TYPE(rela.r_info));
-                } else {
-                    Rel rel {};
-                    std::memcpy(&rel, raw_ent, sizeof(rel));
-                    r_offset = rel.r_offset;
-                    sym_index = ELF32_R_SYM(rel.r_info);
-                    r_type = static_cast<uint32_t>(ELF32_R_TYPE(rel.r_info));
-                }
+                Rel rel {};
+                std::memcpy(&rel, raw_ent, sizeof(rel));
+                r_offset = rel.r_offset;
+                sym_index = ELF64_R_SYM(rel.r_info);
+                r_type = static_cast<uint32_t>(ELF64_R_TYPE(rel.r_info));
             }
 
             if (sym_index == 0) continue;
@@ -1240,8 +1111,7 @@ void inspect_reloc_table(const DiskElf &elf,
             Sym sym {};
             if (!pread_exact(elf.fd, &sym, sizeof(sym), sym_pos)) continue;
 
-            const uint8_t sym_type = kElf64
-                    ? ELF64_ST_TYPE(sym.st_info) : ELF32_ST_TYPE(sym.st_info);
+            const uint8_t sym_type = ELF64_ST_TYPE(sym.st_info);
             if (!is_func_reloc_type(r_type, sym_type, is_plt_table)) continue;
 
             uintptr_t got_addr = 0;
@@ -1299,7 +1169,7 @@ void inspect_self_image(const std::vector<MapEntry> &maps,
     uint64_t pltrel_va = 0, pltrel_sz = 0;
     uint64_t rela_va = 0, rela_sz = 0;
     uint64_t rel_va = 0, rel_sz = 0;
-    long pltrel_type = kElf64 ? DT_RELA : DT_REL;
+    long pltrel_type = DT_RELA;
     size_t syment = sizeof(Sym);
 
     for (const auto &d : dyn) {
@@ -1356,8 +1226,7 @@ void inspect_recorded_baselines(const std::vector<MapEntry> &maps,
                             const std::string &token_prefix,
                             const std::string &code) {
         if (!entry.valid) return;
-        const uintptr_t raw_addr = entry.masked_ptr ^ mask;
-        const uintptr_t code_addr = strip_code_thumb_bit(raw_addr);
+        const uintptr_t code_addr = entry.masked_ptr ^ mask;
         if (code_addr == 0) return;
 
         // 1. Ensure address still resides in self executable image.
@@ -1382,7 +1251,7 @@ void inspect_recorded_baselines(const std::vector<MapEntry> &maps,
         // 2. Compare 16-byte entry prologue SHA-256 against JNI_OnLoad baseline.
         if (entry.has_prologue) {
             uint8_t current_sha[crypto_mini::kSha256DigestSize] = {};
-            if (compute_mem_prologue_sha256(mem, raw_addr, current_sha)
+            if (compute_mem_prologue_sha256(mem, code_addr, current_sha)
                 && !crypto_mini::ct_memcmp(current_sha, entry.prologue_sha256,
                                            crypto_mini::kSha256DigestSize)) {
                 add_finding(findings,
@@ -1422,10 +1291,10 @@ void inspect_jni_env_table(JNIEnv *env, const std::vector<MapEntry> &maps,
         return;
     }
 
-    const uintptr_t find_class = strip_code_thumb_bit(
-            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(copied.FindClass)));
-    const uintptr_t get_version = strip_code_thumb_bit(
-            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(copied.GetVersion)));
+    const uintptr_t find_class =
+            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(copied.FindClass));
+    const uintptr_t get_version =
+            reinterpret_cast<uintptr_t>(reinterpret_cast<void *>(copied.GetVersion));
 
     uintptr_t art_start = 0, art_end = 0;
     rx_range_for(maps, OBF("libart.so"), art_start, art_end);

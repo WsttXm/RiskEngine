@@ -30,7 +30,7 @@
 
 ## Applicable API Range
 
-- **Displays, Accessibility, InputDevices, AudioManager call mode, Clock anchor**: Android 11–17 (API 30–37), all 4 ABIs.
+- **Displays, Accessibility, InputDevices, AudioManager call mode, Clock anchor**: Android 11–17 (API 30–37), both 64-bit ABIs (`arm64-v8a`, `x86_64`).
 - **Screen capture callback**: Android 14+ (API 34+) when host declares `DETECT_SCREEN_CAPTURE`.
 - **Screen recording callback**: Android 15+ (API 35+) when host declares `DETECT_SCREEN_RECORDING`.
 

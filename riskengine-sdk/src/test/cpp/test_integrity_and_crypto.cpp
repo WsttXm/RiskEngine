@@ -17,7 +17,7 @@
 #include <vector>
 
 // Include the REAL production native_integrity.cpp with RISKENGINE_HOST_TEST=1
-// so all 4 ABI trampoline decoders + branch_stays_in_image are tested directly.
+// so both 64-bit ABI trampoline decoders (arm64-v8a, x86_64) + branch_stays_in_image are tested directly.
 #include "detector/native_integrity.cpp"
 
 namespace safe_mem {
@@ -205,72 +205,7 @@ TEST(TrampolineArm64, DetectsHookPatternsAndGuardsIntraImageBranch) {
     EXPECT_TRUE(run_arm64(b_out_image));
 }
 
-TEST(TrampolineArm32, DetectsThumb2AndA32HooksAndGuardsIntraImageBranch) {
-    const auto maps = make_contiguous_lib_maps();
-    const uintptr_t addr_a32 = 0x7000005000ULL;
-    const uintptr_t addr_thumb = addr_a32 | 1u;
-    const uintptr_t r_start = 0x7000004000ULL;
-    const uintptr_t r_end = 0x7000008000ULL;
-
-    // Thumb 16-bit BKPT #0 (0xBE00)
-    {
-        const uint16_t thumb_bkpt[2] = {0xBE00u, 0xBF00u};
-        uint8_t bytes[4] = {};
-        std::memcpy(bytes, thumb_bkpt, sizeof(bytes));
-        EXPECT_TRUE(looks_like_trampoline_arm32(bytes, sizeof(bytes), addr_thumb, maps, r_start, r_end));
-    }
-
-    // Thumb-2 LDR.W PC, [PC, #0] (F8DF F000)
-    {
-        const uint16_t thumb2_ldr[2] = {0xF8DFu, 0xF000u};
-        uint8_t bytes[4] = {};
-        std::memcpy(bytes, thumb2_ldr, sizeof(bytes));
-        EXPECT_TRUE(looks_like_trampoline_arm32(bytes, sizeof(bytes), addr_thumb, maps, r_start, r_end));
-    }
-
-    // Thumb-2 B.W +0x4000 (stays inside contiguous image rx2) -> FALSE
-    // Encoding T4: offset = +0x4000 => S=0, J1=1 (I1=0), J2=1 (I2=0), imm10=0x004, imm11=0x000
-    {
-        const uint16_t hw0 = 0xF004u;
-        const uint16_t hw1 = 0xB800u;
-        uint8_t bytes[4] = {};
-        std::memcpy(bytes, &hw0, 2);
-        std::memcpy(bytes + 2, &hw1, 2);
-        EXPECT_FALSE(looks_like_trampoline_arm32(bytes, sizeof(bytes), addr_thumb, maps, r_start, r_end));
-    }
-
-    // Thumb-2 B.W +0x40000 (outside image) -> TRUE
-    {
-        const uint16_t hw0 = 0xF040u;
-        const uint16_t hw1 = 0xB800u;
-        uint8_t bytes[4] = {};
-        std::memcpy(bytes, &hw0, 2);
-        std::memcpy(bytes + 2, &hw1, 2);
-        EXPECT_TRUE(looks_like_trampoline_arm32(bytes, sizeof(bytes), addr_thumb, maps, r_start, r_end));
-    }
-
-    // A32 LDR PC, [PC, #-4] (0xE51FF004) -> TRUE
-    {
-        const uint32_t a32_ldr = 0xE51FF004u;
-        uint8_t bytes[4] = {};
-        std::memcpy(bytes, &a32_ldr, 4);
-        EXPECT_TRUE(looks_like_trampoline_arm32(bytes, sizeof(bytes), addr_a32, maps, r_start, r_end));
-    }
-
-    // A32 BX LR (0xE12FFF1E) -> FALSE (normal function return), BX r12 (0xE12FFF1C) -> TRUE
-    {
-        const uint32_t bx_lr = 0xE12FFF1Eu;
-        const uint32_t bx_r12 = 0xE12FFF1Cu;
-        uint8_t b_lr[4] = {};
-        uint8_t b_r12[4] = {};
-        std::memcpy(b_lr, &bx_lr, 4);
-        std::memcpy(b_r12, &bx_r12, 4);
-        EXPECT_FALSE(looks_like_trampoline_arm32(b_lr, 4, addr_a32, maps, r_start, r_end));
-        EXPECT_TRUE(looks_like_trampoline_arm32(b_r12, 4, addr_a32, maps, r_start, r_end));
-    }
-}
-
-TEST(TrampolineX86, DetectsX86_64AndX86HooksAndGuardsIntraImageJmp) {
+TEST(TrampolineX86_64, DetectsX86_64HooksAndGuardsIntraImageJmp) {
     const auto maps = make_contiguous_lib_maps();
     const uintptr_t addr = 0x7000005000ULL;
     const uintptr_t r_start = 0x7000004000ULL;
@@ -278,42 +213,35 @@ TEST(TrampolineX86, DetectsX86_64AndX86HooksAndGuardsIntraImageJmp) {
 
     // Clean x86_64 prologue: push rbp; mov rbp, rsp; sub rsp, 0x20
     const uint8_t clean[12] = {0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20, 0x90, 0x90, 0x90, 0x90};
-    EXPECT_FALSE(looks_like_trampoline_x86_common(clean, sizeof(clean), addr, maps, r_start, r_end, true));
-    EXPECT_FALSE(looks_like_trampoline_x86_common(clean, sizeof(clean), addr, maps, r_start, r_end, false));
+    EXPECT_FALSE(looks_like_trampoline_x86_64(clean, sizeof(clean), addr, maps, r_start, r_end));
 
     // INT3
     const uint8_t int3[6] = {0xCC, 0x90, 0x90, 0x90, 0x90, 0x90};
-    EXPECT_TRUE(looks_like_trampoline_x86_common(int3, sizeof(int3), addr, maps, r_start, r_end, true));
+    EXPECT_TRUE(looks_like_trampoline_x86_64(int3, sizeof(int3), addr, maps, r_start, r_end));
 
     // FF 25 [rip+disp32]
     const uint8_t ff25[6] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
-    EXPECT_TRUE(looks_like_trampoline_x86_common(ff25, sizeof(ff25), addr, maps, r_start, r_end, true));
+    EXPECT_TRUE(looks_like_trampoline_x86_64(ff25, sizeof(ff25), addr, maps, r_start, r_end));
 
     // PUSH imm32; RET
     const uint8_t push_ret[6] = {0x68, 0x78, 0x56, 0x34, 0x12, 0xC3};
-    EXPECT_TRUE(looks_like_trampoline_x86_common(push_ret, sizeof(push_ret), addr, maps, r_start, r_end, false));
+    EXPECT_TRUE(looks_like_trampoline_x86_64(push_ret, sizeof(push_ret), addr, maps, r_start, r_end));
 
     // x86_64 MOVABS RAX, imm64; JMP RAX
     const uint8_t movabs_jmp[12] = {0x48, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8, 0xFF, 0xE0};
-    EXPECT_TRUE(looks_like_trampoline_x86_common(movabs_jmp, sizeof(movabs_jmp), addr, maps, r_start, r_end, true));
-    EXPECT_FALSE(looks_like_trampoline_x86_common(movabs_jmp, sizeof(movabs_jmp), addr, maps, r_start, r_end, false));
-
-    // x86 (32-bit) MOV EAX, imm32; JMP EAX
-    const uint8_t mov32_jmp[7] = {0xB8, 0x11, 0x22, 0x33, 0x44, 0xFF, 0xE0};
-    EXPECT_TRUE(looks_like_trampoline_x86_common(mov32_jmp, sizeof(mov32_jmp), addr, maps, r_start, r_end, false));
-    EXPECT_FALSE(looks_like_trampoline_x86_common(mov32_jmp, sizeof(mov32_jmp), addr, maps, r_start, r_end, true));
+    EXPECT_TRUE(looks_like_trampoline_x86_64(movabs_jmp, sizeof(movabs_jmp), addr, maps, r_start, r_end));
 
     // E9 rel32 intra-image (+0x4000 -> rx2) -> FALSE
     uint8_t jmp_in[6] = {0xE9, 0, 0, 0, 0, 0x90};
     const int32_t disp_in = 0x4000 - 5;
     std::memcpy(jmp_in + 1, &disp_in, sizeof(disp_in));
-    EXPECT_FALSE(looks_like_trampoline_x86_common(jmp_in, sizeof(jmp_in), addr, maps, r_start, r_end, true));
+    EXPECT_FALSE(looks_like_trampoline_x86_64(jmp_in, sizeof(jmp_in), addr, maps, r_start, r_end));
 
     // E9 rel32 out-of-image (+0x40000) -> TRUE
     uint8_t jmp_out[6] = {0xE9, 0, 0, 0, 0, 0x90};
     const int32_t disp_out = 0x40000;
     std::memcpy(jmp_out + 1, &disp_out, sizeof(disp_out));
-    EXPECT_TRUE(looks_like_trampoline_x86_common(jmp_out, sizeof(jmp_out), addr, maps, r_start, r_end, true));
+    EXPECT_TRUE(looks_like_trampoline_x86_64(jmp_out, sizeof(jmp_out), addr, maps, r_start, r_end));
 }
 
 RISKENGINE_DEFINE_TEST_MAIN()

@@ -29,7 +29,9 @@
 
 namespace {
 
-#if defined(__LP64__)
+#if !defined(__LP64__)
+#error "RiskEngine tee_binder_probe requires a 64-bit ABI (arm64-v8a or x86_64)"
+#endif
 using ElfEhdr = Elf64_Ehdr;
 using ElfPhdr = Elf64_Phdr;
 using ElfDyn = Elf64_Dyn;
@@ -38,25 +40,11 @@ using ElfRela = Elf64_Rela;
 using ElfRel = Elf64_Rel;
 #define TEE_ELF_R_SYM(i) ELF64_R_SYM(i)
 #define TEE_ELF_R_TYPE(i) ELF64_R_TYPE(i)
-#else
-using ElfEhdr = Elf32_Ehdr;
-using ElfPhdr = Elf32_Phdr;
-using ElfDyn = Elf32_Dyn;
-using ElfSym = Elf32_Sym;
-using ElfRela = Elf32_Rela;
-using ElfRel = Elf32_Rel;
-#define TEE_ELF_R_SYM(i) ELF32_R_SYM(i)
-#define TEE_ELF_R_TYPE(i) ELF32_R_TYPE(i)
-#endif
 
 #if defined(__aarch64__)
 constexpr unsigned long kJumpSlotRelocType = R_AARCH64_JUMP_SLOT;
-#elif defined(__arm__)
-constexpr unsigned long kJumpSlotRelocType = R_ARM_JUMP_SLOT;
 #elif defined(__x86_64__)
 constexpr unsigned long kJumpSlotRelocType = R_X86_64_JUMP_SLOT;
-#elif defined(__i386__)
-constexpr unsigned long kJumpSlotRelocType = R_386_JMP_SLOT;
 #else
 constexpr unsigned long kJumpSlotRelocType = 0;
 #endif
@@ -408,10 +396,7 @@ void run_inline_ioctl_vector(safe_mem::PipeMemoryReader &mem,
         return;
     }
 
-    uintptr_t code_addr = reinterpret_cast<uintptr_t>(ioctl_addr);
-#if defined(__arm__)
-    code_addr &= ~static_cast<uintptr_t>(1U);  // Clear Thumb bit before reading code bytes
-#endif
+    const uintptr_t code_addr = reinterpret_cast<uintptr_t>(ioctl_addr);
 
     uint8_t mem_prologue[16] = {};
     if (!mem.read(code_addr, mem_prologue, sizeof(mem_prologue))) {
@@ -537,20 +522,6 @@ long inline_asm_ioctl(int fd, unsigned long req, void *arg) noexcept {
             : "r"(x1), "r"(x2), "r"(x8)
             : "memory", "cc");
     return x0;
-#elif defined(__arm__)
-    register long r0 __asm__("r0") = static_cast<long>(fd);
-    register long r1 __asm__("r1") = static_cast<long>(req);
-    register long r2 __asm__("r2") = reinterpret_cast<long>(arg);
-    register long r3 __asm__("r3") = static_cast<long>(__NR_ioctl);
-    __asm__ __volatile__(
-            "push {r7}\n\t"
-            "mov r7, r3\n\t"
-            "svc #0\n\t"
-            "pop {r7}"
-            : "+r"(r0)
-            : "r"(r1), "r"(r2), "r"(r3)
-            : "memory", "cc");
-    return r0;
 #elif defined(__x86_64__)
     long ret = 0;
     __asm__ __volatile__(
@@ -561,22 +532,6 @@ long inline_asm_ioctl(int fd, unsigned long req, void *arg) noexcept {
               "S"(static_cast<long>(req)),
               "d"(reinterpret_cast<long>(arg))
             : "rcx", "r11", "memory", "cc");
-    return ret;
-#elif defined(__i386__)
-    long ret = 0;
-    // Bind fd to a non-EBX register (%esi) so pushl %ebx never shifts a stack-relative %esp operand
-    // under -fomit-frame-pointer PIC builds.
-    __asm__ __volatile__(
-            "pushl %%ebx\n\t"
-            "movl %%esi, %%ebx\n\t"
-            "int $0x80\n\t"
-            "popl %%ebx"
-            : "=a"(ret)
-            : "a"(static_cast<long>(__NR_ioctl)),
-              "S"(static_cast<long>(fd)),
-              "c"(static_cast<long>(req)),
-              "d"(reinterpret_cast<long>(arg))
-            : "memory", "cc");
     return ret;
 #else
     return my_ioctl(fd, req, reinterpret_cast<unsigned long>(arg));

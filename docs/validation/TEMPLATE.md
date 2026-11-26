@@ -15,7 +15,7 @@
 | Gate / Suite | Command | Status (`PASS`/`FAIL`) | Key Measured Metrics |
 | :--- | :--- | :---: | :--- |
 | Gate 1 — Evidence Contracts | `python3 -B scripts/check-evidence-records.py` | | `16/16` domains, 7 headings each |
-| Gate 2 — ELF Hardening + JNI 1:1 + R8 Dex | `CHECK_JNI_DEX=1 ./scripts/check-elf-hardening.sh ...` | | AAR: `___ B` (`<= 8 MiB`), `.so`: `___–___ B` (`<= 2000 KiB`), 2 exports, 16KB align, JNI `41/41`, R8 Dex `___ < 2500` |
+| Gate 2 — ELF Hardening + JNI 1:1 + R8 Dex | `CHECK_JNI_DEX=1 ./scripts/check-elf-hardening.sh ...` | | AAR: `___ B` (`<= 4 MiB`), `.so`: `___–___ B` (`<= 2000 KiB`), 2 64-bit ABIs, 2 exports, 16KB align, JNI `41/41`, R8 Dex `___ < 2500` |
 | Gate 3 — Single-Source `<queries>`/INI/Version | `python3 -B scripts/check-single-source-sync.py` | | `<queries>=52`, 13 lists synced, version aligned |
 | Gate 4 — Public ABI Lock & AAR Purity | `./gradlew :riskengine-sdk:apiCheck` | | `___` public/protected types locked, POM 0 deps, AAR pure |
 | Gate 5 — Reflection & Text-Protocol Boundary | `python3 -B scripts/check-boundary-guards.py` | | `___` audited reflection sites, 0 unregistered, 0 UI-text branching |

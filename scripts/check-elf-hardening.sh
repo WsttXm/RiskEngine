@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AAR_PATH="${1:-${ROOT_DIR}/riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar}"
 
-MAX_AAR_BYTES=8388608   # 8 MiB (8 * 1024 * 1024)
+MAX_AAR_BYTES=4194304   # 4 MiB (4 * 1024 * 1024)
 MAX_SO_BYTES=2048000    # 2000 KiB (2000 * 1024)
 MIN_LOAD_ALIGN=16384    # 16 KiB (0x4000)
 
@@ -120,14 +120,14 @@ max_aar_bytes = int(sys.argv[3])
 max_so_bytes = int(sys.argv[4])
 min_load_align = int(sys.argv[5])
 
-expected_abis = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]
+expected_abis = ["arm64-v8a", "x86_64"]
 expected_exports = {"JNI_OnLoad", "JNI_OnUnload"}
 errors = []
 
 aar_size = os.path.getsize(aar_path)
 if aar_size > max_aar_bytes:
     errors.append(
-        f"AAR size {aar_size} bytes exceeds limit {max_aar_bytes} bytes (8 MiB)"
+        f"AAR size {aar_size} bytes exceeds limit {max_aar_bytes} bytes (4 MiB)"
     )
 
 print(f"    AAR size: {aar_size:,} bytes (limit: {max_aar_bytes:,} bytes)")
@@ -277,7 +277,7 @@ if errors:
         print(f"  - {err}", file=sys.stderr)
     die(1)
 
-print("==> ELF Hardening Gate PASSED for all 4 ABIs.")
+print("==> ELF Hardening Gate PASSED for all 2 64-bit ABIs.")
 PY
 
 if [[ "${CHECK_JNI_DEX:-0}" == "1" ]]; then
