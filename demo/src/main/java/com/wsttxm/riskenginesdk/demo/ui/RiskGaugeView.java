@@ -24,13 +24,21 @@ import com.wsttxm.riskenginesdk.demo.R;
 
 /**
  * Dual-mode precision gauge view:
- * - EMBLEM mode: Serene RiskEngine shield-star emblem with display-synced orbital sweep during scan.
+ * - EMBLEM mode: Serene RiskEngine shield-star emblem with display-synced orbital sweep and
+ *   3-tier progressive CRITICAL -> FAST -> POSTPONED arc feedback during tiered scans.
  * - SCORE mode: Apple Health-inspired circular score arc with spring-driven sweep & tabular numerals.
  */
 public class RiskGaugeView extends View {
 
     public static final int MODE_EMBLEM = 0;
     public static final int MODE_SCORE = 1;
+
+    public static final int TIER_IDLE = 0;
+    public static final int TIER_CRITICAL = 1;
+    public static final int TIER_FAST = 2;
+    public static final int TIER_POSTPONED = 3;
+
+    public static final int DEFAULT_MAX_SCORE = 100;
 
     private int mode = MODE_EMBLEM;
     private boolean scanning = false;
@@ -41,8 +49,12 @@ public class RiskGaugeView extends View {
     private final Paint emblemPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint scoreTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint maxTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint tierTrackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint tierArcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint tierLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final RectF arcBounds = new RectF();
+    private final RectF tierArcBounds = new RectF();
     private final Path shieldPath = new Path();
     private final Path transformedShield = new Path();
     private final Matrix emblemMatrix = new Matrix();
@@ -51,9 +63,14 @@ public class RiskGaugeView extends View {
     private float displayedProgress = 0f;
     private float targetProgress = 0f;
     private int scoreValue = 0;
-    private int maxScoreValue = 18;
+    private int maxScoreValue = DEFAULT_MAX_SCORE;
     @ColorInt
     private int accentColor;
+    private int activeTierStage = TIER_IDLE;
+    @ColorInt
+    private int tierAccentColor;
+    private String tierStatusLabel = "";
+    private float displayedTierProgress = 0f;
 
     private float orbitAngle = -90f;
     private float pulsePhase = 0f;
@@ -62,6 +79,8 @@ public class RiskGaugeView extends View {
 
     private final FloatValueHolder progressHolder = new FloatValueHolder(0f);
     private SpringAnimation progressSpring;
+    private final FloatValueHolder tierProgressHolder = new FloatValueHolder(0f);
+    private SpringAnimation tierProgressSpring;
 
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override
@@ -124,6 +143,20 @@ public class RiskGaugeView extends View {
         maxTextPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         maxTextPaint.setFontFeatureSettings("tnum");
 
+        tierAccentColor = accentColor;
+        tierTrackPaint.setStyle(Paint.Style.STROKE);
+        tierTrackPaint.setStrokeCap(Paint.Cap.ROUND);
+        tierTrackPaint.setColor(ContextCompat.getColor(context, R.color.track));
+
+        tierArcPaint.setStyle(Paint.Style.STROKE);
+        tierArcPaint.setStrokeCap(Paint.Cap.ROUND);
+        tierArcPaint.setColor(tierAccentColor);
+
+        tierLabelPaint.setTextAlign(Paint.Align.CENTER);
+        tierLabelPaint.setColor(ContextCompat.getColor(context, R.color.text_secondary));
+        tierLabelPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        tierLabelPaint.setFontFeatureSettings("tnum");
+
         buildShieldPath();
         initSpring();
     }
@@ -137,6 +170,17 @@ public class RiskGaugeView extends View {
         progressSpring.setMinimumVisibleChange(0.002f);
         progressSpring.addUpdateListener((animation, value, velocity) -> {
             displayedProgress = Math.max(0f, Math.min(1f, value));
+            invalidate();
+        });
+
+        tierProgressSpring = new SpringAnimation(tierProgressHolder);
+        SpringForce tierForce = new SpringForce(0f);
+        tierForce.setDampingRatio(0.88f);
+        tierForce.setStiffness(260f);
+        tierProgressSpring.setSpring(tierForce);
+        tierProgressSpring.setMinimumVisibleChange(0.002f);
+        tierProgressSpring.addUpdateListener((animation, value, velocity) -> {
+            displayedTierProgress = Math.max(0f, Math.min(1f, value));
             invalidate();
         });
     }
@@ -186,6 +230,64 @@ public class RiskGaugeView extends View {
         invalidate();
     }
 
+    /**
+     * Updates the progressive 3-tier scan state ({@link #TIER_IDLE} -&gt; {@link #TIER_CRITICAL}
+     * -&gt; {@link #TIER_FAST} -&gt; {@link #TIER_POSTPONED}) driven by {@code ExecutionStateListener}
+     * callbacks without blocking the main thread.
+     */
+    public void setScanTierProgress(int tierStage, @ColorInt int color, @Nullable String badgeLabel) {
+        int clamped = Math.max(TIER_IDLE, Math.min(TIER_POSTPONED, tierStage));
+        this.activeTierStage = clamped;
+        this.tierAccentColor = color;
+        this.tierStatusLabel = badgeLabel == null ? "" : badgeLabel;
+
+        float target;
+        switch (clamped) {
+            case TIER_CRITICAL:
+                target = 1f / 3f;
+                break;
+            case TIER_FAST:
+                target = 2f / 3f;
+                break;
+            case TIER_POSTPONED:
+                target = 1f;
+                break;
+            case TIER_IDLE:
+            default:
+                target = scanning ? 0.12f : 0f;
+                break;
+        }
+
+        if (ValueAnimator.areAnimatorsEnabled() && tierProgressSpring != null) {
+            tierProgressSpring.cancel();
+            tierProgressHolder.setValue(displayedTierProgress);
+            tierProgressSpring.animateToFinalPosition(target);
+        } else {
+            if (tierProgressSpring != null) {
+                tierProgressSpring.cancel();
+            }
+            displayedTierProgress = target;
+            tierProgressHolder.setValue(target);
+            invalidate();
+        }
+    }
+
+    public void resetScanTierProgress() {
+        this.activeTierStage = TIER_IDLE;
+        this.tierAccentColor = ContextCompat.getColor(getContext(), R.color.accent);
+        this.tierStatusLabel = "";
+        if (tierProgressSpring != null) {
+            tierProgressSpring.cancel();
+        }
+        displayedTierProgress = 0f;
+        tierProgressHolder.setValue(0f);
+        invalidate();
+    }
+
+    public int getActiveTierStage() {
+        return activeTierStage;
+    }
+
     public void setScore(int score, int maxScore, @ColorInt int color, boolean animate) {
         this.mode = MODE_SCORE;
         stopOrbit();
@@ -197,7 +299,7 @@ public class RiskGaugeView extends View {
         // Actually for SAFE (score == 0), show a calm full ring in emerald so it reads as "100% protected"
         float visualArc = (scoreValue == 0 && color == ContextCompat.getColor(getContext(), R.color.risk_safe))
                 ? 1f
-                : Math.max(targetProgress, scoreValue > 0 ? 0.08f : 0f);
+                : Math.max(targetProgress, scoreValue > 0 ? 0.06f : 0f);
 
         if (animate && ValueAnimator.areAnimatorsEnabled()) {
             progressSpring.cancel();
@@ -240,6 +342,9 @@ public class RiskGaugeView extends View {
         if (progressSpring != null) {
             progressSpring.cancel();
         }
+        if (tierProgressSpring != null) {
+            tierProgressSpring.cancel();
+        }
         super.onDetachedFromWindow();
     }
 
@@ -275,15 +380,16 @@ public class RiskGaugeView extends View {
         trackPaint.setColor(ContextCompat.getColor(getContext(), R.color.gauge_idle_ring));
         canvas.drawCircle(cx, cy, radius, trackPaint);
 
-        // Scanning luminous sweep (respecting reduced motion)
+        // Scanning luminous sweep + 3-tier progressive arc (CRITICAL -> FAST -> POSTPONED)
         if (scanning) {
             arcBounds.set(cx - radius, cy - radius, cx + radius, cy + radius);
+            int activeColor = tierAccentColor != 0 ? tierAccentColor : accentColor;
             if (ValueAnimator.areAnimatorsEnabled()) {
                 arcPaint.setStrokeWidth(stroke * 1.35f);
-                int transparentAccent = accentColor & 0x00FFFFFF;
+                int transparentAccent = activeColor & 0x00FFFFFF;
                 SweepGradient shader = new SweepGradient(
                         cx, cy,
-                        new int[]{transparentAccent, transparentAccent, accentColor},
+                        new int[]{transparentAccent, transparentAccent, activeColor},
                         new float[]{0f, 0.58f, 1f}
                 );
                 Matrix rot = new Matrix();
@@ -296,23 +402,49 @@ public class RiskGaugeView extends View {
                 // Reduced motion: gentle static accent ring
                 arcPaint.setShader(null);
                 arcPaint.setStrokeWidth(stroke * 1.2f);
-                arcPaint.setColor(accentColor);
+                arcPaint.setColor(activeColor);
                 arcPaint.setAlpha(190);
                 canvas.drawCircle(cx, cy, radius, arcPaint);
                 arcPaint.setAlpha(255);
             }
+
+            // Inner 3-segment progressive tier ring (CRITICAL / FAST / POSTPONED)
+            float tierStroke = Math.max(2.5f * density, size * 0.032f);
+            float tierRadius = radius - stroke * 2.5f;
+            if (tierRadius > size * 0.18f) {
+                tierArcBounds.set(cx - tierRadius, cy - tierRadius, cx + tierRadius, cy + tierRadius);
+                tierTrackPaint.setStrokeWidth(tierStroke);
+                tierTrackPaint.setColor(ContextCompat.getColor(getContext(), R.color.track));
+                tierArcPaint.setStrokeWidth(tierStroke);
+                tierArcPaint.setColor(activeColor);
+
+                float segmentSpan = 104f;
+                float gapSpan = 16f;
+                float filledSegments = displayedTierProgress * 3f;
+                for (int i = 0; i < 3; i++) {
+                    float startAngle = -90f + i * (segmentSpan + gapSpan) + gapSpan * 0.5f;
+                    canvas.drawArc(tierArcBounds, startAngle, segmentSpan, false, tierTrackPaint);
+                    float segFill = Math.max(0f, Math.min(1f, filledSegments - i));
+                    if (segFill > 0.01f) {
+                        canvas.drawArc(tierArcBounds, startAngle, segmentSpan * segFill, false, tierArcPaint);
+                    }
+                }
+            }
         }
 
         // Centered RiskEngine minimalist shield-star mark
-        float glyphScale = (size * 0.72f) / 108f;
+        boolean showTierLabel = scanning && tierStatusLabel != null && !tierStatusLabel.isEmpty();
+        float glyphScale = (size * (showTierLabel ? 0.54f : 0.72f)) / 108f;
+        float glyphCenterY = showTierLabel ? (cy - size * 0.075f) : cy;
         emblemMatrix.reset();
         emblemMatrix.postTranslate(-54f, -54f);
         emblemMatrix.postScale(glyphScale, glyphScale);
-        emblemMatrix.postTranslate(cx, cy);
+        emblemMatrix.postTranslate(cx, glyphCenterY);
         shieldPath.transform(emblemMatrix, transformedShield);
 
-        emblemPaint.setColor(ContextCompat.getColor(getContext(),
-                scanning ? R.color.accent : R.color.text_primary));
+        emblemPaint.setColor(scanning
+                ? (tierAccentColor != 0 ? tierAccentColor : ContextCompat.getColor(getContext(), R.color.accent))
+                : ContextCompat.getColor(getContext(), R.color.text_primary));
         if (scanning && ValueAnimator.areAnimatorsEnabled()) {
             float alphaFactor = 0.80f + 0.20f * (float) Math.sin(pulsePhase);
             emblemPaint.setAlpha((int) (255 * alphaFactor));
@@ -321,6 +453,12 @@ public class RiskGaugeView extends View {
         }
         canvas.drawPath(transformedShield, emblemPaint);
         emblemPaint.setAlpha(255);
+
+        if (showTierLabel) {
+            tierLabelPaint.setTextSize(Math.max(9.5f * density, size * 0.088f));
+            tierLabelPaint.setColor(ContextCompat.getColor(getContext(), R.color.text_secondary));
+            canvas.drawText(tierStatusLabel, cx, cy + size * 0.22f, tierLabelPaint);
+        }
     }
 
     private void drawScoreMode(Canvas canvas, float cx, float cy, float size) {
@@ -340,8 +478,8 @@ public class RiskGaugeView extends View {
             canvas.drawArc(arcBounds, -90f, sweep, false, arcPaint);
         }
 
-        // Optical tabular numeral typography
-        scoreTextPaint.setTextSize(size * 0.30f);
+        // Optical tabular numeral typography calibrated for 0-100 scale
+        scoreTextPaint.setTextSize(scoreValue >= 100 ? size * 0.26f : size * 0.30f);
         scoreTextPaint.setColor(ContextCompat.getColor(getContext(), R.color.text_primary));
         maxTextPaint.setTextSize(size * 0.135f);
         maxTextPaint.setColor(ContextCompat.getColor(getContext(), R.color.text_tertiary));

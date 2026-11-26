@@ -6,9 +6,11 @@
 #include "../util/syscall_wrapper.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <set>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -23,78 +25,219 @@ void add_token(std::vector<std::string> &tokens, const std::string &token) {
     }
 }
 
+std::string parent_dir_of(const std::string &path) {
+    auto pos = path.rfind('/');
+    if (pos == std::string::npos || pos == 0) return std::string("/");
+    return path.substr(0, pos);
+}
+
+std::string base_name_of(const std::string &path) {
+    auto pos = path.rfind('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+enum class SyscallOutcome {
+    EXISTS,
+    DENIED,
+    ABSENT,
+    OTHER
+};
+
+SyscallOutcome classify_probe_result(long ret, int err, bool is_open) {
+    if (ret >= 0) return SyscallOutcome::EXISTS;
+    if (is_open && err == EISDIR) return SyscallOutcome::EXISTS;
+    if (err == ENOENT || err == ENOTDIR) return SyscallOutcome::ABSENT;
+    if (err == EACCES || err == EPERM) return SyscallOutcome::DENIED;
+    return SyscallOutcome::OTHER;
+}
+
 struct PathProbe {
-    bool access_ok = false;
-    bool stat_ok = false;
-    bool open_ok = false;
-    bool any() const { return access_ok || stat_ok || open_ok; }
-    bool mismatch() const {
-        int n = static_cast<int>(access_ok) + static_cast<int>(stat_ok)
-                + static_cast<int>(open_ok);
-        return n == 1 || n == 2;
+    SyscallOutcome access = SyscallOutcome::OTHER;
+    SyscallOutcome stat = SyscallOutcome::OTHER;
+    SyscallOutcome open = SyscallOutcome::OTHER;
+
+    bool any_exists() const {
+        return access == SyscallOutcome::EXISTS
+                || stat == SyscallOutcome::EXISTS
+                || open == SyscallOutcome::EXISTS;
+    }
+
+    bool any_absent() const {
+        return access == SyscallOutcome::ABSENT
+                || stat == SyscallOutcome::ABSENT
+                || open == SyscallOutcome::ABSENT;
+    }
+
+    bool any_metadata_denied() const {
+        return access == SyscallOutcome::DENIED || stat == SyscallOutcome::DENIED;
+    }
+
+    // 0711/0700 files return EXISTS for faccessat/fstatat and DENIED (EACCES)
+    // for openat; that is normal DAC/SELinux behavior, NOT a syscall mismatch.
+    // A genuine mismatch requires conflicting EXISTS vs ABSENT outcomes.
+    bool exists_absent_mismatch() const {
+        return any_exists() && any_absent();
+    }
+
+    bool denied_absent_mismatch() const {
+        return !any_exists() && any_metadata_denied() && any_absent();
+    }
+
+    bool eacces_only() const {
+        return !any_exists() && any_metadata_denied() && !any_absent();
     }
 };
 
 PathProbe probe_path(const std::string &path) {
     PathProbe probe;
-    probe.access_ok = my_faccessat(AT_FDCWD, path.c_str(), F_OK, 0) == 0;
+    long a_ret = my_faccessat(AT_FDCWD, path.c_str(), F_OK, 0);
+    probe.access = classify_probe_result(a_ret, raw_last_error(), false);
+
     struct stat st {};
-    probe.stat_ok = my_fstatat(AT_FDCWD, path.c_str(), &st, 0) == 0;
-    int fd = static_cast<int>(my_openat(AT_FDCWD, path.c_str(),
-                                        O_RDONLY | O_CLOEXEC, 0));
+    long s_ret = my_fstatat(AT_FDCWD, path.c_str(), &st, 0);
+    probe.stat = classify_probe_result(s_ret, raw_last_error(), false);
+
+    long fd = my_openat(AT_FDCWD, path.c_str(), O_RDONLY | O_CLOEXEC, 0);
     if (fd >= 0) {
-        probe.open_ok = true;
-        my_close(fd);
+        probe.open = SyscallOutcome::EXISTS;
+        my_close(static_cast<int>(fd));
+    } else {
+        probe.open = classify_probe_result(fd, raw_last_error(), true);
     }
     return probe;
 }
 
+/**
+ * Verifies whether the parent directory is traversable and reliably returns
+ * ENOENT (rather than EACCES/EPERM/ENOTDIR) for a guaranteed-absent sibling.
+ * Prevents SELinux/DAC parent-directory denials from ever being misinterpreted
+ * as target existence.
+ */
+bool is_parent_reachable_control(const std::string &path,
+                                 std::map<std::string, bool> &cache) {
+    const std::string parent = parent_dir_of(path);
+    auto it = cache.find(parent);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    std::string sentinel = (parent == "/" ? std::string() : parent)
+            + OBF("/.re_ctrl_nonexistent_7c3e91");
+    long a_ret = my_faccessat(AT_FDCWD, sentinel.c_str(), F_OK, 0);
+    int a_err = raw_last_error();
+    struct stat st {};
+    long s_ret = my_fstatat(AT_FDCWD, sentinel.c_str(), &st, 0);
+    int s_err = raw_last_error();
+    bool reachable = (a_ret < 0 && a_err == ENOENT)
+            && (s_ret < 0 && s_err == ENOENT);
+    cache.emplace(parent, reachable);
+    return reachable;
+}
+
 void probe_group(const std::vector<std::string> &paths, const std::string &prefix,
+                 std::map<std::string, bool> &parent_ctrl_cache,
                  std::vector<std::string> &tokens) {
     for (const auto &path : paths) {
         PathProbe probe = probe_path(path);
-        if (probe.any()) {
+        if (probe.any_exists()) {
             add_token(tokens, prefix + path);
-        }
-        if (probe.mismatch()) {
-            add_token(tokens, OBF("syscall_mismatch:") + path);
+            if (probe.exists_absent_mismatch()) {
+                add_token(tokens, OBF("syscall_mismatch:") + path);
+            }
+        } else if (probe.eacces_only()) {
+            if (is_parent_reachable_control(path, parent_ctrl_cache)) {
+                add_token(tokens, OBF("eacces_exists:") + path);
+            }
+        } else if (probe.denied_absent_mismatch()) {
+            if (is_parent_reachable_control(path, parent_ctrl_cache)) {
+                add_token(tokens, OBF("syscall_mismatch:") + path);
+            }
         }
     }
 }
 
-void scan_path_env(std::vector<std::string> &tokens) {
-    std::string env_content = read_file_string(OBF("/proc/self/environ").c_str(), 32 * 1024);
-    if (env_content.empty()) return;
-    std::string path_value;
-    const std::string path_prefix = OBF("PATH=");
-    size_t i = 0;
-    while (i < env_content.size()) {
-        size_t nul = env_content.find('\0', i);
-        if (nul == std::string::npos) nul = env_content.size();
-        if (nul - i > path_prefix.size()
-                && env_content.compare(i, path_prefix.size(), path_prefix) == 0) {
-            path_value = env_content.substr(i + path_prefix.size(), nul - i - path_prefix.size());
-            break;
-        }
-        i = nul + 1;
+std::string normalize_dir_path(std::string dir) {
+    while (dir.size() > 1 && dir.back() == '/') {
+        dir.pop_back();
     }
-    if (path_value.empty()) return;
+    return dir;
+}
+
+void scan_path_env(const std::set<std::string> &already_probed,
+                   std::map<std::string, bool> &parent_ctrl_cache,
+                   std::vector<std::string> &tokens) {
+    std::set<std::string> unique_dirs;
+    std::string env_content = read_file_string(OBF("/proc/self/environ").c_str(), 32 * 1024);
+    if (!env_content.empty()) {
+        std::string path_value;
+        const std::string path_prefix = OBF("PATH=");
+        size_t i = 0;
+        while (i < env_content.size()) {
+            size_t nul = env_content.find('\0', i);
+            if (nul == std::string::npos) nul = env_content.size();
+            if (nul - i > path_prefix.size()
+                    && env_content.compare(i, path_prefix.size(), path_prefix) == 0) {
+                path_value = env_content.substr(i + path_prefix.size(), nul - i - path_prefix.size());
+                break;
+            }
+            i = nul + 1;
+        }
+        size_t start = 0;
+        while (start < path_value.size()) {
+            size_t sep = path_value.find(':', start);
+            if (sep == std::string::npos) sep = path_value.size();
+            std::string dir = normalize_dir_path(path_value.substr(start, sep - start));
+            start = sep + 1;
+            if (!dir.empty() && dir[0] == '/') {
+                unique_dirs.insert(dir);
+            }
+        }
+    }
 
     const std::vector<std::string> bins = {
             OBF("su"), OBF("ksud"), OBF("apd"), OBF("magisk")
     };
-    size_t start = 0;
-    while (start < path_value.size()) {
-        size_t sep = path_value.find(':', start);
-        if (sep == std::string::npos) sep = path_value.size();
-        std::string dir = path_value.substr(start, sep - start);
-        start = sep + 1;
-        if (dir.empty()) continue;
+    const std::string busybox_name = OBF("busybox");
+
+    // Dynamic $PATH binaries merged without duplicates, preserving EACCES-vs-ENOENT parent control.
+    for (const auto &dir : unique_dirs) {
+        const std::string prefix = (dir == "/") ? std::string("/") : (dir + "/");
         for (const auto &bin : bins) {
-            std::string candidate = dir + "/" + bin;
-            if (my_faccessat(AT_FDCWD, candidate.c_str(), F_OK, 0) == 0) {
-                add_token(tokens, OBF("path_su:") + candidate);
+            std::string candidate = prefix + bin;
+            if (already_probed.count(candidate) > 0) {
+                continue;
             }
+            PathProbe probe = probe_path(candidate);
+            if (probe.any_exists()) {
+                add_token(tokens, OBF("path_su:") + candidate);
+                if (probe.exists_absent_mismatch()) {
+                    add_token(tokens, OBF("syscall_mismatch:") + candidate);
+                }
+            } else if (probe.eacces_only()) {
+                if (is_parent_reachable_control(candidate, parent_ctrl_cache)) {
+                    add_token(tokens, OBF("eacces_exists:") + candidate);
+                }
+            } else if (probe.denied_absent_mismatch()) {
+                if (is_parent_reachable_control(candidate, parent_ctrl_cache)) {
+                    add_token(tokens, OBF("syscall_mismatch:") + candidate);
+                }
+            }
+        }
+    }
+
+    // BusyBox isolated strictly as a noise/informational token (never actionable root).
+    std::set<std::string> busybox_dirs = unique_dirs;
+    busybox_dirs.insert(OBF("/system/bin"));
+    busybox_dirs.insert(OBF("/system/xbin"));
+    busybox_dirs.insert(OBF("/system_ext/bin"));
+    busybox_dirs.insert(OBF("/sbin"));
+    busybox_dirs.insert(OBF("/data/local/xbin"));
+    busybox_dirs.insert(OBF("/data/local/bin"));
+    for (const auto &dir : busybox_dirs) {
+        const std::string prefix = (dir == "/") ? std::string("/") : (dir + "/");
+        std::string candidate = prefix + busybox_name;
+        if (probe_path(candidate).any_exists()) {
+            add_token(tokens, OBF("busybox:") + candidate);
+            break;
         }
     }
 }
@@ -190,17 +333,6 @@ int read_selinux_enforce() {
     if (buf[0] == '0') return 0;
     if (buf[0] == '1') return 1;
     return -1;
-}
-
-std::string parent_dir_of(const std::string &path) {
-    auto pos = path.rfind('/');
-    if (pos == std::string::npos || pos == 0) return std::string("/");
-    return path.substr(0, pos);
-}
-
-std::string base_name_of(const std::string &path) {
-    auto pos = path.rfind('/');
-    return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
 /**
@@ -309,19 +441,35 @@ bool native_check_root() {
 
 std::string native_get_root_evidence() {
     std::vector<std::string> tokens;
-    probe_group(list_su_paths(), OBF("su:"), tokens);
-    probe_group(list_magisk_paths(), OBF("magisk:"), tokens);
-    probe_group(list_kernelsu_paths(), OBF("ksu:"), tokens);
-    probe_group(list_apatch_paths(), OBF("apatch:"), tokens);
-    probe_group(list_module_paths(), OBF("modules:"), tokens);
-    probe_group(list_tamper_tool_paths(), OBF("tamper_tool:"), tokens);
-    scan_path_env(tokens);
+    std::map<std::string, bool> parent_ctrl_cache;
+    const auto su_paths = list_su_paths();
+    const auto magisk_paths = list_magisk_paths();
+    const auto ksu_paths = list_kernelsu_paths();
+    const auto apatch_paths = list_apatch_paths();
+    const auto module_paths = list_module_paths();
+    const auto tamper_paths = list_tamper_tool_paths();
+
+    probe_group(su_paths, OBF("su:"), parent_ctrl_cache, tokens);
+    probe_group(magisk_paths, OBF("magisk:"), parent_ctrl_cache, tokens);
+    probe_group(ksu_paths, OBF("ksu:"), parent_ctrl_cache, tokens);
+    probe_group(apatch_paths, OBF("apatch:"), parent_ctrl_cache, tokens);
+    probe_group(module_paths, OBF("modules:"), parent_ctrl_cache, tokens);
+    probe_group(tamper_paths, OBF("tamper_tool:"), parent_ctrl_cache, tokens);
+
+    std::set<std::string> already_probed;
+    already_probed.insert(su_paths.begin(), su_paths.end());
+    already_probed.insert(magisk_paths.begin(), magisk_paths.end());
+    already_probed.insert(ksu_paths.begin(), ksu_paths.end());
+    already_probed.insert(apatch_paths.begin(), apatch_paths.end());
+    already_probed.insert(module_paths.begin(), module_paths.end());
+    already_probed.insert(tamper_paths.begin(), tamper_paths.end());
+    scan_path_env(already_probed, parent_ctrl_cache, tokens);
     scan_mountinfo(tokens);
 
     // Hidden-root detection that path probes cannot reach.
     std::map<std::string, RawDirResult> dir_cache;
-    cross_check_listing(list_su_paths(), dir_cache, tokens);
-    cross_check_listing(list_magisk_paths(), dir_cache, tokens);
+    cross_check_listing(su_paths, dir_cache, tokens);
+    cross_check_listing(magisk_paths, dir_cache, tokens);
 
     const std::string kernel_evidence = native_get_kernel_root_evidence();
     if (!kernel_evidence.empty()) {

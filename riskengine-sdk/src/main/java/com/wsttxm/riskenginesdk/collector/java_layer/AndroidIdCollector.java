@@ -14,7 +14,7 @@ import com.wsttxm.riskenginesdk.util.CLog;
 import com.wsttxm.riskenginesdk.util.PrivacyUtils;
 
 public class AndroidIdCollector extends BaseCollector {
-    private static final Uri SECURE_URI = Uri.parse("content://settings/secure");
+    private static final String SECURE_URI_STRING = "content://settings/secure";
 
     public AndroidIdCollector(Context context) {
         this(context, null);
@@ -55,7 +55,7 @@ public class AndroidIdCollector extends BaseCollector {
     private void collectViaContentResolver(CollectorResult result) {
         try {
             Bundle callResult = context.getContentResolver().call(
-                    SECURE_URI,
+                    Uri.parse(SECURE_URI_STRING),
                     "GET_secure",
                     "android_id",
                     new Bundle()
@@ -74,7 +74,7 @@ public class AndroidIdCollector extends BaseCollector {
      */
     private void collectViaProviderQuery(CollectorResult result) {
         try (Cursor cursor = context.getContentResolver().query(
-                SECURE_URI,
+                Uri.parse(SECURE_URI_STRING),
                 new String[]{"value"},
                 "name=?",
                 new String[]{"android_id"},

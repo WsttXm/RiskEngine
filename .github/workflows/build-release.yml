@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build-release:
-    name: Build SDK and Demo
+    name: Build Core SDK & Demo
     runs-on: ubuntu-latest
 
     steps:
@@ -34,7 +34,7 @@ jobs:
 
           tag="${GITHUB_REF_NAME}"
           if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Tag must use semantic version format vMAJOR.MINOR.PATCH, for example v1.2.3."
+            echo "Tag must use semantic version format vMAJOR.MINOR.PATCH, for example v2.0.0."
             exit 1
           fi
 
@@ -56,53 +56,57 @@ jobs:
           echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "code=$version_code" >> "$GITHUB_OUTPUT"
 
-      - name: Build and verify SDK AAR and demo APK
+      - name: Verify Core SDK, Gates 1-6, L1+L2+L3 & Demo APK
         run: |
           ./scripts/ci-verify.sh \
             -PreleaseVersionName="${{ steps.version.outputs.name }}" \
             -PreleaseVersionCode="${{ steps.version.outputs.code }}"
 
-      - name: Collect release artifacts
+      - name: Collect and checksum release artifacts
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
 
+          rm -rf release-artifacts
           mkdir -p release-artifacts
 
-          sdk_aar="riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"
-          sdk_sources="riskengine-sdk/build/intermediates/source_jar/release/release-sources.jar"
-          sdk_pom="riskengine-sdk/build/publications/release/pom-default.xml"
+          collect_module() {
+            local mod_dir="$1"
+            local out_prefix="$2"
+            local aar="${mod_dir}/build/outputs/aar/${mod_dir}-release.aar"
+            local sources="${mod_dir}/build/intermediates/source_jar/release/release-sources.jar"
+            local pom="${mod_dir}/build/publications/release/pom-default.xml"
+
+            for f in "$aar" "$sources" "$pom"; do
+              if [[ ! -s "$f" ]]; then
+                echo "Missing or empty release artifact for ${mod_dir}: $f" >&2
+                exit 1
+              fi
+            done
+
+            unzip -tq "$aar"
+            unzip -tq "$sources"
+
+            cp "$aar" "release-artifacts/${out_prefix}-${VERSION_NAME}.aar"
+            cp "$sources" "release-artifacts/${out_prefix}-${VERSION_NAME}-sources.jar"
+            cp "$pom" "release-artifacts/${out_prefix}-${VERSION_NAME}.pom"
+          }
+
+          collect_module "riskengine-sdk" "RiskEngine-SDK"
+
           demo_apk="demo/build/outputs/apk/debug/demo-debug.apk"
-
-          if [[ ! -f "$sdk_aar" ]]; then
-            echo "SDK AAR not found: $sdk_aar"
+          if [[ ! -s "$demo_apk" ]]; then
+            echo "Demo APK not found: $demo_apk" >&2
             exit 1
           fi
-
-          if [[ ! -f "$sdk_sources" ]]; then
-            echo "SDK sources JAR not found: $sdk_sources"
-            exit 1
-          fi
-
-          if [[ ! -f "$sdk_pom" ]]; then
-            echo "SDK POM not found: $sdk_pom"
-            exit 1
-          fi
-
-          if [[ ! -f "$demo_apk" ]]; then
-            echo "Demo APK not found: $demo_apk"
-            exit 1
-          fi
-
-          cp "$sdk_aar" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}.aar"
-          cp "$sdk_sources" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}-sources.jar"
-          cp "$sdk_pom" "release-artifacts/RiskEngine-SDK-${VERSION_NAME}.pom"
+          unzip -tq "$demo_apk"
           cp "$demo_apk" "release-artifacts/RiskEngine-Demo-${VERSION_NAME}-debug.apk"
 
           cd release-artifacts
-          sha256sum ./*.aar ./*.jar ./*.pom ./*.apk > SHA256SUMS
+          LC_ALL=C ls -1 ./*.aar ./*.jar ./*.pom ./*.apk | sort | xargs sha256sum > SHA256SUMS
 
+          cat SHA256SUMS
           ls -lah
 
       - name: Prepare release notes

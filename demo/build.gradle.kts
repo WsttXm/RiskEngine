@@ -48,4 +48,5 @@ dependencies {
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.dynamicanimation)
+    testImplementation(libs.junit)
 }

@@ -1,0 +1,88 @@
+name: Refresh Google Attestation Roots & CRL (Gate 6)
+
+on:
+  schedule:
+    # Weekly Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate Google endpoints and monotonic CRL floor without modifying files"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-attestation-roots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-roots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python & OpenSSL check
+        run: |
+          python3 --version
+          openssl version
+
+      - name: Run Google Attestation Root & Monotonic CRL Refresh
+        id: refresh
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            TMP_ROOTS="$(mktemp /tmp/google-attestation-roots.XXXXXX.json)"
+            TMP_STATUS="$(mktemp /tmp/google-attestation-status.XXXXXX.json)"
+            trap 'rm -f "$TMP_ROOTS" "$TMP_STATUS"' EXIT
+            curl -fsSL --max-time 20 "https://android.googleapis.com/attestation/root" -o "$TMP_ROOTS"
+            curl -fsSL --max-time 20 "https://android.googleapis.com/attestation/status" -o "$TMP_STATUS"
+            python3 -B scripts/refresh_google_attestation_roots.py \
+              --roots-file "$TMP_ROOTS" \
+              --status-file "$TMP_STATUS" \
+              --dry-run
+          else
+            python3 -B scripts/refresh_google_attestation_roots.py
+          fi
+
+          TARGET="riskengine-sdk/src/main/java/com/wsttxm/riskenginesdk/attestation/GoogleAttestationRootStore.java"
+          if git diff --quiet -- "$TARGET"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "### Gate 6: Google Attestation Root & CRL Refresh" >> "$GITHUB_STEP_SUMMARY"
+            echo "No trust-root or CRL additions detected (monotonic floor already up to date)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff -- "$TARGET" > /tmp/google-attestation-roots.patch
+            {
+              echo "### Gate 6: Google Attestation Root & CRL Refresh — Changes Detected"
+              echo ""
+              echo '```text'
+              git diff --stat -- "$TARGET"
+              echo '```'
+              echo ""
+              echo "Download artifact \`google-attestation-roots-patch\` and apply via \`git apply\` after review."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify unit tests when trust roots or CRL changed
+        if: steps.refresh.outputs.changed == 'true'
+        uses: ./.github/actions/setup-android-env
+
+      - name: Run attestation & envelope unit tests
+        if: steps.refresh.outputs.changed == 'true'
+        run: ./gradlew :riskengine-sdk:testDebugUnitTest --tests '*Attestation*' --tests '*Envelope*' --no-daemon
+
+      - name: Upload trust-root refresh diff patch
+        if: steps.refresh.outputs.changed == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: google-attestation-roots-patch
+          path: /tmp/google-attestation-roots.patch
+          if-no-files-found: error

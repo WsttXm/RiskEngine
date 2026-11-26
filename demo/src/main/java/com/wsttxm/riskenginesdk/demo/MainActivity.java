@@ -4,6 +4,7 @@ import android.animation.ValueAnimator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -27,6 +28,7 @@ import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.ColorInt;
 import androidx.annotation.ColorRes;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.ContextCompat;
@@ -40,19 +42,29 @@ import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.wsttxm.riskenginesdk.DeviceStateListener;
+import com.wsttxm.riskenginesdk.ExecutionStateListener;
 import com.wsttxm.riskenginesdk.RiskEngine;
-import com.wsttxm.riskenginesdk.RiskEngineCallback;
 import com.wsttxm.riskenginesdk.RiskEngineConfig;
+import com.wsttxm.riskenginesdk.ThreatListener;
 import com.wsttxm.riskenginesdk.demo.ui.FluidDetailSheet;
 import com.wsttxm.riskenginesdk.demo.ui.ReportFormatter;
 import com.wsttxm.riskenginesdk.demo.ui.RiskGaugeView;
 import com.wsttxm.riskenginesdk.demo.ui.SegmentedControlView;
 import com.wsttxm.riskenginesdk.demo.ui.SpringTouchHelper;
+import com.wsttxm.riskenginesdk.demo.ui.ThreatStreamDrawer;
 import com.wsttxm.riskenginesdk.model.CollectorResult;
 import com.wsttxm.riskenginesdk.model.DetectionResult;
+import com.wsttxm.riskenginesdk.model.DevicePosture;
 import com.wsttxm.riskenginesdk.model.FingerprintId;
+import com.wsttxm.riskenginesdk.model.RiskAction;
+import com.wsttxm.riskenginesdk.model.RiskDimension;
 import com.wsttxm.riskenginesdk.model.RiskLevel;
 import com.wsttxm.riskenginesdk.model.RiskReport;
+import com.wsttxm.riskenginesdk.model.ScoreBreakdown;
+import com.wsttxm.riskenginesdk.model.ThreatEvent;
+import com.wsttxm.riskenginesdk.model.TierReport;
 
 import java.lang.ref.WeakReference;
 import java.text.DateFormat;
@@ -61,6 +73,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -68,7 +82,12 @@ public class MainActivity extends AppCompatActivity {
         ALL, RISK, INFO, INCOMPLETE, NORMAL
     }
 
+    private static final String PREFS_NAME = "riskengine_demo_prefs";
+    private static final String KEY_PRIVACY_CONSENTED = "privacy_consented";
+    private static final long SCAN_WATCHDOG_MS = 18_000L;
+
     private static final Object STATE_LOCK = new Object();
+    private static final ExecutorService DEMO_IO_EXECUTOR = Executors.newSingleThreadExecutor();
     private static WeakReference<MainActivity> activeActivity = new WeakReference<>(null);
     private static RiskReport latestReport;
     private static Throwable latestError;
@@ -77,9 +96,19 @@ public class MainActivity extends AppCompatActivity {
     private static long latestElapsedMs;
     private static long activeRequestToken;
     private static int savedSegmentIndex = 0;
+    private static int activeTierStage = RiskGaugeView.TIER_IDLE;
+    private static RiskLevel activeTierRiskLevel = RiskLevel.SAFE;
+    private static String activeTierSubtitle = "";
+    private static String activeTierBadge = "";
+    private static boolean consentPromptShownThisLaunch = false;
+    private static final List<ThreatEvent> bufferedThreatEvents = new ArrayList<>();
+    private static final List<Boolean> bufferedRuntimeFlags = new ArrayList<>();
+    private static DevicePosture bufferedPosture;
 
     private ReportFormatter formatter;
     private FluidDetailSheet detailSheet;
+    private ThreatStreamDrawer threatStreamDrawer;
+    private AlertDialog activeDialog;
 
     private View mainContentContainer;
     private View topBarContainer;
@@ -97,17 +126,27 @@ public class MainActivity extends AppCompatActivity {
 
     // Top bar
     private TextView tvStickyVerdict;
+    private View btnThreatStream;
+    private View viewThreatStreamDot;
+    private TextView tvThreatStreamLabel;
     private ImageButton btnThemeToggle;
 
     // Hero & metrics
     private View cardHero;
     private RiskGaugeView heroGauge;
     private TextView tvHeroVerdict;
+    private TextView tvHeroActionBadge;
+    private TextView tvHeroHardTriggerBadge;
     private TextView tvHeroSummary;
     private TextView tvHeroMeta;
     private TextView tvMetricAttention;
+    private TextView tvMetricConfidence;
     private TextView tvMetricCoverage;
     private TextView tvMetricFields;
+    private TextView btnScoreBreakdown;
+    private LinearLayout layoutDimensionBars;
+    private View rowBreakdownPreview;
+    private TextView tvBreakdownPreview;
 
     // Inconsistency banner
     private LinearLayout cardInconsistentBanner;
@@ -124,6 +163,10 @@ public class MainActivity extends AppCompatActivity {
     private View cardIdentity;
     private TextView tvIdentityCoverage;
     private LinearLayout layoutIdentityRows;
+    private TextView btnResetBaseline;
+    private LinearLayout layoutContinuityMeta;
+    private TextView tvIdentityBucketsLabel;
+    private LinearLayout layoutIdentityBuckets;
     private TextView tvCollectedSectionLabel;
     private LinearLayout layoutCollected;
     private TextView tvSyntheticSectionLabel;
@@ -146,6 +189,7 @@ public class MainActivity extends AppCompatActivity {
     private SpringAnimation hudSpringY;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideHudRunnable = this::hideHud;
+    private final Runnable scanWatchdogRunnable = this::onScanWatchdogExpired;
 
     private DetectionFilter activeFilter = DetectionFilter.ALL;
     private List<DetectionResult> cachedDetections = new ArrayList<>();
@@ -165,12 +209,26 @@ public class MainActivity extends AppCompatActivity {
         formatter = new ReportFormatter(this);
         initViews();
         applyWindowInsets();
-        initSdk();
+        hydrateThreatStreamDrawer();
+        updatePrivacyNoteCopy();
+
+        if (hasPrivacyConsent()) {
+            initSdkIfConsented();
+        } else if (!consentPromptShownThisLaunch) {
+            consentPromptShownThisLaunch = true;
+            getWindow().getDecorView().post(() -> {
+                if (!isFinishing() && !isDestroyed() && !hasPrivacyConsent()) {
+                    showPrivacyConsentDialog(false);
+                }
+            });
+        }
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (detailSheet != null && detailSheet.isShowing()) {
+                if (threatStreamDrawer != null && threatStreamDrawer.isShowing()) {
+                    threatStreamDrawer.dismiss();
+                } else if (detailSheet != null && detailSheet.isShowing()) {
                     detailSheet.dismiss();
                 } else {
                     setEnabled(false);
@@ -183,9 +241,19 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        boolean inFlight;
+        long elapsed;
         synchronized (STATE_LOCK) {
             activeActivity = new WeakReference<>(this);
+            inFlight = collectionInFlight;
+            elapsed = Math.max(0L, System.currentTimeMillis() - collectionStartedAtMs);
         }
+        if (inFlight) {
+            long remaining = Math.max(1000L, SCAN_WATCHDOG_MS - elapsed);
+            mainHandler.removeCallbacks(scanWatchdogRunnable);
+            mainHandler.postDelayed(scanWatchdogRunnable, remaining);
+        }
+        updateThreatStreamButton();
         renderSharedState(false);
     }
 
@@ -197,11 +265,16 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         mainHandler.removeCallbacks(hideHudRunnable);
+        mainHandler.removeCallbacks(scanWatchdogRunnable);
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
+        if (activeDialog != null && activeDialog.isShowing()) {
+            activeDialog.dismiss();
+            activeDialog = null;
+        }
         if (isFinishing()) {
             synchronized (STATE_LOCK) {
                 activeRequestToken++;
@@ -209,8 +282,18 @@ public class MainActivity extends AppCompatActivity {
                 latestReport = null;
                 latestError = null;
                 savedSegmentIndex = 0;
+                activeTierStage = RiskGaugeView.TIER_IDLE;
+                activeTierSubtitle = "";
+                activeTierBadge = "";
+                consentPromptShownThisLaunch = false;
+                bufferedThreatEvents.clear();
+                bufferedRuntimeFlags.clear();
+                bufferedPosture = null;
             }
-            RiskEngine.shutdown();
+            if (RiskEngine.isInitialized()) {
+                RiskEngine.stopMonitoring();
+                RiskEngine.shutdown();
+            }
         }
         super.onDestroy();
     }
@@ -230,16 +313,27 @@ public class MainActivity extends AppCompatActivity {
         tvPrivacyNote = findViewById(R.id.tvPrivacyNote);
 
         tvStickyVerdict = findViewById(R.id.tvStickyVerdict);
+        btnThreatStream = findViewById(R.id.btnThreatStream);
+        viewThreatStreamDot = findViewById(R.id.viewThreatStreamDot);
+        tvThreatStreamLabel = findViewById(R.id.tvThreatStreamLabel);
         btnThemeToggle = findViewById(R.id.btnThemeToggle);
 
         cardHero = findViewById(R.id.cardHero);
         heroGauge = findViewById(R.id.heroGauge);
         tvHeroVerdict = findViewById(R.id.tvHeroVerdict);
+        tvHeroActionBadge = findViewById(R.id.tvHeroActionBadge);
+        tvHeroHardTriggerBadge = findViewById(R.id.tvHeroHardTriggerBadge);
         tvHeroSummary = findViewById(R.id.tvHeroSummary);
         tvHeroMeta = findViewById(R.id.tvHeroMeta);
         tvMetricAttention = findViewById(R.id.tvMetricAttention);
+        tvMetricConfidence = findViewById(R.id.tvMetricConfidence);
         tvMetricCoverage = findViewById(R.id.tvMetricCoverage);
         tvMetricFields = findViewById(R.id.tvMetricFields);
+        btnScoreBreakdown = findViewById(R.id.btnScoreBreakdown);
+        layoutDimensionBars = findViewById(R.id.layoutDimensionBars);
+        rowBreakdownPreview = findViewById(R.id.rowBreakdownPreview);
+        tvBreakdownPreview = findViewById(R.id.tvBreakdownPreview);
+        btnScoreBreakdown.setBackground(createPillDrawable(color(R.color.accent_soft)));
 
         cardInconsistentBanner = findViewById(R.id.cardInconsistentBanner);
         tvInconsistentBannerSub = findViewById(R.id.tvInconsistentBannerSub);
@@ -255,6 +349,11 @@ public class MainActivity extends AppCompatActivity {
         cardIdentity = findViewById(R.id.cardIdentity);
         tvIdentityCoverage = findViewById(R.id.tvIdentityCoverage);
         layoutIdentityRows = findViewById(R.id.layoutIdentityRows);
+        btnResetBaseline = findViewById(R.id.btnResetBaseline);
+        layoutContinuityMeta = findViewById(R.id.layoutContinuityMeta);
+        tvIdentityBucketsLabel = findViewById(R.id.tvIdentityBucketsLabel);
+        layoutIdentityBuckets = findViewById(R.id.layoutIdentityBuckets);
+        btnResetBaseline.setBackground(createPillDrawable(color(R.color.accent_soft)));
         tvCollectedSectionLabel = findViewById(R.id.tvCollectedSectionLabel);
         layoutCollected = findViewById(R.id.layoutCollected);
         tvSyntheticSectionLabel = findViewById(R.id.tvSyntheticSectionLabel);
@@ -283,6 +382,31 @@ public class MainActivity extends AppCompatActivity {
                 sheetOverlay, sheetScrim, sheetContainer,
                 sheetDragHeader, sheetScrollView, mainContentContainer);
 
+        // Live Threat & Device Posture Stream Drawer
+        View threatOverlay = findViewById(R.id.threatDrawerOverlay);
+        View threatScrim = findViewById(R.id.threatDrawerScrim);
+        View threatContainer = findViewById(R.id.threatDrawerContainer);
+        View threatHeader = findViewById(R.id.threatDrawerHeader);
+        ScrollView threatScroll = findViewById(R.id.threatDrawerScrollView);
+        LinearLayout threatBody = findViewById(R.id.threatDrawerBody);
+        TextView tvThreatBadge = findViewById(R.id.tvThreatDrawerBadge);
+        TextView btnThreatClear = findViewById(R.id.btnThreatDrawerClear);
+        btnThreatClear.setBackground(createPillDrawable(color(R.color.action_secondary_bg)));
+        ImageButton btnThreatClose = findViewById(R.id.btnThreatDrawerClose);
+        threatStreamDrawer = new ThreatStreamDrawer(
+                this, formatter,
+                threatOverlay, threatScrim, threatContainer, threatHeader,
+                threatScroll, threatBody, tvThreatBadge, btnThreatClear, btnThreatClose,
+                mainContentContainer);
+        threatStreamDrawer.setOnClearedCallback(() -> {
+            synchronized (STATE_LOCK) {
+                bufferedThreatEvents.clear();
+                bufferedRuntimeFlags.clear();
+            }
+            updateThreatStreamButton();
+            showHud(getString(R.string.threat_stream_cleared_hud));
+        });
+
         // HUD Capsule
         hudCapsule = findViewById(R.id.hudCapsule);
         tvHudMessage = findViewById(R.id.tvHudMessage);
@@ -297,17 +421,23 @@ public class MainActivity extends AppCompatActivity {
         SpringTouchHelper.attach(stageGauge, 0.94f, true);
         SpringTouchHelper.attach(btnDockRescan, 0.95f, true);
         SpringTouchHelper.attach(btnDockCopy, 0.95f, true);
+        SpringTouchHelper.attachCompact(btnThreatStream);
         SpringTouchHelper.attachCompact(btnThemeToggle);
         SpringTouchHelper.attachCompact(btnSheetClose);
+        SpringTouchHelper.attachCompact(btnResetBaseline);
+        SpringTouchHelper.attachCompact(btnScoreBreakdown);
+        SpringTouchHelper.attach(rowBreakdownPreview, 0.98f, true);
         SpringTouchHelper.attach(cardInconsistentBanner, 0.98f, true);
 
         stageGauge.setMode(RiskGaugeView.MODE_EMBLEM);
-        stageGauge.setOnClickListener(v -> startCollection());
-        btnStartScan.setOnClickListener(v -> startCollection());
-        btnDockRescan.setOnClickListener(v -> startCollection());
+        stageGauge.setOnClickListener(v -> startCollectionWithConsentGate());
+        btnStartScan.setOnClickListener(v -> startCollectionWithConsentGate());
+        btnDockRescan.setOnClickListener(v -> startCollectionWithConsentGate());
         btnDockCopy.setOnClickListener(v -> copyRedactedReport());
         btnSheetClose.setOnClickListener(v -> detailSheet.dismiss());
         btnThemeToggle.setOnClickListener(v -> toggleTheme());
+        btnThreatStream.setOnClickListener(v -> openThreatStreamDrawer());
+        btnResetBaseline.setOnClickListener(v -> showResetBaselineDialog());
 
         segmentedControl.setSelectedIndex(savedSegmentIndex, false, false);
         segmentedControl.setOnSegmentSelectedListener(index -> {
@@ -355,6 +485,10 @@ public class MainActivity extends AppCompatActivity {
             sheetLp.topMargin = statusBarInsetPx + dp(56);
             sheetContainer.setLayoutParams(sheetLp);
 
+            if (threatStreamDrawer != null) {
+                threatStreamDrawer.applyInsets(statusBarInsetPx, navBarInsetPx);
+            }
+
             return windowInsets;
         });
     }
@@ -380,12 +514,146 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void initSdk() {
+    private boolean hasPrivacyConsent() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.getBoolean(KEY_PRIVACY_CONSENTED, false);
+    }
+
+    private void savePrivacyConsentAccepted() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        prefs.edit().putBoolean(KEY_PRIVACY_CONSENTED, true).apply();
+        updatePrivacyNoteCopy();
+    }
+
+    private void updatePrivacyNoteCopy() {
+        if (tvPrivacyNote == null) {
+            return;
+        }
+        tvPrivacyNote.setText(hasPrivacyConsent()
+                ? R.string.idle_privacy_note_consented
+                : R.string.idle_privacy_note_pending);
+    }
+
+    private void showPrivacyConsentDialog(boolean startScanAfter) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (activeDialog != null && activeDialog.isShowing()) {
+            activeDialog.dismiss();
+        }
+        activeDialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.privacy_consent_title)
+                .setMessage(R.string.privacy_consent_message)
+                .setCancelable(false)
+                .setPositiveButton(R.string.privacy_consent_accept, (dialog, which) -> {
+                    savePrivacyConsentAccepted();
+                    initSdkIfConsented();
+                    if (startScanAfter) {
+                        startCollection();
+                    }
+                })
+                .setNegativeButton(R.string.privacy_consent_decline, (dialog, which) -> {
+                    updatePrivacyNoteCopy();
+                    showHud(getString(R.string.privacy_consent_declined_hud));
+                })
+                .show();
+    }
+
+    private void initSdkIfConsented() {
+        if (!hasPrivacyConsent()) {
+            return;
+        }
         RiskEngineConfig config = new RiskEngineConfig.Builder()
                 .debugLog(BuildConfig.DEBUG)
                 .collectTimeout(15_000)
                 .build();
         RiskEngine.initIfNeeded(this, config);
+    }
+
+    private void startCollectionWithConsentGate() {
+        if (!hasPrivacyConsent()) {
+            showPrivacyConsentDialog(true);
+            return;
+        }
+        if (!RiskEngine.isInitialized()) {
+            initSdkIfConsented();
+        }
+        startCollection();
+    }
+
+    private void hydrateThreatStreamDrawer() {
+        if (threatStreamDrawer == null) {
+            return;
+        }
+        synchronized (STATE_LOCK) {
+            if (bufferedPosture != null) {
+                threatStreamDrawer.recordPosture(bufferedPosture);
+            }
+            for (int i = bufferedThreatEvents.size() - 1; i >= 0; i--) {
+                threatStreamDrawer.recordThreat(
+                        bufferedThreatEvents.get(i),
+                        bufferedRuntimeFlags.get(i));
+            }
+        }
+        updateThreatStreamButton();
+    }
+
+    private void openThreatStreamDrawer() {
+        if (detailSheet != null && detailSheet.isShowing()) {
+            detailSheet.dismiss();
+        }
+        if (threatStreamDrawer != null) {
+            threatStreamDrawer.show();
+        }
+    }
+
+    private void updateThreatStreamButton() {
+        if (btnThreatStream == null || viewThreatStreamDot == null || tvThreatStreamLabel == null) {
+            return;
+        }
+        int count = threatStreamDrawer != null ? threatStreamDrawer.getEventCount() : 0;
+        int runtimeCount = threatStreamDrawer != null ? threatStreamDrawer.getRuntimeTamperCount() : 0;
+        @ColorInt int dotColor;
+        if (runtimeCount > 0) {
+            dotColor = color(R.color.risk_deadly);
+        } else if (count > 0) {
+            dotColor = color(R.color.risk_high);
+        } else {
+            dotColor = color(R.color.risk_safe);
+        }
+        viewThreatStreamDot.setBackground(createCircleDrawable(dotColor));
+        tvThreatStreamLabel.setText(count > 0
+                ? getString(R.string.threat_stream_pill_count, count)
+                : getString(R.string.threat_stream_pill_label));
+    }
+
+    private void showResetBaselineDialog() {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (!RiskEngine.isInitialized()) {
+            showHud(getString(R.string.privacy_consent_declined_hud));
+            return;
+        }
+        if (activeDialog != null && activeDialog.isShowing()) {
+            activeDialog.dismiss();
+        }
+        activeDialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.identity_reset_dialog_title)
+                .setMessage(R.string.identity_reset_dialog_message)
+                .setPositiveButton(R.string.identity_reset_dialog_confirm, (dialog, which) -> {
+                    DEMO_IO_EXECUTOR.execute(() -> {
+                        RiskEngine.resetFingerprintBaseline();
+                        mainHandler.post(() -> {
+                            if (!isFinishing() && !isDestroyed()) {
+                                rootHapticConfirm();
+                                showHud(getString(R.string.identity_reset_success_hud));
+                            }
+                        });
+                    });
+                })
+                .setNegativeButton(R.string.identity_reset_dialog_cancel, null)
+                .show();
     }
 
     private void syncSystemBarAppearance() {
@@ -416,47 +684,203 @@ public class MainActivity extends AppCompatActivity {
             collectionStartedAtMs = System.currentTimeMillis();
             latestReport = null;
             latestError = null;
+            activeTierStage = RiskGaugeView.TIER_IDLE;
+            activeTierRiskLevel = RiskLevel.SAFE;
+            activeTierSubtitle = getString(R.string.tier_stage_critical_running);
+            activeTierBadge = getString(R.string.tier_badge_critical);
             requestToken = ++activeRequestToken;
         }
 
         if (detailSheet != null && detailSheet.isShowing()) {
             detailSheet.dismiss();
         }
+        if (threatStreamDrawer != null && threatStreamDrawer.isShowing()) {
+            threatStreamDrawer.dismiss();
+        }
         activeFilter = DetectionFilter.ALL;
         reportHasRendered = false;
+        stageGauge.resetScanTierProgress();
         showScanningState();
-        RiskEngine.collect(createCollectionCallback(requestToken));
+
+        mainHandler.removeCallbacks(scanWatchdogRunnable);
+        mainHandler.postDelayed(scanWatchdogRunnable, SCAN_WATCHDOG_MS);
+
+        try {
+            RiskEngine.startMonitoring(
+                    createThreatListener(),
+                    createDeviceStateListener(),
+                    createExecutionStateListener(requestToken));
+        } catch (RuntimeException error) {
+            mainHandler.removeCallbacks(scanWatchdogRunnable);
+            synchronized (STATE_LOCK) {
+                if (requestToken == activeRequestToken) {
+                    latestReport = null;
+                    latestError = error;
+                    collectionInFlight = false;
+                }
+            }
+            deliverSharedState(false);
+        }
     }
 
-    private static RiskEngineCallback createCollectionCallback(long requestToken) {
-        return new RiskEngineCallback() {
+    private void onScanWatchdogExpired() {
+        boolean timedOut = false;
+        synchronized (STATE_LOCK) {
+            if (collectionInFlight) {
+                collectionInFlight = false;
+                latestReport = null;
+                latestError = new IllegalStateException("检测超时，请重试");
+                activeRequestToken++;
+                timedOut = true;
+            }
+        }
+        if (timedOut) {
+            renderSharedState(true);
+        }
+    }
+
+    private static ThreatListener createThreatListener() {
+        return new ThreatListener() {
             @Override
-            public void onSuccess(RiskReport report) {
+            public void onThreatDetected(ThreatEvent event) {
+                deliverLiveThreat(event, false);
+            }
+
+            @Override
+            public void onRuntimeTamperDetected(ThreatEvent event) {
+                deliverLiveThreat(event, true);
+            }
+        };
+    }
+
+    private static DeviceStateListener createDeviceStateListener() {
+        return new DeviceStateListener() {
+            @Override
+            public void onDeviceStateEvaluated(DevicePosture posture) {
+                if (posture == null) {
+                    return;
+                }
+                MainActivity activity;
+                synchronized (STATE_LOCK) {
+                    bufferedPosture = posture;
+                    activity = activeActivity.get();
+                }
+                if (activity != null) {
+                    activity.runOnUiThread(() -> {
+                        if (activity.threatStreamDrawer != null) {
+                            activity.threatStreamDrawer.recordPosture(posture);
+                            activity.threatStreamDrawer.refreshIfShowing();
+                        }
+                        activity.updateThreatStreamButton();
+                    });
+                }
+            }
+        };
+    }
+
+    private static void deliverLiveThreat(ThreatEvent event, boolean runtimeTamper) {
+        if (event == null) {
+            return;
+        }
+        boolean isRuntime = runtimeTamper || event.isRuntimeTamper();
+        MainActivity activity;
+        synchronized (STATE_LOCK) {
+            bufferedThreatEvents.add(0, event);
+            bufferedRuntimeFlags.add(0, isRuntime);
+            while (bufferedThreatEvents.size() > ThreatStreamDrawer.MAX_ENTRIES) {
+                bufferedThreatEvents.remove(bufferedThreatEvents.size() - 1);
+                bufferedRuntimeFlags.remove(bufferedRuntimeFlags.size() - 1);
+            }
+            activity = activeActivity.get();
+        }
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
+                if (activity.threatStreamDrawer != null) {
+                    activity.threatStreamDrawer.recordThreat(event, isRuntime);
+                    activity.threatStreamDrawer.refreshIfShowing();
+                }
+                activity.updateThreatStreamButton();
+                if (isRuntime) {
+                    String title = activity.formatter.detectorTitle(event.getDetectorName());
+                    activity.showHud(activity.getString(R.string.threat_stream_live_alert_hud, title));
+                    activity.rootHapticConfirm();
+                }
+            });
+        }
+    }
+
+    private static ExecutionStateListener createExecutionStateListener(long requestToken) {
+        return new ExecutionStateListener() {
+            @Override
+            public void onCriticalChecksFinished(TierReport criticalReport) {
+                deliverTierProgress(
+                        requestToken,
+                        RiskGaugeView.TIER_CRITICAL,
+                        criticalReport != null ? criticalReport.getHighestRiskLevel() : RiskLevel.SAFE,
+                        criticalReport != null ? criticalReport.getElapsedMs() : 0L);
+            }
+
+            @Override
+            public void onFastChecksFinished(TierReport fastReport) {
+                deliverTierProgress(
+                        requestToken,
+                        RiskGaugeView.TIER_FAST,
+                        fastReport != null ? fastReport.getHighestRiskLevel() : RiskLevel.SAFE,
+                        fastReport != null ? fastReport.getElapsedMs() : 0L);
+            }
+
+            @Override
+            public void onPostponedChecksFinished(RiskReport fullReport) {
                 synchronized (STATE_LOCK) {
                     if (requestToken != activeRequestToken) {
                         return;
                     }
                     latestElapsedMs = Math.max(0, System.currentTimeMillis() - collectionStartedAtMs);
-                    latestReport = report;
+                    latestReport = fullReport;
                     latestError = null;
                     collectionInFlight = false;
+                    activeTierStage = RiskGaugeView.TIER_POSTPONED;
+                    activeTierRiskLevel = fullReport != null
+                            ? fullReport.getOverallRiskLevel()
+                            : RiskLevel.SAFE;
                 }
                 deliverSharedState(true);
             }
+        };
+    }
 
-            @Override
-            public void onError(Throwable error) {
+    private static void deliverTierProgress(long requestToken, int tierStage,
+                                            RiskLevel level, long tierElapsedMs) {
+        MainActivity activity;
+        synchronized (STATE_LOCK) {
+            if (requestToken != activeRequestToken || !collectionInFlight) {
+                return;
+            }
+            activeTierStage = tierStage;
+            if (level != null && level.getValue() > activeTierRiskLevel.getValue()) {
+                activeTierRiskLevel = level;
+            }
+            activity = activeActivity.get();
+        }
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
                 synchronized (STATE_LOCK) {
-                    if (requestToken != activeRequestToken) {
+                    if (requestToken != activeRequestToken || !collectionInFlight) {
                         return;
                     }
-                    latestReport = null;
-                    latestError = error;
-                    collectionInFlight = false;
+                    if (tierStage == RiskGaugeView.TIER_CRITICAL) {
+                        activeTierSubtitle = activity.getString(
+                                R.string.tier_stage_fast_running, tierElapsedMs);
+                        activeTierBadge = activity.getString(R.string.tier_badge_fast);
+                    } else if (tierStage == RiskGaugeView.TIER_FAST) {
+                        activeTierSubtitle = activity.getString(
+                                R.string.tier_stage_postponed_running, tierElapsedMs);
+                        activeTierBadge = activity.getString(R.string.tier_badge_postponed);
+                    }
                 }
-                deliverSharedState(false);
-            }
-        };
+                activity.applyScanningTierVisuals();
+            });
+        }
     }
 
     private static void deliverSharedState(boolean success) {
@@ -466,6 +890,18 @@ public class MainActivity extends AppCompatActivity {
         }
         if (activity != null) {
             activity.runOnUiThread(() -> {
+                activity.mainHandler.removeCallbacks(activity.scanWatchdogRunnable);
+                if (success) {
+                    RiskLevel finalLevel;
+                    synchronized (STATE_LOCK) {
+                        finalLevel = activeTierRiskLevel;
+                    }
+                    @ColorInt int doneColor = activity.color(activity.formatter.riskColorRes(finalLevel));
+                    activity.stageGauge.setScanTierProgress(
+                            RiskGaugeView.TIER_POSTPONED,
+                            doneColor,
+                            activity.getString(R.string.tier_badge_done));
+                }
                 activity.renderSharedState(true);
                 View hapticHost = activity.scrollReport.getVisibility() == View.VISIBLE
                         ? activity.cardHero
@@ -503,6 +939,7 @@ public class MainActivity extends AppCompatActivity {
     private void showIdleState() {
         stageGauge.setMode(RiskGaugeView.MODE_EMBLEM);
         stageGauge.setScanning(false);
+        stageGauge.resetScanTierProgress();
         stageGauge.setEnabled(true);
 
         tvStageTitle.setText(R.string.idle_title);
@@ -512,6 +949,7 @@ public class MainActivity extends AppCompatActivity {
         btnStartScan.setEnabled(true);
         btnStartScan.setAlpha(1f);
         btnStartScan.setVisibility(View.VISIBLE);
+        updatePrivacyNoteCopy();
         tvPrivacyNote.setVisibility(View.VISIBLE);
 
         stateStage.setVisibility(View.VISIBLE);
@@ -528,7 +966,7 @@ public class MainActivity extends AppCompatActivity {
 
         tvStageTitle.setText(R.string.collecting_title);
         tvStageTitle.setTextColor(color(R.color.text_primary));
-        tvStageSubtitle.setText(R.string.collecting_subtitle);
+        applyScanningTierVisuals();
         btnStartScan.setText(R.string.collecting_action);
         btnStartScan.setEnabled(false);
         btnStartScan.setAlpha(0.55f);
@@ -542,9 +980,33 @@ public class MainActivity extends AppCompatActivity {
         hideStickyVerdictImmediate();
     }
 
+    private void applyScanningTierVisuals() {
+        int tierStage;
+        RiskLevel tierLevel;
+        String subtitle;
+        String badge;
+        synchronized (STATE_LOCK) {
+            tierStage = activeTierStage;
+            tierLevel = activeTierRiskLevel;
+            subtitle = activeTierSubtitle;
+            badge = activeTierBadge;
+        }
+        @ColorInt int tierColor = tierLevel == RiskLevel.SAFE
+                ? color(R.color.accent)
+                : color(formatter.riskColorRes(tierLevel));
+        stageGauge.setScanTierProgress(
+                tierStage,
+                tierColor,
+                badge.isEmpty() ? getString(R.string.tier_badge_critical) : badge);
+        tvStageSubtitle.setText(subtitle.isEmpty()
+                ? getString(R.string.tier_stage_critical_running)
+                : subtitle);
+    }
+
     private void showErrorState(Throwable error) {
         stageGauge.setMode(RiskGaugeView.MODE_EMBLEM);
         stageGauge.setScanning(false);
+        stageGauge.resetScanTierProgress();
         stageGauge.setEnabled(true);
 
         tvStageTitle.setText(R.string.collection_failed);
@@ -578,29 +1040,49 @@ public class MainActivity extends AppCompatActivity {
         @ColorInt int levelBg = color(formatter.riskBgRes(level));
         String levelLabel = formatter.riskLabel(level);
 
-        // Hero gauge & verdict (zero redundancy!)
-        heroGauge.setScore(report.getRiskScore(), report.getDisplayThresholdMaximum(), levelColor, animate);
+        // Hero gauge & verdict calibrated to 0-100 scale
+        heroGauge.setScore(report.getRiskScore(), report.getMaxRiskScore(), levelColor, animate);
         heroGauge.setContentDescription(getString(R.string.risk_progress_value,
-                report.getRiskScore(), report.getDisplayThresholdMaximum()));
+                report.getRiskScore(), report.getMaxRiskScore()));
 
         tvHeroVerdict.setText(levelLabel);
         tvHeroVerdict.setTextColor(levelColor);
+
+        RiskAction recommendedAction = report.getRecommendedAction();
+        tvHeroActionBadge.setText(formatter.riskActionLabel(recommendedAction));
+        tvHeroActionBadge.setTextColor(color(formatter.riskActionColorRes(recommendedAction)));
+        tvHeroActionBadge.setBackground(createPillDrawable(color(formatter.riskActionBgRes(recommendedAction))));
+
+        List<String> hardTriggers = report.getHardTriggers();
+        if (hardTriggers.isEmpty()) {
+            tvHeroHardTriggerBadge.setVisibility(View.GONE);
+        } else {
+            tvHeroHardTriggerBadge.setVisibility(View.VISIBLE);
+            tvHeroHardTriggerBadge.setText(getString(R.string.hero_hard_trigger_badge, hardTriggers.size()));
+            tvHeroHardTriggerBadge.setTextColor(color(R.color.risk_deadly));
+            tvHeroHardTriggerBadge.setBackground(createPillDrawable(color(R.color.risk_deadly_bg)));
+        }
+
         tvHeroSummary.setText(formatter.heroSubtitle(report));
 
         String time = DateFormat.getTimeInstance(DateFormat.MEDIUM, Locale.getDefault())
                 .format(new Date(report.getTimestampMs()));
-        tvHeroMeta.setText(getString(R.string.hero_meta, time, formatter.formatElapsed(elapsedMs)));
+        String postureTag = formatter.postureCompactSummary(report.getDevicePosture());
+        String baseMeta = getString(R.string.hero_meta, time, formatter.formatElapsed(elapsedMs));
+        tvHeroMeta.setText(postureTag.isEmpty() ? baseMeta : baseMeta + " · " + postureTag);
 
         // Sticky verdict pill in top bar (shown dynamically on scroll)
-        tvStickyVerdict.setText(levelLabel);
+        tvStickyVerdict.setText(levelLabel + " · " + report.getRiskScore());
         tvStickyVerdict.setTextColor(levelColor);
         tvStickyVerdict.setBackground(createPillDrawable(levelBg));
 
-        // 3-Column Clean Inline Metrics
+        // 4-Column Clean Inline Metrics (Attention / Assessment Confidence / Coverage / Fields)
         cachedDetections = formatter.environmentDetections(report);
         int attentionCount = formatter.countActionableAttention(cachedDetections);
         tvMetricAttention.setText(String.valueOf(attentionCount));
         tvMetricAttention.setTextColor(attentionCount > 0 ? levelColor : color(R.color.text_primary));
+        tvMetricConfidence.setText(getString(R.string.coverage_percent, report.getConfidencePercent()));
+        tvMetricConfidence.setTextColor(color(ReportFormatter.confidenceColorRes(report.getConfidencePercent())));
         tvMetricCoverage.setText(getString(R.string.coverage_percent, report.getCoveragePercent()));
 
         Map<String, CollectorResult> fpResults = report.getFingerprint().getResults();
@@ -611,6 +1093,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         tvMetricFields.setText(String.valueOf(collectedCount));
+
+        // Four-Dimension Risk Sub-Scores & Score Breakdown affordance
+        renderDimensionBars(layoutDimensionBars, report, false);
+        tvBreakdownPreview.setText(formatter.breakdownSummaryLine(report));
+        View.OnClickListener openBreakdownListener = v -> openScoreBreakdownSheet(report);
+        btnScoreBreakdown.setOnClickListener(openBreakdownListener);
+        rowBreakdownPreview.setOnClickListener(openBreakdownListener);
 
         // Multi-source inconsistency banner
         List<String> inconsistent = report.getFingerprint().getInconsistentFields();
@@ -895,9 +1384,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderFingerprintTab(RiskReport report) {
-        // 1. Layered Device Fingerprint Identity Card
+        // 1. Layered Device Fingerprint Identity, Continuity & Hardware Bucket Card
         FingerprintId fpId = report.getFingerprintId();
         layoutIdentityRows.removeAllViews();
+        layoutContinuityMeta.removeAllViews();
+        layoutIdentityBuckets.removeAllViews();
         if (fpId != null && (!fpId.getCompositeId().isEmpty() || !fpId.getHardwareId().isEmpty())) {
             cardIdentity.setVisibility(View.VISIBLE);
             tvIdentityCoverage.setText(getString(R.string.identity_hardware_coverage,
@@ -924,6 +1415,45 @@ public class MainActivity extends AppCompatActivity {
                 if (i < layers.size() - 1) {
                     layoutIdentityRows.addView(createInsetHairline(0));
                 }
+            }
+
+            // Continuity & device_binding metadata
+            addColoredKeyValue(layoutContinuityMeta,
+                    getString(R.string.identity_meta_version),
+                    formatter.fingerprintVersionLabel(fpId.getVersion()),
+                    R.color.text_primary);
+            addColoredKeyValue(layoutContinuityMeta,
+                    getString(R.string.identity_meta_stability),
+                    formatter.fingerprintStabilityLabel(fpId.getStability()),
+                    R.color.text_primary);
+            int driftCount = report.getAnchorDriftCount();
+            addColoredKeyValue(layoutContinuityMeta,
+                    getString(R.string.identity_meta_drift),
+                    getString(R.string.identity_meta_drift_value, driftCount),
+                    driftCount > 0 ? R.color.risk_high : R.color.risk_safe);
+            ReportFormatter.DeviceBindingDisplay binding = formatter.deviceBindingStatus(report);
+            addColoredKeyValue(layoutContinuityMeta,
+                    getString(R.string.identity_meta_binding),
+                    binding.label,
+                    binding.colorRes);
+
+            // Physical hardware bucket digests (gpu, cpu, sensor, camera, memory_battery)
+            Map<String, String> buckets = fpId.getHardwareBucketDigests();
+            if (buckets != null && !buckets.isEmpty()) {
+                tvIdentityBucketsLabel.setVisibility(View.VISIBLE);
+                layoutIdentityBuckets.setVisibility(View.VISIBLE);
+                int idx = 0;
+                for (Map.Entry<String, String> bucket : buckets.entrySet()) {
+                    layoutIdentityBuckets.addView(createIdentityLayerRow(
+                            formatter.hardwareBucketLabel(bucket.getKey()),
+                            bucket.getValue()));
+                    if (++idx < buckets.size()) {
+                        layoutIdentityBuckets.addView(createInsetHairline(0));
+                    }
+                }
+            } else {
+                tvIdentityBucketsLabel.setVisibility(View.GONE);
+                layoutIdentityBuckets.setVisibility(View.GONE);
             }
         } else {
             cardIdentity.setVisibility(View.GONE);
@@ -974,7 +1504,7 @@ public class MainActivity extends AppCompatActivity {
         row.setPadding(0, dp(10), 0, dp(10));
 
         TextView tvLabel = createText(label, 13f, R.color.text_secondary, Typeface.NORMAL);
-        tvLabel.setLayoutParams(new LinearLayout.LayoutParams(dp(72), ViewGroup.LayoutParams.WRAP_CONTENT));
+        tvLabel.setLayoutParams(new LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT));
         row.addView(tvLabel);
 
         TextView tvHash = createText(formatter.shortenHash(fullHash), 12.5f, R.color.text_primary, Typeface.NORMAL);
@@ -1128,7 +1658,21 @@ public class MainActivity extends AppCompatActivity {
             sheetBody.addView(failWell);
         }
 
-        // 5. Benign diagnostic / environment context (if any)
+        // 5. Related Score Breakdown attribution for this Detection Domain (if any)
+        RiskReport currentReport;
+        synchronized (STATE_LOCK) {
+            currentReport = latestReport;
+        }
+        List<ReportFormatter.BreakdownItem> relatedBreakdown =
+                formatter.breakdownItemsForDetector(currentReport, detection.getDetectorName());
+        if (!relatedBreakdown.isEmpty()) {
+            addSheetSectionTitle(getString(R.string.sheet_section_detector_breakdown), true);
+            for (int i = 0; i < relatedBreakdown.size(); i++) {
+                sheetBody.addView(createBreakdownCard(relatedBreakdown.get(i), i > 0));
+            }
+        }
+
+        // 6. Benign diagnostic / environment context (if any)
         List<ReportFormatter.EvidenceDetail> diagnostics = formatter.detectionDiagnosticItems(detection);
         if (!diagnostics.isEmpty()) {
             addSheetSectionTitle(getString(R.string.sheet_section_diagnostics), true);
@@ -1159,6 +1703,271 @@ public class MainActivity extends AppCompatActivity {
         }
 
         showDetailSheetWithCappedHeight();
+    }
+
+    private void renderDimensionBars(LinearLayout container, RiskReport report, boolean showDescriptions) {
+        container.removeAllViews();
+        RiskDimension[] dims = RiskDimension.values();
+        for (int i = 0; i < dims.length; i++) {
+            RiskDimension dim = dims[i];
+            int dimScore = report.getDimensionScore(dim);
+            container.addView(createDimensionBarRow(dim, dimScore, showDescriptions, i > 0));
+        }
+    }
+
+    private View createDimensionBarRow(RiskDimension dimension, int score,
+                                       boolean showDescription, boolean topMargin) {
+        int clamped = Math.max(0, Math.min(RiskReport.MAX_RISK_SCORE, score));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        if (topMargin) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(showDescription ? 12 : 9);
+            row.setLayoutParams(lp);
+        }
+
+        LinearLayout labelRow = new LinearLayout(this);
+        labelRow.setOrientation(LinearLayout.HORIZONTAL);
+        labelRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvName = createText(formatter.dimensionLabel(dimension),
+                12.5f, R.color.text_primary, Typeface.BOLD);
+        tvName.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        tvName.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        labelRow.addView(tvName);
+
+        @ColorRes int scoreColorRes = clamped > 0
+                ? ReportFormatter.scoreColorRes(clamped)
+                : R.color.text_tertiary;
+        TextView tvScore = createText(clamped + " / " + RiskReport.MAX_RISK_SCORE,
+                12f, scoreColorRes, Typeface.BOLD);
+        tvScore.setFontFeatureSettings("tnum");
+        labelRow.addView(tvScore);
+        row.addView(labelRow);
+
+        // Rounded capsule progress track
+        LinearLayout track = new LinearLayout(this);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams trackLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(6));
+        trackLp.topMargin = dp(5);
+        track.setLayoutParams(trackLp);
+        track.setBackground(createPillDrawable(color(R.color.track)));
+        track.setClipToOutline(true);
+
+        if (clamped > 0) {
+            float fillWeight = Math.max(4f, clamped);
+            float emptyWeight = Math.max(0f, 100f - fillWeight);
+            View fill = new View(this);
+            fill.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, fillWeight));
+            fill.setBackground(createPillDrawable(color(ReportFormatter.scoreColorRes(clamped))));
+            track.addView(fill);
+
+            if (emptyWeight > 0f) {
+                View remainder = new View(this);
+                remainder.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.MATCH_PARENT, emptyWeight));
+                track.addView(remainder);
+            }
+        }
+        row.addView(track);
+
+        if (showDescription) {
+            TextView tvDesc = createText(formatter.dimensionDescription(dimension),
+                    11.5f, R.color.text_tertiary, Typeface.NORMAL);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dlp.topMargin = dp(4);
+            tvDesc.setLayoutParams(dlp);
+            row.addView(tvDesc);
+        }
+        return row;
+    }
+
+    private void openScoreBreakdownSheet(RiskReport report) {
+        RiskAction action = report.getRecommendedAction();
+        @ColorInt int actionColor = color(formatter.riskActionColorRes(action));
+        @ColorInt int actionBg = color(formatter.riskActionBgRes(action));
+
+        tvSheetBadge.setText(formatter.riskActionLabel(action));
+        tvSheetBadge.setTextColor(actionColor);
+        tvSheetBadge.setBackground(createPillDrawable(actionBg));
+        tvSheetTitle.setText(R.string.breakdown_sheet_title);
+
+        sheetBody.removeAllViews();
+
+        // 1. Score & Decision Overview
+        addSheetSectionTitle(getString(R.string.breakdown_section_overview), false);
+        LinearLayout overviewWell = createSheetWell();
+        addColoredKeyValue(overviewWell,
+                getString(R.string.breakdown_meta_score),
+                getString(R.string.breakdown_score_with_level,
+                        report.getRiskScore(),
+                        report.getMaxRiskScore(),
+                        formatter.riskLabel(report.getOverallRiskLevel())),
+                formatter.riskColorRes(report.getOverallRiskLevel()));
+        addColoredKeyValue(overviewWell,
+                getString(R.string.breakdown_meta_action),
+                formatter.riskActionLabel(action) + " (" + action.name() + ")",
+                formatter.riskActionColorRes(action));
+        addColoredKeyValue(overviewWell,
+                getString(R.string.breakdown_meta_confidence),
+                getString(R.string.coverage_percent, report.getConfidencePercent()),
+                ReportFormatter.confidenceColorRes(report.getConfidencePercent()));
+        addSheetKeyValue(overviewWell,
+                getString(R.string.breakdown_meta_coverage),
+                getString(R.string.breakdown_coverage_detail,
+                        report.getCoveragePercent(),
+                        report.getCompletedCheckCount(),
+                        report.getCheckCount()),
+                false);
+        addSheetKeyValue(overviewWell,
+                getString(R.string.breakdown_meta_scene),
+                formatter.collectSceneLabel(report.getCollectScene()),
+                false);
+        ScoreBreakdown breakdown = report.getScoreBreakdown();
+        if (breakdown != null && breakdown.getPreFloorScore() != breakdown.getFinalScore()) {
+            addSheetKeyValue(overviewWell,
+                    getString(R.string.breakdown_meta_prefloor),
+                    breakdown.getPreFloorScore() + " / " + report.getMaxRiskScore(),
+                    false);
+        }
+        TextView tvActionDesc = createText(formatter.riskActionDescription(action),
+                12.5f, R.color.text_secondary, Typeface.NORMAL);
+        tvActionDesc.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        descLp.topMargin = dp(8);
+        tvActionDesc.setLayoutParams(descLp);
+        overviewWell.addView(tvActionDesc);
+        sheetBody.addView(overviewWell);
+
+        // 2. Four-Dimension Sub-Scores with Scopes
+        addSheetSectionTitle(getString(R.string.breakdown_section_dimensions), true);
+        LinearLayout dimWell = createSheetWell();
+        renderDimensionBars(dimWell, report, true);
+        sheetBody.addView(dimWell);
+
+        // 3. Authoritative Hard Triggers (if any)
+        List<String> hardTriggers = report.getHardTriggers();
+        if (!hardTriggers.isEmpty()) {
+            addSheetSectionTitle(getString(R.string.breakdown_section_hard_triggers), true);
+            LinearLayout triggerWell = createSheetWell();
+            TextView tvHint = createText(getString(R.string.breakdown_hard_trigger_hint),
+                    12.5f, R.color.risk_deadly, Typeface.NORMAL);
+            tvHint.setLineSpacing(dp(2), 1f);
+            triggerWell.addView(tvHint);
+            for (String code : hardTriggers) {
+                TextView tvTrigger = createText("• " + formatter.formatHardTriggerLabel(code),
+                        12.5f, R.color.text_primary, Typeface.BOLD);
+                tvTrigger.setTypeface(Typeface.MONOSPACE);
+                tvTrigger.setTextIsSelectable(true);
+                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tlp.topMargin = dp(6);
+                tvTrigger.setLayoutParams(tlp);
+                triggerWell.addView(tvTrigger);
+            }
+            sheetBody.addView(triggerWell);
+        }
+
+        // 4. Item-by-Item Score Breakdown Attribution (with Copy)
+        String copyText = formatter.formatScoreBreakdownForCopy(report);
+        if (!copyText.isBlank()) {
+            addSheetSectionTitleWithCopy(getString(R.string.breakdown_section_entries), copyText);
+        } else {
+            addSheetSectionTitle(getString(R.string.breakdown_section_entries), true);
+        }
+        List<ReportFormatter.BreakdownItem> items = formatter.formatScoreBreakdown(breakdown);
+        if (items.isEmpty()) {
+            int emptyRes;
+            if (report.getOverallRiskLevel() == RiskLevel.UNKNOWN) {
+                emptyRes = R.string.breakdown_empty_unknown;
+            } else if (report.getOverallRiskLevel() == RiskLevel.LOW) {
+                emptyRes = R.string.breakdown_empty_info;
+            } else {
+                emptyRes = R.string.breakdown_empty_safe;
+            }
+            TextView tvEmpty = createText(getString(emptyRes), 13.5f, R.color.text_secondary, Typeface.NORMAL);
+            tvEmpty.setLineSpacing(dp(2), 1f);
+            sheetBody.addView(tvEmpty);
+        } else {
+            for (int i = 0; i < items.size(); i++) {
+                sheetBody.addView(createBreakdownCard(items.get(i), i > 0));
+            }
+        }
+
+        showDetailSheetWithCappedHeight();
+    }
+
+    private View createBreakdownCard(ReportFormatter.BreakdownItem item, boolean topMargin) {
+        LinearLayout card = createSheetWell();
+        if (topMargin) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(10);
+            card.setLayoutParams(lp);
+        }
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView catPill = createPill(item.categoryLabel,
+                color(item.accentColorRes), color(item.badgeBgRes));
+        catPill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+        catPill.setPadding(dp(8), dp(2), dp(8), dp(2));
+        topRow.addView(catPill);
+
+        TextView dimPill = createPill(item.dimensionLabel,
+                color(R.color.text_secondary), color(R.color.action_secondary_bg));
+        dimPill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+        dimPill.setPadding(dp(8), dp(2), dp(8), dp(2));
+        LinearLayout.LayoutParams dimLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dimLp.setMarginStart(dp(6));
+        dimPill.setLayoutParams(dimLp);
+        topRow.addView(dimPill);
+
+        View spacer = new View(this);
+        spacer.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1f));
+        topRow.addView(spacer);
+
+        TextView tvPts = createText(item.pointsLabel, 13f, item.accentColorRes, Typeface.BOLD);
+        tvPts.setFontFeatureSettings("tnum");
+        topRow.addView(tvPts);
+        card.addView(topRow);
+
+        TextView tvTitle = createText(item.title, 14f, R.color.text_primary, Typeface.BOLD);
+        tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = dp(8);
+        tvTitle.setLayoutParams(tlp);
+        card.addView(tvTitle);
+
+        if (item.sourceSummary != null && !item.sourceSummary.isEmpty()) {
+            TextView tvSource = createText(item.sourceSummary, 12f, R.color.text_secondary, Typeface.NORMAL);
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            slp.topMargin = dp(3);
+            tvSource.setLayoutParams(slp);
+            card.addView(tvSource);
+        }
+
+        if (item.detail != null && !item.detail.isEmpty()) {
+            TextView tvDetail = createText(item.detail, 12.5f, R.color.text_secondary, Typeface.NORMAL);
+            tvDetail.setLineSpacing(dp(2), 1f);
+            tvDetail.setTextIsSelectable(true);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dlp.topMargin = dp(5);
+            tvDetail.setLayoutParams(dlp);
+            card.addView(tvDetail);
+        }
+        return card;
     }
 
     private View createFindingCard(ReportFormatter.EvidenceDetail item, @ColorInt int accentColor, boolean topMargin) {
@@ -1510,6 +2319,25 @@ public class MainActivity extends AppCompatActivity {
         } else {
             tvVal.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         }
+        tvVal.setGravity(Gravity.END);
+        tvVal.setFontFeatureSettings("tnum");
+        row.addView(tvVal);
+        container.addView(row);
+    }
+
+    private void addColoredKeyValue(LinearLayout container, String key, String value,
+                                    @ColorRes int valueColorRes) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(4), 0, dp(4));
+
+        TextView tvKey = createText(key, 12.5f, R.color.text_secondary, Typeface.NORMAL);
+        tvKey.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(tvKey);
+
+        TextView tvVal = createText(value, 12.5f, valueColorRes, Typeface.BOLD);
+        tvVal.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         tvVal.setGravity(Gravity.END);
         tvVal.setFontFeatureSettings("tnum");
         row.addView(tvVal);

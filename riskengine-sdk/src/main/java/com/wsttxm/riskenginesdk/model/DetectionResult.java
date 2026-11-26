@@ -1,5 +1,7 @@
 package com.wsttxm.riskenginesdk.model;
 
+import com.wsttxm.riskenginesdk.ScanTier;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -18,7 +20,9 @@ public class DetectionResult {
     private final int checksFailed;
     private final List<String> failureReasons;
     private final List<String> details;
+    private final List<EvidenceItem> evidenceItems;
     private final String evidence;
+    private final ScanTier scanTier;
     private final long timestampMs;
 
     public DetectionResult(String detectorName, RiskLevel riskLevel, String evidence) {
@@ -35,7 +39,9 @@ public class DetectionResult {
                 riskLevel == RiskLevel.UNKNOWN ? 1 : 0,
                 Collections.emptyList(),
                 deriveDetails(evidence),
+                Collections.emptyList(),
                 evidence,
+                ScanTier.FAST,
                 System.currentTimeMillis()
         );
     }
@@ -65,7 +71,8 @@ public class DetectionResult {
                 defaultExecutionStatusFor(riskLevel), 1,
                 riskLevel == RiskLevel.UNKNOWN ? 0 : 1,
                 riskLevel == RiskLevel.UNKNOWN ? 1 : 0,
-                Collections.emptyList(), details, evidence, timestampMs);
+                Collections.emptyList(), details, Collections.emptyList(), evidence,
+                ScanTier.FAST, timestampMs);
     }
 
     public DetectionResult(String detectorName,
@@ -83,7 +90,28 @@ public class DetectionResult {
                            String evidence) {
         this(detectorName, riskLevel, status, score, maxScore, informational,
                 executionStatus, checksAttempted, checksSucceeded, checksFailed,
-                failureReasons, details, evidence, System.currentTimeMillis());
+                failureReasons, details, Collections.emptyList(), evidence,
+                ScanTier.FAST, System.currentTimeMillis());
+    }
+
+    public DetectionResult(String detectorName,
+                           RiskLevel riskLevel,
+                           DetectionStatus status,
+                           int score,
+                           int maxScore,
+                           boolean informational,
+                           DetectionExecutionStatus executionStatus,
+                           int checksAttempted,
+                           int checksSucceeded,
+                           int checksFailed,
+                           List<String> failureReasons,
+                           List<String> details,
+                           List<EvidenceItem> evidenceItems,
+                           String evidence) {
+        this(detectorName, riskLevel, status, score, maxScore, informational,
+                executionStatus, checksAttempted, checksSucceeded, checksFailed,
+                failureReasons, details, evidenceItems, evidence,
+                ScanTier.FAST, System.currentTimeMillis());
     }
 
     private DetectionResult(String detectorName,
@@ -98,7 +126,9 @@ public class DetectionResult {
                             int checksFailed,
                             List<String> failureReasons,
                             List<String> details,
+                            List<EvidenceItem> evidenceItems,
                             String evidence,
+                            ScanTier scanTier,
                             long timestampMs) {
         this.detectorName = detectorName == null || detectorName.isBlank()
                 ? "unknown"
@@ -118,9 +148,11 @@ public class DetectionResult {
                 Math.max(0, checksFailed));
         this.failureReasons = sanitizeDetails(failureReasons);
         this.details = sanitizeDetails(details);
+        this.evidenceItems = sanitizeEvidenceItems(evidenceItems);
         this.evidence = (evidence == null || evidence.isEmpty())
                 ? String.join("; ", this.details)
                 : evidence;
+        this.scanTier = scanTier == null ? ScanTier.FAST : scanTier;
         this.timestampMs = timestampMs;
     }
 
@@ -139,7 +171,9 @@ public class DetectionResult {
     public int getChecksFailed() { return checksFailed; }
     public List<String> getFailureReasons() { return failureReasons; }
     public List<String> getDetails() { return details; }
+    public List<EvidenceItem> getEvidenceItems() { return evidenceItems; }
     public String getEvidence() { return evidence; }
+    public ScanTier getScanTier() { return scanTier; }
     public long getTimestampMs() { return timestampMs; }
 
     public DetectionResult withInformational(boolean informational) {
@@ -149,7 +183,25 @@ public class DetectionResult {
         return new DetectionResult(
                 detectorName, riskLevel, status, score, maxScore, informational,
                 executionStatus, checksAttempted, checksSucceeded, checksFailed,
-                failureReasons, details, evidence, timestampMs);
+                failureReasons, details, evidenceItems, evidence, scanTier, timestampMs);
+    }
+
+    public DetectionResult withEvidenceItems(List<EvidenceItem> items) {
+        return new DetectionResult(
+                detectorName, riskLevel, status, score, maxScore, warnOnly,
+                executionStatus, checksAttempted, checksSucceeded, checksFailed,
+                failureReasons, details, items, evidence, scanTier, timestampMs);
+    }
+
+    public DetectionResult withScanTier(ScanTier scanTier) {
+        ScanTier normalized = scanTier == null ? ScanTier.FAST : scanTier;
+        if (this.scanTier == normalized) {
+            return this;
+        }
+        return new DetectionResult(
+                detectorName, riskLevel, status, score, maxScore, warnOnly,
+                executionStatus, checksAttempted, checksSucceeded, checksFailed,
+                failureReasons, details, evidenceItems, evidence, normalized, timestampMs);
     }
 
     /**
@@ -163,7 +215,7 @@ public class DetectionResult {
         return new DetectionResult(
                 detectorName, RiskLevel.LOW, DetectionStatus.WARNING, score, maxScore, true,
                 executionStatus, checksAttempted, checksSucceeded, checksFailed,
-                failureReasons, duplicateDetails, evidence, timestampMs);
+                failureReasons, duplicateDetails, evidenceItems, evidence, scanTier, timestampMs);
     }
 
     public static DetectionResult unavailable(String detectorName, String reason) {
@@ -269,6 +321,19 @@ public class DetectionResult {
         for (String detail : details) {
             if (detail != null && !detail.isBlank()) {
                 copy.add(detail);
+            }
+        }
+        return Collections.unmodifiableList(copy);
+    }
+
+    private static List<EvidenceItem> sanitizeEvidenceItems(List<EvidenceItem> items) {
+        if (items == null || items.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<EvidenceItem> copy = new ArrayList<>(items.size());
+        for (EvidenceItem item : items) {
+            if (item != null) {
+                copy.add(item);
             }
         }
         return Collections.unmodifiableList(copy);

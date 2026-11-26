@@ -18,6 +18,7 @@ android {
         targetSdk = androidTargetSdk
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -27,10 +28,27 @@ android {
 }
 
 dependencies {
-    // Deliberately consume the produced binary rather than project(":riskengine-sdk").
-    implementation(files("../riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar"))
+    // Deliberately consume the produced release AAR binary rather than project(":riskengine-sdk").
+    implementation(
+        files(layout.projectDirectory.file("../riskengine-sdk/build/outputs/aar/riskengine-sdk-release.aar")) {
+            builtBy(":riskengine-sdk:assembleRelease")
+        }
+    )
+
+    // Pin AndroidX Test >= monitor 1.7.x for API 34/36 targetSdk=36 BroadcastReceiver flag compliance.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:monitor:1.7.2")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
 
 tasks.named("preBuild") {
     dependsOn(":riskengine-sdk:assembleRelease")
+}
+
+tasks.configureEach {
+    if (name == "preDebugAndroidTestBuild") {
+        dependsOn(":riskengine-sdk:assembleRelease")
+    }
 }

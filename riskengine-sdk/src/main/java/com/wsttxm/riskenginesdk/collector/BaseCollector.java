@@ -28,7 +28,7 @@ public abstract class BaseCollector implements Callable<CollectorResult> {
         CollectorResult result = new CollectorResult(getName(), comparesSources());
         try {
             collect(result);
-        } catch (Exception | LinkageError e) {
+        } catch (Exception | LinkageError | OutOfMemoryError e) {
             CLog.e("Collector [" + getName() + "] failed", e);
             result.markError(e);
         }

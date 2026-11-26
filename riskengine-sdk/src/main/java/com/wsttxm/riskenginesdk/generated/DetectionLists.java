@@ -11,19 +11,20 @@ public final class DetectionLists {
     public static final String[] SU_PATHS = ObfuscatedLists.decode(0x101, new String[]{
             "89293502e1cda9d12c2b16d51079",
             "ea19535899533b1cd1260f9c4d0008",
-            "a2cd3649b2a080ee",
-            "fdcf2ee83c0971c4bf23054b5fbe66ea4b2cec",
-            "278c58797178e5fe47ee7126b2e725452f9b",
-            "6a005eb20e8077337e4befe5da12a5ba0f52",
-            "def6df33f61b44a4ee4d109938eef95d1ac185fe2f190d",
-            "71002b345dca68775b05ae5eb885",
-            "fa989fc70f1a4c915073",
-            "afb9b4e33ef3ce0392ad0982f7f74395b6bcf812c492dc0b71687c4e561d8048",
-            "552d6c4c7e468e6304d9a5ac318acf7e41be67",
-            "c549a9cd62144b0990ed620ea245442c3ec9d47c81de9340ec7ecd",
-            "a5f5e30226e2b6c31d",
-            "19dcbec013cfaa0d",
-            "80150bedc22ca4"
+            "2618ae4ecd677e9b9628493478d080db1dd8",
+            "5088640d216f9f46",
+            "0e09929c0693f4398bbf84c9e0fce4cf853e0b",
+            "6a1746b51bca76736e4eacb2da12a5ba0f52",
+            "fea18a7f1691dfe17dc703ae7de7d8e74147",
+            "7136b2fcbbdb54ae31b255c709950d87dafe03c296fd76",
+            "aac80d47fcea64a1d0323be82e3e",
+            "1ff92b30c028725649a3",
+            "bcd9677e021dac5d7bf709998e137b03ba3fc75b3f23f1231813a5f874dfffb0",
+            "14e066518987303c406e33e47b346816318faa",
+            "27ac964ce164903bdd48ebff7a4a486e5be8ac716999854c3c45bf",
+            "e76b55ed38f61802ac",
+            "ee1e0e804eac7c50",
+            "2d79983a1ab551"
     });
 
     public static final String[] MAGISK_PATHS = ObfuscatedLists.decode(0x203, new String[]{
@@ -58,10 +59,14 @@ public final class DetectionLists {
             "5f6f5e2d3e5d3bbda47fba334ed6",
             "bf7ce6e9019e2b60b4aaadfffc3deb6d710bdf",
             "b126b89edb0c3f02a7",
-            "247b7bff22419ba087b596082d134b40be",
-            "da8832de63726fe8bfd4d0698266b937",
-            "1335dfcd5ddfb948512fe28d7bf3a6f10bd127f64482",
-            "fd04f70f5ac615323f30af21c542037aa212"
+            "b124fd2786c0e2f48cf175acff",
+            "5f7e03326be28a4eb376b22a40bb07cce3",
+            "f32d825efdd4c217ea49cb812655beed",
+            "83900734213b552d195aecb1b1d3a0e233413e633cc5",
+            "df289a0df16f8f7847c6350aa730af6ee3a68a7a7c5c",
+            "475d59836d1750e267f01d1c667b7bfa6151",
+            "19ca3b28ec5107a9749547e61bf3b4",
+            "ce483dd3fbdc2a0ff8e3ef4a559229635542ff7a4eedb6d87d65208a74f4e57d04230901faa6fc"
     });
 
     public static final String[] CLOUD_PACKAGES = ObfuscatedLists.decode(0x70F, new String[]{
@@ -134,7 +139,13 @@ public final class DetectionLists {
             "3711510c4925f97e14fd10",
             "dcce3b4be3028d6a44626af10857",
             "7c04106f9da031895090a7860e7f58cd113b377e",
-            "d97abd66690437f98c7c7d0004d380"
+            "d97abd66690437f98c7c7d0004d380",
+            "1511791de2cbcd38baafbceb27e723db3cc478",
+            "9732262a09efa43b36a88ff63bb3",
+            "ea90e77be0f56d59dcc0d60e08e1a4f2e7a0639b",
+            "3de90dcb0e75345a06c4cf1e1d1cd99ab1e144",
+            "cecd5970ea7fa1ccc04c72a7a18144",
+            "cf361a0b0824517f31853165a2298d4580d7adb97370c17316532a1be6"
     });
 
     public static final String[] PARTITION_FINGERPRINT_PROPERTIES = ObfuscatedLists.decode(0xB1D, new String[]{
@@ -169,6 +180,32 @@ public final class DetectionLists {
             "797bb15b82f9a5",
             "cbb50fee5c13",
             "ca52ef94"
+    });
+
+    public static final String[] THREAT_APP_PACKAGES = ObfuscatedLists.decode(0xE27, new String[]{
+            "b202741e7d84409616f5a2773843acff54db",
+            "89affbb0444df7e98afaf02931b05a73e67d3ec4052f",
+            "6d9e903b41455884f4b7ef83cf56a0bc07fe",
+            "43dc3fe479165bcb69713acdf6378a25",
+            "3c05bf8ebc66c4a29e6d84fb81b6ed63bfc73e8fa3",
+            "d7686162ebad686f604391bbd6bea8f403a2e633",
+            "23207bde70b43546982b17e5f07c89fc0ff30fd0a42ae7e9",
+            "b1ad2fb7e119fc6e59ea53450fa0",
+            "b2790312b39a2f4c9a977be79afe6cc46dcb173823f122e2232ff9",
+            "29d29200878fc29f6941cae7aabe567f47bd5ae5",
+            "0908bd7ef174110de9dee9631f81ceca6cd0156512cb",
+            "9bd160c19ead5a5bc0f3b87511ca0fb0295d7d4c59",
+            "73f513c305fdd40d8d078cb2f335dfb98a46ed",
+            "988daf8c7341bb117d1585042acaf605bba031",
+            "984c192ae421f764b82ae5f69b8dc78611b489",
+            "a74222c1151bf9d170a7f9d866c2d8d2572db9e328e92706eab32a66a857a828",
+            "e450d4c296a255c7d1b22b13ef4c51b0cc6571b78a832af0",
+            "4cf510bc754e1d45a77491aa0464b6cd9701c2d86282",
+            "df8b48ea024b29dcfb8568402d8d8ed5c30075db7e099af1efef5785cfd982d2c97290f20077b4070958dd3284b4798fd542a3e2",
+            "37fa3fff604057192caef62710",
+            "5d50f4979339cc87e7c0a5c3c301d15f9948abd823346f9b04e7",
+            "594dfe668546eeb83953c2c74708f1ba6be65c5029285f32b9d2292f07",
+            "1b0f23dd9b1930e1845919bbfd647f2b571c6f8cd8582b"
     });
 
 }

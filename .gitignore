@@ -66,5 +66,6 @@ bin/
 # Project specific
 # ========================
 .claude/
+.scratch/
 *.log
 HELP.md

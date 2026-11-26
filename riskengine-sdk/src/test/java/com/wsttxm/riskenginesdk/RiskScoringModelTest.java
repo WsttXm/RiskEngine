@@ -16,11 +16,29 @@ public class RiskScoringModelTest {
 
     @Test
     public void scoreThresholdsHaveStableBoundaries() {
-        assertEquals(RiskLevel.SAFE, reportAtScore(0).getOverallRiskLevel());
-        assertEquals(RiskLevel.LOW, reportAtScore(1).getOverallRiskLevel());
-        assertEquals(RiskLevel.MEDIUM, reportAtScore(4).getOverallRiskLevel());
-        assertEquals(RiskLevel.HIGH, reportAtScore(10).getOverallRiskLevel());
-        assertEquals(RiskLevel.DEADLY, reportAtScore(18).getOverallRiskLevel());
+        assertEquals(30, RiskReport.MEDIUM_THRESHOLD);
+        assertEquals(60, RiskReport.HIGH_THRESHOLD);
+        assertEquals(85, RiskReport.DEADLY_THRESHOLD);
+        assertEquals(100, RiskReport.MAX_RISK_SCORE);
+
+        assertEquals(RiskLevel.SAFE, reportAtDetectorScore(0, RiskLevel.SAFE).getOverallRiskLevel());
+        assertEquals(0, reportAtDetectorScore(0, RiskLevel.SAFE).getRiskScore());
+
+        RiskReport low = reportAtDetectorScore(2, RiskLevel.LOW);
+        assertEquals(RiskLevel.LOW, low.getOverallRiskLevel());
+        assertEquals(18, low.getRiskScore());
+
+        RiskReport medium = reportAtDetectorScore(4, RiskLevel.MEDIUM);
+        assertEquals(RiskLevel.MEDIUM, medium.getOverallRiskLevel());
+        assertEquals(38, medium.getRiskScore());
+
+        RiskReport high = reportAtDetectorScore(7, RiskLevel.HIGH);
+        assertEquals(RiskLevel.HIGH, high.getOverallRiskLevel());
+        assertEquals(64, high.getRiskScore());
+
+        RiskReport deadly = reportAtDetectorScore(10, RiskLevel.DEADLY);
+        assertEquals(RiskLevel.DEADLY, deadly.getOverallRiskLevel());
+        assertEquals(92, deadly.getRiskScore());
     }
 
     @Test
@@ -37,7 +55,7 @@ public class RiskScoringModelTest {
                 )
         );
 
-        assertEquals(12, report.getRiskScore());
+        assertEquals(95, report.getRiskScore());
         assertEquals(1, report.getDangerCount());
         assertEquals(2, report.getWarningCount());
         assertEquals(RiskLevel.DEADLY, report.getOverallRiskLevel());
@@ -113,14 +131,17 @@ public class RiskScoringModelTest {
         assertEquals(RiskLevel.DEADLY, memfdElf.getOverallRiskLevel());
     }
 
-    private RiskReport reportAtScore(int score) {
+    private RiskReport reportAtDetectorScore(int score, RiskLevel level) {
         if (score == 0) {
             return new RiskReport(new DeviceFingerprint(), List.of(
                     new DetectionResult("test", RiskLevel.SAFE, DetectionStatus.NORMAL,
-                            0, 18, false, List.of(), "")));
+                            0, 10, false, List.of(), "")));
         }
+        DetectionStatus status = level.getValue() >= RiskLevel.HIGH.getValue()
+                ? DetectionStatus.DANGER
+                : DetectionStatus.WARNING;
         return new RiskReport(new DeviceFingerprint(), List.of(
-                new DetectionResult("test", RiskLevel.MEDIUM, DetectionStatus.WARNING,
-                        score, Math.max(18, score), false, List.of("signal"), "signal")));
+                new DetectionResult("test", level, status,
+                        score, 10, false, List.of("signal"), "signal")));
     }
 }

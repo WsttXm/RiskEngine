@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Host backup & device-transfer exclusion rules.
+  Critically excludes RiskEngine's DirectBoot / Keystore-bound SharedPreferences
+  (riskengine_fp.xml) so app-data cloning or cloud restore never copies device-bound
+  ciphertext across devices and triggers device_binding_broken.
+-->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="riskengine_fp.xml" />
+        <exclude domain="device_sharedpref" path="riskengine_fp.xml" />
         <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
@@ -12,6 +20,8 @@
         <exclude domain="device_sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="sharedpref" path="riskengine_fp.xml" />
+        <exclude domain="device_sharedpref" path="riskengine_fp.xml" />
         <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />

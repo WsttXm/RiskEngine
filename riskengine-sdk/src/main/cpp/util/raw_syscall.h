@@ -59,16 +59,24 @@ static inline long raw_syscall6(long n, long a0, long a1, long a2,
 #elif defined(__i386__)
 static inline long raw_syscall6(long n, long a0, long a1, long a2,
                                 long a3, long a4, long a5) {
-    (void) a5;
+    long args[7] = {n, a0, a1, a2, a3, a4, a5};
     long ret;
     __asm__ volatile(
-            "push %%ebx\n\t"
-            "movl %[a0], %%ebx\n\t"
+            "pushl %%ebx\n\t"
+            "pushl %%ebp\n\t"
+            "movl 4(%%eax), %%ebx\n\t"
+            "movl 8(%%eax), %%ecx\n\t"
+            "movl 12(%%eax), %%edx\n\t"
+            "movl 16(%%eax), %%esi\n\t"
+            "movl 20(%%eax), %%edi\n\t"
+            "movl 24(%%eax), %%ebp\n\t"
+            "movl 0(%%eax), %%eax\n\t"
             "int $0x80\n\t"
-            "pop %%ebx"
+            "popl %%ebp\n\t"
+            "popl %%ebx"
             : "=a"(ret)
-            : "a"(n), [a0] "r"(a0), "c"(a1), "d"(a2), "S"(a3), "D"(a4)
-            : "memory", "cc");
+            : "a"(args), "m"(args)
+            : "ecx", "edx", "esi", "edi", "memory", "cc");
     return ret;
 }
 #else

@@ -5,25 +5,33 @@
 #include <string>
 
 /**
- * Background re-verification of the fastest tamper signals.
- *
- * Detection was previously a single snapshot taken during collect(), so a hook
- * installed after that point was never seen: an attacker could simply wait for
- * the check to finish. This runs a small subset of the cheapest, highest-signal
- * checks on a native thread at jittered intervals and latches anything it finds,
- * so a later injection still shows up in the next report.
- *
- * Only a subset runs, deliberately. Full root and emulator scans read hundreds
- * of paths and are far too expensive to repeat; the checks here are the ones
- * that detect live code modification, which is what a post-init attack does.
- *
- * Intervals are jittered so the thread does not become a predictable timing
- * landmark an attacker can synchronise against.
+ * Caches NativeMonitorDispatcher jclass (GlobalRef) and static callback jmethodID
+ * during JNI_OnLoad so the attached monitor pthread never calls FindClass.
+ */
+void native_monitor_init_dispatcher(JNIEnv *env, JavaVM *vm);
+
+/**
+ * Releases cached dispatcher GlobalRef during JNI_OnUnload.
+ * Must be called ONLY after native_monitor_stop() has joined the monitor thread.
+ */
+void native_monitor_cleanup_dispatcher(JNIEnv *env);
+
+/**
+ * Starts the background periodic monitor thread (2-4s initial pass, 20-26s foreground
+ * jitter, 120s background backoff, immediate recheck on foreground resume after >10s).
+ * Safe to call multiple times (idempotent).
  */
 void native_monitor_start(JavaVM *vm);
 
-/** Stops the thread. Safe to call when not started. */
+/** Stops and joins the monitor thread without holding lifecycle locks across join. */
 void native_monitor_stop();
+
+/**
+ * Notifies the monitor of app foreground/background transitions.
+ * Background switches to 120s backoff; foreground resume after >10s triggers an
+ * immediate lightweight recheck pass.
+ */
+void native_monitor_set_background(bool is_background);
 
 /**
  * Returns comma-separated tokens latched since the monitor started, plus the

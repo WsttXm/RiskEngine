@@ -20,6 +20,8 @@ public class RiskEngineConfigTest {
         assertTrue(config.isCollectAndroidId());
         assertFalse(config.isCollectBootId());
         assertFalse(config.isCollectDrmId());
+        assertFalse(config.isEnableAntiDumpable());
+        assertTrue(config.isEnablePeriodicMonitor());
     }
 
     @Test
@@ -51,11 +53,15 @@ public class RiskEngineConfigTest {
                 .debugLog(true)
                 .enableRoot(false)
                 .enableAdbDetection(false)
+                .enableAntiDumpable(true)
+                .enablePeriodicMonitor(false)
                 .collectTimeout(1234)
                 .build();
         assertTrue(config.isDebugLog());
         assertFalse(config.isEnableRoot());
         assertFalse(config.isEnableAdbDetection());
+        assertTrue(config.isEnableAntiDumpable());
+        assertFalse(config.isEnablePeriodicMonitor());
         assertEquals(1234, config.getCollectTimeoutMs());
     }
 
@@ -89,10 +95,21 @@ public class RiskEngineConfigTest {
                 .enableDebugDetection(false)
                 .enableCloudPhoneDetection(false)
                 .enableCustomRomDetection(false)
+                .enableAppIntegrityDetection(false)
+                .enableMultiInstanceDetection(false)
+                .enableNetworkRiskDetection(false)
+                .enableLocationRiskDetection(false)
+                .enableScreenAndFraudDetection(false)
+                .enableTeeAttestation(false)
+                .enableThreatAppDetection(false)
                 .build();
 
         DetectorRegistry registry = new DetectorRegistry(null, config);
         assertEquals(1, registry.getDetectors().size());
         assertEquals("consistency", registry.getDetectors().get(0).getName());
+
+        DetectorRegistry defaultRegistry =
+                new DetectorRegistry(null, new RiskEngineConfig.Builder().build());
+        assertEquals(16, defaultRegistry.getDetectors().size());
     }
 }

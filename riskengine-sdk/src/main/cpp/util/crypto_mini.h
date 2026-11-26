@@ -6,8 +6,8 @@
 #include <cstring>
 
 /**
- * Self-contained SHA-256 and HMAC-SHA256 (FIPS 180-4 / RFC 2104) with no
- * external library dependency, plus constant-time comparison and secure zeroing.
+ * Self-contained SHA-256 (FIPS 180-4) with no external library dependency,
+ * plus constant-time comparison and secure zeroing.
  */
 namespace crypto_mini {
 
@@ -163,42 +163,6 @@ private:
     uint64_t bit_count_ = 0;
     size_t buf_len_ = 0;
 };
-
-inline void hmac_sha256(const uint8_t *key, size_t key_len,
-                        const uint8_t *data, size_t data_len,
-                        uint8_t out[kSha256DigestSize]) {
-    uint8_t key_block[kSha256BlockSize] = {0};
-    if (key_len > kSha256BlockSize) {
-        Sha256 kh;
-        kh.update(key, key_len);
-        kh.final(key_block);
-    } else if (key != nullptr && key_len > 0) {
-        std::memcpy(key_block, key, key_len);
-    }
-
-    uint8_t ipad[kSha256BlockSize];
-    uint8_t opad[kSha256BlockSize];
-    for (size_t i = 0; i < kSha256BlockSize; ++i) {
-        ipad[i] = static_cast<uint8_t>(key_block[i] ^ 0x36u);
-        opad[i] = static_cast<uint8_t>(key_block[i] ^ 0x5cu);
-    }
-
-    uint8_t inner[kSha256DigestSize];
-    Sha256 inner_hash;
-    inner_hash.update(ipad, sizeof(ipad));
-    inner_hash.update(data, data_len);
-    inner_hash.final(inner);
-
-    Sha256 outer_hash;
-    outer_hash.update(opad, sizeof(opad));
-    outer_hash.update(inner, sizeof(inner));
-    outer_hash.final(out);
-
-    secure_zero(key_block, sizeof(key_block));
-    secure_zero(ipad, sizeof(ipad));
-    secure_zero(opad, sizeof(opad));
-    secure_zero(inner, sizeof(inner));
-}
 
 }  // namespace crypto_mini
 
