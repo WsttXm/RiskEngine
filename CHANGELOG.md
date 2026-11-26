@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
-## [v2.0.0] - 2026-11-25
+## [v2.0.0] - 2026-11-26
 
 ### 单核三模块收敛与 16 大检测域（Single-Core Consolidation & 16 Converged Domains）
 - **单一零依赖核心架构（ADR-0001）**：发布前彻底收敛为 3 模块仓库（`:riskengine-sdk`、`:demo`、`:integration-test`），不随 `v2.0.0` 引入任何可选扩展子模块或未消费的孤立 SPI，确保锁定后的核心公开 ABI 简洁纯净、**零第三方运行时依赖**且**零 `<uses-permission>`**。
@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### 硬件信任根、增量 JSON v2 与 `v=2` 离线可验签信封（Hardware Trust Root, JSON v2 & Envelope `v=2`）
 - **零依赖硬件证明与反伪造**：内置纯 Java 严格最小 DER / 规范 CBOR（RFC 8949）解析器（OID `.17` 根优先校验与 RKP OID `.30` 校验）、Google Hardware Attestation Root 锚点与 1,699 条单调离线 CRL 吊销底线；覆盖 `Keystore2ParcelClient` 冻结 AIDL 协议（零受限隐藏 API 反射）、Keystore2 `Domain.APP` vs 隔离进程 `Domain.GRANT` 证书链分裂校验、`libbinder.so` `ioctl` GOT/内联钩子与三路 `BINDER_VERSION` 校验、覆写反缓存陷阱、StrongBox 软模拟识别与 Widevine Java↔NDK 双层一致校验。
-- **增量 JSON v2 与 `v=2` 硬件签名信封**：`RiskReportJsonSerializer` 增量输出 `maxRiskScore=100`、`displayThresholdMaximum=100`、`confidencePercent`、`recommendedAction`、`hardTriggers[]`、`dimensionScores{}`、`scoreBreakdown[]`；`SignedRiskEnvelope` 升级至协议 `v=2`（17 字段规范载荷新增 `action`/`confidence`/`dimensions` 并复用 `RiskReport.getHardTriggers()`），同步升级零依赖 Python 6 步离线验签器 [`scripts/verify_risk_envelope.py`](./scripts/verify_risk_envelope.py)（默认 `reject_score_threshold=60`、`min_confidence=70`）及 Java↔Python 黄金向量一致性测试。
+- **增量 JSON v2 与 `v=2` 硬件签名信封**：`RiskReportJsonSerializer` 增量输出 `maxRiskScore=100`、`displayThresholdMaximum=100`、`confidencePercent`、`recommendedAction`、`hardTriggers[]`、`dimensionScores{}`、`scoreBreakdown[]`；`SignedRiskEnvelope` 升级至协议 `v=2`（17 字段规范载荷新增 `action`/`confidence`/`dimensions` 并复用 `RiskReport.getHardTriggers()`），同步升级零依赖 Python 6 步离线验签器 [`scripts/verify_risk_envelope.py`](https://github.com/WsttXm/RiskEngine/blob/v2.0.0/scripts/verify_risk_envelope.py)（默认 `reject_score_threshold=60`、`min_confidence=70`）及 Java↔Python 黄金向量一致性测试。
 
 ### 深度对抗、HMA 全代际侧信道、推拉双模与分层指纹 v2
 - **异步 `<5ms` 初始化与推拉双模**：`RiskEngine.init()` 主线程零同步 I/O，新增 `startMonitoring(ThreatListener, DeviceStateListener, ExecutionStateListener)` 严格按 `CRITICAL -> FAST -> POSTPONED` 渐进推送结果（阶段 `TierReport` 统一对齐 `0–100` 标尺），并支持后台周期完整性巡检与运行期篡改实时回调。
