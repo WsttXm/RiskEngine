@@ -29,6 +29,12 @@ if [[ ! -d "$SDK_ROOT" ]]; then
   exit 1
 fi
 
+export ANDROID_SDK_ROOT="$SDK_ROOT"
+export ANDROID_HOME="$SDK_ROOT"
+export ANDROID_USER_HOME="${ANDROID_USER_HOME:-${HOME}/.android}"
+export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-${ANDROID_USER_HOME}/avd}"
+mkdir -p "$ANDROID_AVD_HOME" "$LOG_DIR"
+
 find_sdk_tool() {
   local tool="$1"
   shift
@@ -66,11 +72,9 @@ for pair in "sdkmanager:${SDKMANAGER}" "avdmanager:${AVDMANAGER}" "adb:${ADB_BIN
   fi
 done
 
-mkdir -p "$LOG_DIR"
-
 SYS_IMAGE="system-images;android-${API_LEVEL};${TARGET};${ARCH}"
 echo "==> Ensuring Android emulator and system image '${SYS_IMAGE}' are installed"
-yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+(yes || true) 2>/dev/null | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 if [[ -z "$EMULATOR_BIN" ]]; then
   "$SDKMANAGER" --install "emulator" --channel=0 >/dev/null
   EMULATOR_BIN="${SDK_ROOT}/emulator/emulator"
@@ -87,6 +91,11 @@ EMU_PID=""
 dump_diagnostics() {
   local tag="$1"
   echo "==> Capturing emulator diagnostics (${tag}) into ${LOG_DIR}/"
+  if [[ -n "${EMU_LOG:-}" && -f "${EMU_LOG}" ]]; then
+    echo "--- Tail of ${EMU_LOG} ---" >&2
+    tail -n 40 "${EMU_LOG}" >&2 || true
+    echo "--- End of ${EMU_LOG} ---" >&2
+  fi
   if "$ADB_BIN" -s "$SERIAL" get-state >/dev/null 2>&1; then
     timeout 15 "$ADB_BIN" -s "$SERIAL" logcat -d -v time 2>&1 | tail -n 1500 \
       > "${LOG_DIR}/logcat-api${API_LEVEL}-${tag}.txt" || true
@@ -235,7 +244,14 @@ while (( boot_attempt <= MAX_BOOT_ATTEMPTS )); do
   echo no | "$AVDMANAGER" create avd --force \
     -n "$AVD_NAME" \
     --package "$SYS_IMAGE" \
-    --device "$PROFILE" >/dev/null
+    --device "$PROFILE" \
+    --path "${ANDROID_AVD_HOME}/${AVD_NAME}.avd" >/dev/null
+
+  if [[ ! -f "${ANDROID_AVD_HOME}/${AVD_NAME}.ini" ]]; then
+    echo "ERROR: Expected AVD config '${ANDROID_AVD_HOME}/${AVD_NAME}.ini' not found after avdmanager create" >&2
+    ls -la "$ANDROID_AVD_HOME" >&2 || true
+    exit 1
+  fi
 
   EMU_LOG="${LOG_DIR}/emulator-api${API_LEVEL}-attempt${boot_attempt}.log"
   echo "==> Launching ${EMULATOR_BIN} -avd ${AVD_NAME} (log: ${EMU_LOG})"
