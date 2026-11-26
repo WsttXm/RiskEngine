@@ -65,20 +65,20 @@ jobs:
         run: ./gradlew :integration-test:assembleDebug :integration-test:assembleDebugAndroidTest --no-daemon
 
       - name: Run L3 integration-test instrumentation on API ${{ matrix.api-level }} KVM emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api-level }}
-          target: default
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: ./gradlew :integration-test:connectedDebugAndroidTest --no-daemon
+        env:
+          API_LEVEL: ${{ matrix.api-level }}
+          TARGET: default
+          ARCH: x86_64
+          PROFILE: pixel_6
+          LOG_DIR: emulator-logs
+        run: ./scripts/ci-run-emulator.sh ./gradlew :integration-test:connectedDebugAndroidTest --no-daemon
 
-      - name: Upload L3 instrumentation test reports
+      - name: Upload L3 instrumentation test reports and emulator logs
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: l3-androidTest-api${{ matrix.api-level }}-${{ github.sha }}
-          path: integration-test/build/reports/androidTests/connected/
+          path: |
+            integration-test/build/reports/androidTests/connected/
+            emulator-logs/
           if-no-files-found: ignore
